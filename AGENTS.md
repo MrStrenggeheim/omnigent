@@ -3,6 +3,14 @@
 Guidance for AI agents (Claude Code, Copilot, Cursor, etc.) working in this
 repository. See `CONTRIBUTING.md` for the full contributor workflow.
 
+## Local customizations
+
+This checkout maintains local changes on top of official release tags. Read
+`/home/agent/knowledge/infrastructure/omnigent/custom-builds.md` for the current
+base release, change register, and build/deployment commands. Update that central
+page whenever a customization is added, changed, or supplied by upstream.
+Keep each customization in a focused commit. Never edit installed package files.
+
 ## Reuse and design
 
 - Search for and reuse existing helpers before adding code. Refactor an existing

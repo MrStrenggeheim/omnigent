@@ -1,0 +1,148 @@
+#!/bin/bash
+# Deploy only prepared custom builds. Keep the existing systemd lock and idle guard.
+set -euo pipefail
+export PATH=/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+app=/home/agent/apps/omnigent
+legacy_python=/home/agent/.local/share/uv/tools/omnigent/bin/python
+source=/home/agent/src/omnigent
+tool_python="$app/current/venv/bin/python"
+[[ -x "$tool_python" ]] || tool_python="$legacy_python"
+
+as_agent() {
+    runuser -u agent -- env HOME=/home/agent \
+        PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin "$@"
+}
+
+case "${1:-}" in
+    --check|"") ;;
+    *) echo "Usage: $0 [--check]" >&2; exit 2 ;;
+esac
+
+if [[ ! -L "$app/pending" ]]; then
+    echo "No custom release staged; the running installation stays unchanged."
+    as_agent "$tool_python" - <<'PY'
+from importlib.metadata import version
+from omnigent.update_check import fetch_latest_version
+
+latest = fetch_latest_version(include_prereleases=False, timeout=30, attempts=2)
+if latest is None:
+    raise SystemExit("Could not check official releases.")
+print(f"Installed package: {version('omnigent')}; latest official stable: {latest}.")
+print("Integrate the chosen upstream tag, then run omni-custom build and stage.")
+PY
+    exit 0
+fi
+
+candidate=$(readlink -f "$app/pending")
+[[ "$(dirname "$candidate")" == "$app/releases" ]] || { echo "Invalid pending release." >&2; exit 1; }
+as_agent "$source/.venv/bin/python" "$source/deploy/local/manage.py" verify "$(basename "$candidate")"
+if [[ "${1:-}" == --check ]]; then
+    echo "Would deploy $candidate after the idle guard passes."
+    exit 0
+fi
+
+if ! systemctl is-active --quiet omnigent.target \
+    || ! systemctl is-active --quiet omnigent-server.service \
+    || ! systemctl is-active --quiet omnigent-host.service; then
+    echo "Omnigent is intentionally stopped or unhealthy; refusing automatic deployment." >&2
+    exit 1
+fi
+/usr/local/sbin/omnigent-idle-check --quiet-seconds 30
+
+previous=$(readlink -f "$app/current")
+backup="$app/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+stopped=0
+recover() {
+    result=$?
+    trap - EXIT
+    if (( result != 0 && stopped == 1 )); then
+        echo "Deployment failed. Restoring the prior code and saved application state." >&2
+        systemctl stop omnigent.target
+        as_agent /usr/bin/python3 - "$app" "$previous" "$backup" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+
+app, previous, backup = map(Path, sys.argv[1:])
+temporary = app / "current.recover"
+temporary.symlink_to(previous)
+temporary.replace(app / "current")
+state = Path.home() / ".omnigent"
+for name in ("chat.db", "config.yaml", "auth_tokens.json"):
+    saved = backup / name
+    if (backup / "complete").exists() and saved.exists():
+        shutil.copy2(saved, state / name)
+if (backup / "complete").exists():
+    for suffix in ("-wal", "-shm"):
+        (state / ("chat.db" + suffix)).unlink(missing_ok=True)
+PY
+        systemctl start omnigent.target || echo "Service recovery needs attention." >&2
+    fi
+    exit "$result"
+}
+trap recover EXIT
+
+systemctl stop omnigent.target
+stopped=1
+as_agent /usr/bin/python3 - "$app" "$candidate" "$previous" "$backup" <<'PY'
+import shutil
+import sqlite3
+import sys
+from pathlib import Path
+
+app, candidate, previous, backup = map(Path, sys.argv[1:])
+backup.mkdir(parents=True, mode=0o700)
+state = Path.home() / ".omnigent"
+with sqlite3.connect(state / "chat.db") as original:
+    with sqlite3.connect(backup / "chat.db") as saved:
+        original.backup(saved)
+for name in ("config.yaml", "auth_tokens.json"):
+    path = state / name
+    if path.exists():
+        shutil.copy2(path, backup / name)
+(backup / "complete").touch()
+for name, target in (("previous", previous), ("current", candidate)):
+    temporary = app / (name + ".new")
+    temporary.symlink_to(target)
+    temporary.replace(app / name)
+for command in ("omnigent", "omni"):
+    target = Path.home() / ".local/bin" / command
+    temporary = target.with_name(command + ".new")
+    temporary.symlink_to(app / "current/venv/bin" / command)
+    temporary.replace(target)
+PY
+
+systemctl start omnigent.target
+for attempt in {1..30}; do
+    if systemctl is-active --quiet omnigent-server.service \
+        && systemctl is-active --quiet omnigent-host.service \
+        && as_agent /usr/bin/python3 - "$candidate" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+from urllib.request import urlopen
+
+candidate = Path(sys.argv[1])
+expected = json.loads((candidate / "release.json").read_text())["version"]
+with urlopen("http://127.0.0.1:6767/health", timeout=5) as response:
+    assert json.load(response)["status"] == "ok"
+with urlopen("http://127.0.0.1:6767/api/version", timeout=5) as response:
+    assert json.load(response)["version"] == expected
+for unit in ("omnigent-server.service", "omnigent-host.service"):
+    pid = subprocess.check_output(["systemctl", "show", unit, "-p", "MainPID", "--value"], text=True).strip()
+    argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    assert argv[0].startswith(str(candidate / "venv/bin/python").encode()), unit
+PY
+    then
+        if [[ "$(readlink -f "$app/pending")" == "$candidate" ]]; then
+            as_agent rm "$app/pending"
+        fi
+        echo "Deployed $(basename "$candidate"). Previous release: $previous. Backup: $backup."
+        exit 0
+    fi
+    sleep 2
+done
+echo "Custom release failed its startup checks." >&2
+exit 1

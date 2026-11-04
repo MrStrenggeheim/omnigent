@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /home/agent/src/omnigent/.venv/bin/python /home/agent/src/omnigent/deploy/local/manage.py "$@"
