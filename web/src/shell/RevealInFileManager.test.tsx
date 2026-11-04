@@ -10,6 +10,7 @@ let hostStatusChanged: () => void;
 
 const files: WorkspaceFile[] = [
   { path: "src/main.ts", name: "main.ts", type: "file", bytes: 10, modified_at: null },
+  { path: "src", name: "src", type: "directory", bytes: null, modified_at: null },
 ];
 
 function contextFor(sessionHostId: string) {
@@ -28,7 +29,8 @@ function contextFor(sessionHostId: string) {
 async function renderTree({
   sessionHostId = HOST,
   browseLocation,
-}: { sessionHostId?: string; browseLocation?: string } = {}) {
+  gitIgnored,
+}: { sessionHostId?: string; browseLocation?: string; gitIgnored?: boolean } = {}) {
   // Fresh modules per test: the desktop host id is shared window-wide.
   const { FileViewerContext } = await import("./FileViewerContext");
   const { FolderTree } = await import("./FolderTree");
@@ -37,7 +39,7 @@ async function renderTree({
     <QueryClientProvider client={new QueryClient()}>
       <FileViewerContext.Provider value={context}>
         <FolderTree
-          files={files}
+          files={files.map((file) => ({ ...file, git_ignored: gitIgnored }))}
           isLoading={false}
           isError={false}
           error={null}
@@ -83,22 +85,28 @@ afterEach(() => {
   delete (window as { omnigentDesktop?: unknown }).omnigentDesktop;
 });
 
-it("reveals a local file selected in its folder", async () => {
-  await renderTree();
-  fireEvent.contextMenu(screen.getByText("main.ts"));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Show in Finder" }));
-  expect(revealFile).toHaveBeenCalledWith(HOST, "/Users/me/project/src/main.ts");
-});
+it.each([undefined, true])(
+  "reveals a local file selected in its folder (ignored=%s)",
+  async (gitIgnored) => {
+    await renderTree({ gitIgnored });
+    fireEvent.contextMenu(screen.getByText("main.ts"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show in Finder" }));
+    expect(revealFile).toHaveBeenCalledWith(HOST, "/Users/me/project/src/main.ts");
+  },
+);
 
-it("opens a local folder without toggling it", async () => {
-  await renderTree();
-  const folder = screen.getByRole("button", { name: "src/" });
-  expect(folder).toHaveAttribute("aria-expanded", "true");
-  fireEvent.contextMenu(folder);
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Open in Finder" }));
-  expect(revealFile).toHaveBeenCalledWith(HOST, "/Users/me/project/src");
-  expect(folder).toHaveAttribute("aria-expanded", "true");
-});
+it.each([undefined, true])(
+  "opens a local folder without toggling it (ignored=%s)",
+  async (gitIgnored) => {
+    await renderTree({ gitIgnored });
+    const folder = screen.getByRole("button", { name: "src/" });
+    expect(folder).toHaveAttribute("aria-expanded", "true");
+    fireEvent.contextMenu(folder);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open in Finder" }));
+    expect(revealFile).toHaveBeenCalledWith(HOST, "/Users/me/project/src");
+    expect(folder).toHaveAttribute("aria-expanded", "true");
+  },
+);
 
 it("resolves rows against the folder being browsed", async () => {
   await renderTree({ browseLocation: "packages/app" });

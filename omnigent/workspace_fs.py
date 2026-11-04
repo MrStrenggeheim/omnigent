@@ -33,6 +33,7 @@ search, and file content work identically in both modes.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import mimetypes
 import os
 import re
@@ -57,6 +58,7 @@ from omnigent.runtime.filesystem_registry import (
     GitStatusUnavailable,
     create_filesystem_registry,
 )
+from omnigent.runtime.git_ignore import git_ignored_paths
 
 # Match the runner's caps so a host-served read is truncated identically.
 _MAX_READ_BYTES = 10 * 1024 * 1024  # 10 MiB
@@ -211,6 +213,11 @@ class WorkspaceReader:
             before=before,
             order=order,
         )
+        ignored = git_ignored_paths([str(resolved / str(entry["name"])) for entry in page.data])
+        for entry in page.data:
+            status = ignored.get(str(resolved / str(entry["name"])))
+            if status is not None:
+                entry["git_ignored"] = status
         return {
             "object": "list",
             "data": page.data,
@@ -456,6 +463,11 @@ class WorkspaceReader:
         results.sort(key=lambda entry: entry.path)
         if indexed is not None:
             results = merge_entries(indexed, results, limit)
+        ignored = git_ignored_paths([str(self._root / entry.path) for entry in results])
+        results = [
+            dataclasses.replace(entry, git_ignored=ignored.get(str(self._root / entry.path)))
+            for entry in results
+        ]
         return self._search_payload(results, limit, truncated=truncated)
 
     @staticmethod

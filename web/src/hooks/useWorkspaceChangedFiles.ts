@@ -338,6 +338,7 @@ export interface WorkspaceFile {
   type: "file" | "directory";
   bytes: number | null;
   modified_at: number | null;
+  git_ignored?: boolean;
 }
 
 export interface WorkspaceAllFilesResult {
@@ -354,6 +355,7 @@ interface FilesystemListResponse {
     type: string;
     bytes: number | null;
     modified_at: number | null;
+    git_ignored?: boolean;
   }[];
   has_more: boolean;
   last_id?: string | null;
@@ -390,6 +392,7 @@ function mapFilesystemEntries(
       type: e.type === "directory" ? "directory" : "file",
       bytes: e.bytes,
       modified_at: e.modified_at,
+      git_ignored: e.git_ignored,
     };
   });
 }

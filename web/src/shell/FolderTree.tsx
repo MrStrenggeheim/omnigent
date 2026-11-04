@@ -72,6 +72,7 @@ interface DirNode {
    *  directories can participate in the "last edited" sort. Undefined for dirs
    *  synthesized from a nested file's path, which carry no mtime of their own. */
   modifiedAt?: number | null;
+  gitIgnored?: boolean;
   /** When true the children come from an explicit directory entry and must be
    *  fetched on demand rather than being statically known from file paths. */
   lazy?: boolean;
@@ -124,13 +125,19 @@ function buildTree(files: WorkspaceFile[], sort: ChangedSort = "alpha"): TreeNod
       const lastName = parts[parts.length - 1];
       // Avoid adding a duplicate if a non-lazy DirNode already exists (e.g.
       // created while processing a nested file entry).
-      if (!node.children.find((c) => c.type === "dir" && c.name === lastName)) {
+      const existing = node.children.find(
+        (child): child is DirNode => child.type === "dir" && child.name === lastName,
+      );
+      if (existing) {
+        existing.gitIgnored = file.git_ignored;
+      } else {
         node.children.push({
           type: "dir",
           name: lastName,
           path: file.path,
           children: [],
           modifiedAt: file.modified_at,
+          gitIgnored: file.git_ignored,
           lazy: true,
         });
       }
@@ -206,6 +213,7 @@ function lazyChildrenToNodes(
         path: file.path,
         children: [],
         modifiedAt: file.modified_at,
+        gitIgnored: file.git_ignored,
         lazy: true,
       };
     }
@@ -943,6 +951,7 @@ function FileRowItem({
   labelIsPath = false,
   depth = 0,
   fileStatus,
+  gitIgnored,
   bytes,
   onFileSelect,
   conversationId,
@@ -958,6 +967,7 @@ function FileRowItem({
    *  same column as a folder's chevron at this depth. */
   depth?: number;
   fileStatus: WorkspaceChangedFile["status"] | undefined;
+  gitIgnored?: boolean;
   bytes: number | null;
   onFileSelect: (path: string) => void;
   conversationId: string | undefined;
@@ -988,14 +998,16 @@ function FileRowItem({
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
           onClick={() => !isDeleted && onFileSelect(path)}
           disabled={isDeleted}
+          title={gitIgnored ? "Ignored by Git" : undefined}
         >
-          <WorkspaceFileIcon path={path} />
+          <WorkspaceFileIcon path={path} className={gitIgnored ? "opacity-50" : undefined} />
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-ui",
               labelIsPath && "[direction:rtl]",
               isDeleted && "line-through",
               fileColorClass,
+              gitIgnored && "opacity-50",
             )}
             {...handlers}
           >
@@ -1077,6 +1089,7 @@ function SearchResultRow({
       displayLabel={file.path}
       labelIsPath={true}
       fileStatus={changedFileMap.get(file.path)}
+      gitIgnored={file.git_ignored}
       bytes={file.bytes}
       onFileSelect={onFileSelect}
       conversationId={conversationId}
@@ -1112,9 +1125,20 @@ function SearchDirRow({
           type="button"
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
           onClick={() => onRevealDir(file.path)}
+          title={file.git_ignored ? "Ignored by Git" : undefined}
         >
-          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-ui [direction:rtl]">
+          <FolderIcon
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground",
+              file.git_ignored && "opacity-50",
+            )}
+          />
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-ui [direction:rtl]",
+              file.git_ignored && "opacity-50",
+            )}
+          >
             <bdi>{file.path}/</bdi>
           </span>
         </button>
@@ -1155,6 +1179,7 @@ function TreeFileRow({
       displayLabel={node.name}
       depth={depth}
       fileStatus={fileStatus}
+      gitIgnored={node.file.git_ignored}
       bytes={node.file.bytes}
       onFileSelect={onFileSelect}
       conversationId={conversationId}
@@ -1241,8 +1266,14 @@ const TreeNodeRow = memo(function TreeNodeRow({
         onClick={() => onTogglePath(node.path)}
         onDoubleClick={onNavigateDir ? () => onNavigateDir(node.path) : undefined}
         aria-expanded={open}
+        title={node.gitIgnored ? "Ignored by Git" : undefined}
       >
-        <span className="relative flex size-3.5 shrink-0 items-center justify-center">
+        <span
+          className={cn(
+            "relative flex size-3.5 shrink-0 items-center justify-center",
+            node.gitIgnored && "opacity-50",
+          )}
+        >
           <span className="flex transition-opacity group-hover/folder:opacity-0 group-focus-visible/folder:opacity-0">
             {open ? (
               <FolderOpenIcon className="size-3.5 text-muted-foreground" />
@@ -1257,7 +1288,15 @@ const TreeNodeRow = memo(function TreeNodeRow({
             )}
           />
         </span>
-        <span className={cn("min-w-0 flex-1 truncate text-ui", dirDotClass)}>{node.name}/</span>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-ui",
+            dirDotClass,
+            node.gitIgnored && "opacity-50",
+          )}
+        >
+          {node.name}/
+        </span>
         {dirStatus && (
           <span
             className={cn("flex shrink-0 items-center justify-center", ROW_STATUS_SLOT_CLASS)}

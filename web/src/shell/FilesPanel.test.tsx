@@ -861,6 +861,51 @@ describe("FilesPanel tree (Explore) search", () => {
     expect(screen.queryByRole("searchbox", { name: "Search all files" })).toBeNull();
   });
 
+  it("dims ignored filename search results and keeps opening and folder reveal enabled", () => {
+    vi.useFakeTimers();
+    const onFileSelect = vi.fn();
+    renderPanel({
+      conversationId: "conv_ignored_search",
+      files: [{ ...dir("cache"), git_ignored: true }],
+      treeSearchResults: [
+        { ...file("cache/ignored.log"), git_ignored: true },
+        { ...dir("cache"), git_ignored: true },
+        { ...file("tracked.log"), git_ignored: false },
+        file("legacy.log"),
+        dir("legacy"),
+      ],
+      onFileSelect,
+    });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search all files" }), {
+      target: { value: "cache" },
+    });
+    act(() => vi.advanceTimersByTime(300));
+
+    for (const name of ["cache/ignored.log", "cache/"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("title", "Ignored by Git");
+      expect(button).toBeEnabled();
+      expect(button.querySelector("svg")).toHaveClass("opacity-50");
+      expect(button.querySelector("span")).toHaveClass("opacity-50");
+      expect(button.closest(".opacity-50")).toBeNull();
+    }
+    for (const name of ["tracked.log", "legacy.log", "legacy/"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).not.toHaveAttribute("title");
+      expect(button.querySelector(".opacity-50")).toBeNull();
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "cache/ignored.log" }));
+    expect(onFileSelect).toHaveBeenCalledWith("cache/ignored.log");
+    fireEvent.click(screen.getByRole("button", { name: "cache/" }));
+    expect(screen.getByRole("searchbox", { name: "Search all files" })).toHaveValue("");
+    expect(screen.getByRole("button", { name: "cache/" })).toHaveAttribute(
+      "title",
+      "Ignored by Git",
+    );
+  });
+
   it("shows search results as a flat list after the debounce fires", () => {
     vi.useFakeTimers();
 

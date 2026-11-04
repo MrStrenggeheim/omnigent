@@ -177,6 +177,8 @@ def build() -> None:
         "-m",
         "pytest",
         "tests/deploy/test_local_release.py",
+        "tests/runner/test_environment_filesystem.py",
+        "tests/test_workspace_fs.py",
         "-q",
         "--reruns",
         "0",
@@ -195,6 +197,16 @@ def build() -> None:
     )
     run("pnpm", "install", "--frozen-lockfile", "--filter", "web")
     run("pnpm", "--dir", "web", "exec", "prettier", "--check", "src/index.css")
+    run(
+        "pnpm",
+        "--filter",
+        "web",
+        "test",
+        "src/hooks/useWorkspaceChangedFiles.test.tsx",
+        "src/shell/FolderTree.test.tsx",
+        "src/shell/FilesPanel.test.tsx",
+        "src/shell/RevealInFileManager.test.tsx",
+    )
     run("pnpm", "--filter", "web", "run", "build")
     run("uv", "build", "--wheel", "--out-dir", str(wheels))
     run(

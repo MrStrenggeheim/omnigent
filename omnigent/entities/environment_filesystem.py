@@ -28,6 +28,7 @@ class FilesystemEntry:
     :param type: Entry type discriminator.
     :param bytes: Size in bytes for files; ``None`` for directories.
     :param modified_at: Unix epoch seconds of last modification.
+    :param git_ignored: Git ignore state; ``None`` outside Git or when unavailable.
     """
 
     id: str
@@ -36,6 +37,7 @@ class FilesystemEntry:
     type: Literal["file", "directory", "symlink", "other"]
     bytes: int | None = None
     modified_at: int | None = None
+    git_ignored: bool | None = None
 
 
 @dataclass(frozen=True)

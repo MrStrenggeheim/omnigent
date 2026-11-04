@@ -12,6 +12,8 @@ filesystem service.
 from __future__ import annotations
 
 import base64
+import dataclasses
+import logging
 import os
 import re
 import stat
@@ -48,6 +50,7 @@ from omnigent.inner.sandbox import (
     is_unconfined,
     reachable_roots,
 )
+from omnigent.runtime.git_ignore import GIT_IGNORE_SCRIPT
 
 if TYPE_CHECKING:
     from omnigent.inner.os_env import OpResult, OSEnvironment
@@ -407,7 +410,7 @@ def entry_payload(entry: FilesystemEntry) -> dict[str, object]:
     :param entry: Entry to serialize.
     :returns: JSON-ready dict.
     """
-    return {
+    payload: dict[str, object] = {
         "id": entry.id,
         "object": "session.environment.filesystem.entry",
         "name": entry.name,
@@ -416,6 +419,9 @@ def entry_payload(entry: FilesystemEntry) -> dict[str, object]:
         "bytes": entry.bytes,
         "modified_at": entry.modified_at,
     }
+    if entry.git_ignored is not None:
+        payload["git_ignored"] = entry.git_ignored
+    return payload
 
 
 async def _run_os_env_async(
@@ -891,12 +897,44 @@ class CallerProcessFilesystem:
                 )
             )
 
+        entries = await self.annotate_git_ignored(entries, path, listing=True)
         return PagedList(
             data=entries,
             first_id=entries[0].id if entries else None,
             last_id=entries[-1].id if entries else None,
             has_more=raw["has_more"],
         )
+
+    async def annotate_git_ignored(
+        self, entries: list[FilesystemEntry], path: str = "", *, listing: bool = False
+    ) -> list[FilesystemEntry]:
+        """Annotate visible entries using Git inside the filesystem sandbox."""
+        import json
+
+        if not entries:
+            return entries
+        target, _ = self._target(path)
+        paths = [os.path.join(target, entry.name if listing else entry.path) for entry in entries]
+        script = GIT_IGNORE_SCRIPT + "\nimport json\n"
+        script += f"print(json.dumps(git_ignored_paths({json.dumps(paths)})))"
+        response = await _run_os_env_async(self._os_env.shell, _python_script_command(script))
+        logger = logging.getLogger(__name__)
+        if response.get("exit_code") != 0 or "error" in response:
+            logger.warning("Git ignore annotations unavailable for the current listing")
+            return entries
+        if response.get("stderr"):
+            logger.warning("Git ignore annotation diagnostics: %s", response["stderr"])
+        try:
+            ignored = json.loads(response.get("stdout", ""))
+            if not isinstance(ignored, dict):
+                raise ValueError("expected path annotations")
+        except (ValueError, TypeError):
+            logger.warning("Git ignore annotations returned invalid data")
+            return entries
+        return [
+            dataclasses.replace(entry, git_ignored=ignored.get(full_path))
+            for entry, full_path in zip(entries, paths, strict=True)
+        ]
 
     async def search_files(
         self,

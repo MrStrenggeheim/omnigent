@@ -329,6 +329,81 @@ def _seed_citation_file(
     )
 
 
+def test_git_ignored_files_and_folders_stay_clickable(
+    page: Page, seeded_session: BrowserSession
+) -> None:
+    """The built Files tree dims ignored content without dimming descendants twice."""
+    session = seeded_session
+    api = f"/v1/sessions/{session.session_id}/resources/environments/default"
+    folder = {"path": "cache", "name": "cache", "type": "directory", "git_ignored": True}
+    children = [
+        {"path": "cache/ignored.md", "name": "ignored.md", "git_ignored": True},
+        {"path": "cache/tracked.txt", "name": "tracked.txt", "git_ignored": False},
+        {"path": "cache/legacy.txt", "name": "legacy.txt"},
+    ]
+    session.contract.json(
+        f"{api}/filesystem", {"object": "list", "data": [folder], "has_more": False}
+    )
+    session.contract.json(
+        f"{api}/filesystem/cache",
+        {
+            "object": "list",
+            "data": [
+                {**child, "type": "file", "bytes": 15, "modified_at": None} for child in children
+            ],
+            "has_more": False,
+        },
+    )
+    session.contract.json(
+        f"{api}/filesystem/cache/ignored.md",
+        {
+            "path": "cache/ignored.md",
+            "content": "# Ignored file\n",
+            "encoding": "utf-8",
+            "content_type": "text/markdown",
+            "bytes": 15,
+        },
+    )
+    page.set_viewport_size({"width": 1600, "height": 1000})
+    page.goto(f"{session.contract.base_url}/c/{session.session_id}")
+    page.get_by_role("button", name="Expand right panel", exact=True).click()
+    rail = page.get_by_role("complementary", name="Workspace")
+    rail.get_by_role("tab", name="Files", exact=True).click()
+    directory = rail.get_by_role("button", name="cache/", exact=True)
+    expect(directory).to_have_attribute("title", "Ignored by Git")
+    directory.click()
+    expect(directory).to_have_attribute("aria-expanded", "true")
+    page.mouse.move(0, 0)
+
+    for name, opacity in (
+        ("cache/", 0.5),
+        ("ignored.md", 0.5),
+        ("tracked.txt", 1),
+        ("legacy.txt", 1),
+    ):
+        button = rail.get_by_role("button", name=name, exact=True)
+        expect(button).to_be_enabled()
+        # Include ancestor opacity so an ignored parent cannot dim its children again.
+        page.wait_for_function(
+            """({button, name, opacity}) => [
+              button.querySelector('svg'),
+              [...button.querySelectorAll('span')].find(el => el.textContent === name)
+            ].every(el => {
+              if (!el) return false;
+              let actual = 1;
+              for (let node = el; node; node = node.parentElement)
+                actual *= Number(getComputedStyle(node).opacity);
+              return Math.abs(actual - opacity) < 0.001;
+            })""",
+            arg={"button": button.element_handle(), "name": name, "opacity": opacity},
+        )
+
+    rail.get_by_role("button", name="ignored.md", exact=True).click()
+    viewer = page.get_by_test_id("file-viewer")
+    expect(viewer).to_be_visible()
+    expect(viewer.get_by_role("heading", name="Ignored file", exact=True)).to_be_visible()
+
+
 def test_markdown_code_block_creation_keeps_caret(
     page: Page, seeded_session: BrowserSession
 ) -> None:

@@ -562,10 +562,74 @@ describe("FolderTree change-status overlay", () => {
   });
 });
 
+describe("FolderTree Git-ignore metadata", () => {
+  it.each([false, true])(
+    "keeps explicit directory metadata when children come first: %s",
+    (childrenFirst) => {
+      const directory = { ...dir("cache"), git_ignored: true };
+      const child = { ...file("cache/ignored.log"), git_ignored: true };
+      renderTree({
+        conversationId: `conv_ignored_order_${childrenFirst}`,
+        files: childrenFirst ? [child, directory] : [directory, child],
+      });
+
+      expect(screen.getByText("cache/")).toHaveClass("opacity-50");
+      expect(screen.getByRole("button", { name: "cache/" })).toHaveAttribute(
+        "title",
+        "Ignored by Git",
+      );
+    },
+  );
+});
+
 describe("FolderTree nested lazy loading", () => {
   beforeEach(() => {
     lazyChildren.clear();
     lazyErrors.clear();
+  });
+
+  it("dims ignored icons and names without dimming descendants or disabling actions", async () => {
+    lazyChildren.set("cache", [
+      { ...dir("cache/nested"), git_ignored: true },
+      { ...file("cache/ignored.log"), git_ignored: true },
+      { ...file("cache/tracked.txt"), git_ignored: false },
+      file("cache/legacy.txt"),
+    ]);
+    lazyChildren.set("cache/nested", [{ ...file("cache/nested/deep.log"), git_ignored: true }]);
+    const onFileSelect = vi.fn();
+    const onNavigateDir = vi.fn();
+    renderTree({
+      conversationId: "conv_ignored_expansion",
+      files: [{ ...dir("cache"), git_ignored: true }],
+      onFileSelect,
+      onNavigateDir,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "cache/" }));
+    fireEvent.click(await screen.findByRole("button", { name: "nested/" }));
+    expect(await screen.findByText("deep.log")).toBeInTheDocument();
+
+    for (const name of ["cache/", "nested/", "ignored.log", "deep.log"]) {
+      const label = screen.getByText(name);
+      const button = label.closest("button");
+      expect(label).toHaveClass("opacity-50");
+      expect(label.parentElement?.closest(".opacity-50")).toBeNull();
+      expect(button?.querySelector("svg")?.closest(".opacity-50")).not.toBeNull();
+      expect(button).toHaveAttribute("title", "Ignored by Git");
+      expect(button).toBeEnabled();
+    }
+    for (const name of ["tracked.txt", "legacy.txt"]) {
+      const label = screen.getByText(name);
+      expect(label.closest(".opacity-50")).toBeNull();
+      expect(label.closest("button")).not.toHaveAttribute("title");
+    }
+
+    fireEvent.click(screen.getByText("ignored.log"));
+    expect(onFileSelect).toHaveBeenCalledWith("cache/ignored.log");
+    fireEvent.doubleClick(screen.getByRole("button", { name: "nested/" }));
+    expect(onNavigateDir).toHaveBeenCalledWith("cache/nested");
+    fireEvent.click(screen.getByRole("button", { name: "Copy folder path: nested" }));
+    expect(copyTextMock).toHaveBeenCalledWith("cache/nested");
   });
 
   it("shows an error row when a lazy directory's listing fails", async () => {

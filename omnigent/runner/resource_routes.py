@@ -1175,6 +1175,7 @@ def register_resource_routes(
         entries, truncated = await walk
         if indexed is not None:
             entries = merge_entries(indexed, entries, limit)
+        entries = await fs.annotate_git_ignored(entries, path)
         data = [_fs_entry_to_dict(e) for e in entries]
         return JSONResponse(
             status_code=200,

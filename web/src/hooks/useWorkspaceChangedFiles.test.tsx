@@ -746,6 +746,70 @@ describe("useWorkspaceFileSearch gating", () => {
   });
 });
 
+describe("workspace Git-ignore metadata", () => {
+  it.each([
+    [
+      "listing",
+      function useEntries() {
+        return useWorkspaceAllFiles("conv_ignored", {}, "/home/agent").data?.data;
+      },
+      true,
+    ],
+    [
+      "directory expansion",
+      function useEntries() {
+        return useWorkspaceDirectory("conv_ignored", "repo", "/home/agent").data;
+      },
+      false,
+    ],
+    [
+      "filename search",
+      function useEntries() {
+        return useWorkspaceFileSearch("conv_ignored", "cache", "", "", {}, "/home/agent").data
+          ?.files;
+      },
+      false,
+    ],
+  ] as const)(
+    "preserves true, false and absent flags through %s",
+    async (_kind, useEntries, preflight) => {
+      onlineMock.mockReturnValue(true);
+      if (preflight) fetchMock.mockResolvedValueOnce(environmentResponse("/home/agent"));
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          object: "list",
+          data: [
+            ["ignored.log", "file", true],
+            ["cache", "directory", true],
+            ["tracked.txt", "file", false],
+            ["legacy.txt", "file", undefined],
+          ].map(([name, type, gitIgnored]) => ({
+            id: name,
+            name,
+            path: name,
+            type,
+            bytes: 1,
+            modified_at: null,
+            ...(gitIgnored === undefined ? {} : { git_ignored: gitIgnored }),
+          })),
+          has_more: false,
+        }),
+      );
+
+      const { result } = renderHook(useEntries, { wrapper: Wrap });
+
+      await waitFor(() => expect(result.current).toHaveLength(4));
+      expect(result.current?.map((entry) => entry.git_ignored)).toEqual([
+        true,
+        true,
+        false,
+        undefined,
+      ]);
+      expect(result.current?.[1].type).toBe("directory");
+    },
+  );
+});
+
 describe("useWorkspaceFileSearch truncation", () => {
   it("surfaces the server's truncated flag so a miss is not shown as definitive", async () => {
     // The server already reported that its scan budget ran out; the hook used

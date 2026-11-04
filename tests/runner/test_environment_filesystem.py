@@ -34,6 +34,7 @@ from omnigent.runner import create_runner_app
 from omnigent.runner.environment_filesystem import CallerProcessFilesystem, search_indexed_paths
 from omnigent.runner.resource_registry import SessionResourceRegistry
 from omnigent.runtime.filesystem_registry import GitFilesystemRegistry
+from omnigent.workspace_fs import WorkspaceReader
 from tests.runner.helpers import NullServerClient
 
 
@@ -102,6 +103,110 @@ async def test_list_environment_root(
     names = {e["name"] for e in body["data"]}
     assert "hello.txt" in names
     assert "src" in names
+
+
+@pytest.mark.asyncio
+async def test_git_ignored_entries_follow_browsed_repositories(
+    client: httpx.AsyncClient, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runner and idle-host browsing/search agree beneath a non-Git workspace."""
+    repo = workspace / "projects/repo"
+    repo.mkdir(parents=True)
+
+    def git(*arguments: str, cwd: Path = repo) -> None:
+        subprocess.run(["git", *arguments], cwd=cwd, check=True, capture_output=True)
+
+    git("init", "-q")
+    (repo / ".gitignore").write_text("*.tmp\n!keep.tmp\ncache/\n")
+    (repo / "tracked.tmp").write_text("tracked despite rule")
+    git("add", "-f", "tracked.tmp")
+    for name in ("result.tmp", "keep.tmp", "normal.txt", "-odd\nü.tmp"):
+        (repo / name).write_text(name)
+    (repo / "cache").mkdir()
+    (repo / "cache/data.txt").write_text("ignored ancestor")
+    (repo / ".git/info/exclude").write_text("local.txt\n")
+    (repo / "local.txt").touch()
+    excludes = workspace / "global-excludes"
+    excludes.write_text("global.txt\n")
+    git("config", "core.excludesFile", str(excludes))
+    (repo / "global.txt").touch()
+    nested = repo / "nested"
+    nested.mkdir()
+    git("init", "-q", "--separate-git-dir", str(workspace / "nested-gitdir"), cwd=nested)
+    (nested / ".gitignore").write_text("*.log\n")
+    (nested / "own.tmp").touch()
+    (nested / "own.log").touch()
+    # An inherited shell repository must not redirect these read-only lookups.
+    monkeypatch.setenv("GIT_DIR", str(workspace / "nonexistent-repository"))
+    original_config = (repo / ".git/config").read_bytes()
+    original_index = (repo / ".git/index").read_bytes()
+
+    base = "/v1/sessions/conv_test/resources/environments/default"
+    host = WorkspaceReader(workspace)
+    expected = {
+        "result.tmp": True,
+        "keep.tmp": False,
+        "tracked.tmp": False,
+        "normal.txt": False,
+        "-odd\nü.tmp": True,
+        "cache": True,
+        "global.txt": True,
+        "local.txt": True,
+    }
+    for suffix in ("projects/repo", str(repo)):
+        response = await client.get(f"{base}/filesystem/{suffix}")
+        assert response.status_code == 200, response.text
+        by_name = {entry["name"]: entry for entry in response.json()["data"]}
+        for name, ignored in expected.items():
+            assert by_name[name]["git_ignored"] is ignored, (suffix, name)
+    listing = host.list_or_read("projects/repo", limit=100)
+    by_name = {entry["name"]: entry for entry in listing["data"]}
+    for name, ignored in expected.items():
+        assert by_name[name]["git_ignored"] is ignored
+    for suffix in ("projects/repo/cache", "projects/repo/nested"):
+        response = await client.get(f"{base}/filesystem/{suffix}")
+        assert response.status_code == 200, response.text
+        entries = {entry["name"]: entry["git_ignored"] for entry in response.json()["data"]}
+        hosted = host.list_or_read(suffix, limit=100)
+        assert entries == {entry["name"]: entry["git_ignored"] for entry in hosted["data"]}
+        if suffix.endswith("cache"):
+            assert entries["data.txt"] is True
+        else:
+            assert entries["own.tmp"] is False
+            assert entries["own.log"] is True
+    for scope in ("", "/projects/repo", f"/{repo}"):
+        response = await client.get(f"{base}/search{scope}", params={"q": ".tmp"})
+        assert response.status_code == 200, response.text
+        by_name = {entry["name"]: entry["git_ignored"] for entry in response.json()["data"]}
+        assert by_name["result.tmp"] is True
+        assert by_name["tracked.tmp"] is False
+        assert by_name["own.tmp"] is False
+    results = host.search(".tmp")["data"]
+    assert {entry["name"]: entry["git_ignored"] for entry in results} == by_name
+    response = await client.get(f"{base}/filesystem")
+    ordinary = next(e for e in response.json()["data"] if e["name"] == "hello.txt")
+    assert "git_ignored" not in ordinary
+    assert (repo / ".git/config").read_bytes() == original_config
+    assert (repo / ".git/index").read_bytes() == original_index
+    (repo / ".gitignore").write_text("*.tmp\n!result.tmp\n")
+    response = await client.get(f"{base}/filesystem/projects/repo")
+    changed = next(e for e in response.json()["data"] if e["name"] == "result.tmp")
+    assert changed["git_ignored"] is False
+
+
+@pytest.mark.asyncio
+async def test_git_ignore_failure_keeps_browsing_available(
+    client: httpx.AsyncClient, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True, capture_output=True)
+    # The filesystem's Python still runs; only git is unavailable to it.
+    (workspace / "bin").mkdir()
+    (workspace / "bin/python3").symlink_to(sys.executable)
+    monkeypatch.setenv("PATH", str(workspace / "bin"))
+    response = await client.get("/v1/sessions/conv_test/resources/environments/default/filesystem")
+    assert response.status_code == 200, response.text
+    entry = next(e for e in response.json()["data"] if e["name"] == "hello.txt")
+    assert "git_ignored" not in entry
 
 
 @pytest.mark.asyncio
