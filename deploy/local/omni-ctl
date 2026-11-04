@@ -1,0 +1,20 @@
+#!/bin/sh
+# Manage the always-on Omnigent services (systemd), instead of `omni start/stop`,
+# which don't know about systemd (`omni stop` just triggers an automatic restart).
+set -e
+SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
+case "${1:-status}" in
+  status)
+    systemctl --no-pager --lines=0 status omnigent-server omnigent-host | grep -E "●|Active:" || true
+    sudo -iu agent omni host status 2>/dev/null | sed -n '1,3p'
+    curl -sf -m3 -o /dev/null http://127.0.0.1:6767/healthz && echo "health: ok" || echo "health: DOWN"
+    echo "url:    https://jarvis-vps.tail2a853d.ts.net:6767" ;;
+  start)    $SUDO systemctl start omnigent.target ;;
+  stop)     $SUDO systemctl stop omnigent.target ;;      # stays off until start/reboot
+  restart)  $SUDO systemctl restart omnigent.target ;;   # NOTE: ends running agent sessions
+  logs)     $SUDO journalctl -u omnigent-server -u omnigent-host -f -n 50 ;;
+  upgrade)
+    $SUDO systemctl start omnigent-stable-update.service
+    echo "Custom update requested; inspect journalctl -u omnigent-stable-update.service." ;;
+  *) echo "usage: omni-ctl {status|start|stop|restart|logs|upgrade}"; exit 1 ;;
+esac

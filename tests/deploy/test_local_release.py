@@ -104,6 +104,24 @@ def _executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def test_legacy_upgrade_requests_the_guarded_custom_deployment(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    calls = tmp_path / "calls"
+    _executable(fake_bin / "id", "#!/bin/sh\nprintf '0\\n'\n")
+    _executable(fake_bin / "systemctl", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$COMMAND_LOG"\n')
+    for command in ("sudo", "uv"):
+        _executable(fake_bin / command, "#!/bin/sh\nexit 99\n")
+    result = subprocess.run(
+        ["/bin/sh", str(_ROOT / "deploy/local/omni-ctl"), "upgrade"],
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}", "COMMAND_LOG": str(calls)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert calls.read_text().splitlines() == ["start omnigent-stable-update.service"]
+
+
 @pytest.fixture
 def deployment(tmp_path: Path):
     home = tmp_path / "home"
