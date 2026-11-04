@@ -72,6 +72,25 @@ def test_list_dir_returns_entries(tmp_path: Path) -> None:
     assert by_path["sub"]["type"] == "directory"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory permissions")
+def test_ignore_metadata_permission_failure_preserves_browsing(tmp_path: Path) -> None:
+    repo = tmp_path / "nested"
+    repo.mkdir()
+    _git_repo(repo)
+    reader = WorkspaceReader(tmp_path)
+    metadata = repo / ".git"
+    metadata.chmod(0)
+    try:
+        listing = reader.list_or_read("nested", limit=100)
+        entry = next(e for e in listing["data"] if e["name"] == "committed.txt")
+        assert "git_ignored" not in entry
+        result = reader.search("committed.txt")
+        assert result["data"][0]["path"] == "nested/committed.txt"
+        assert "git_ignored" not in result["data"][0]
+    finally:
+        metadata.chmod(0o755)
+
+
 def test_read_text_file_returns_utf8_content(tmp_path: Path) -> None:
     """Reading a text file returns its UTF-8 content inline.
 

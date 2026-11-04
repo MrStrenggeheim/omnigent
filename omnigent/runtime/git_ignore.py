@@ -29,14 +29,18 @@ def git_ignored_paths(paths: list[str]) -> dict[str, bool]:
             logger.warning("Git ignore path unavailable: %s", exc)
             continue
         if parent not in roots:
-            roots[parent] = next(
-                (
-                    root
-                    for root in (parent, *parent.parents)
-                    if (root / ".git/HEAD").is_file() or (root / ".git").is_file()
-                ),
-                None,
-            )
+            try:
+                roots[parent] = next(
+                    (
+                        root
+                        for root in (parent, *parent.parents)
+                        if (root / ".git/HEAD").is_file() or (root / ".git").is_file()
+                    ),
+                    None,
+                )
+            except OSError as exc:
+                logger.warning("Git ignore metadata unavailable: %s", exc)
+                roots[parent] = None
         root = roots[parent]
         if root is not None:
             relative = (parent / entry.name).relative_to(root).as_posix()

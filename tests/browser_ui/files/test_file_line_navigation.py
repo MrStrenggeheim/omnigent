@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -330,7 +331,7 @@ def _seed_citation_file(
 
 
 def test_git_ignored_files_and_folders_stay_clickable(
-    page: Page, seeded_session: BrowserSession
+    page: Page, seeded_session: BrowserSession, output_path: str
 ) -> None:
     """The built Files tree dims ignored content without dimming descendants twice."""
     session = seeded_session
@@ -398,6 +399,9 @@ def test_git_ignored_files_and_folders_stay_clickable(
             arg={"button": button.element_handle(), "name": name, "opacity": opacity},
         )
 
+    evidence = Path(output_path)
+    evidence.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(evidence / "ignored-file-tree.png"))
     rail.get_by_role("button", name="ignored.md", exact=True).click()
     viewer = page.get_by_test_id("file-viewer")
     expect(viewer).to_be_visible()
