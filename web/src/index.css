@@ -1519,24 +1519,24 @@ html[data-electron-mac] .breadcrumb-folder {
   margin-bottom: 0;
 }
 
-/* Use the usable chat column so side panels and split views keep narrow prose. */
+/* Keep prose inside the usable chat column in side panels and split views. */
 .chat-conversation-content {
   container: chat-column / inline-size;
 }
 
 .is-assistant {
-  --chat-prose-width: 80ch;
+  --chat-prose-width: 100%;
 }
 
 @container chat-column (min-width: 64rem) {
   .is-assistant {
-    --chat-prose-width: 120ch;
+    --chat-prose-width: 100%;
   }
 }
 
 /* Prose shares one limit in ordinary replies and replies with wide content. */
 .chat-markdown > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) {
-  max-width: var(--chat-prose-width, 80ch);
+  max-width: var(--chat-prose-width, 100%);
 }
 
 .chat-markdown :is(ul, ol) {
