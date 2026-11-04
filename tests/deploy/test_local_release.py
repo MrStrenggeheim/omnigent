@@ -161,6 +161,10 @@ def deployment(tmp_path: Path):
         '            : > "${@: -1}/chat.db"\n'
         "            exit 1\n"
         "        fi\n"
+        '    elif [[ "$payload" == *"expected = json.loads"* ]]; then\n'
+        '        echo health-check >> "$COMMAND_LOG"\n'
+        '        [[ "$MODE" == success ]]\n'
+        "        exit $?\n"
         "    else\n"
         '        echo restore >> "$COMMAND_LOG"\n'
         '        [[ $(cat "$RUNNING") == stopped ]] || exit 9\n'
@@ -233,9 +237,14 @@ def test_failed_start_stops_services_before_restoring_database(deployment) -> No
     assert result.returncode == 1, result.stderr
     assert (app / "current").resolve().name == "previous"
     commands = log.read_text().splitlines()
-    failed_start = commands.index("systemctl start omnigent.target")
+    failed_start = commands.index(
+        "systemctl start omnigent.target omnigent-server.service omnigent-host.service"
+    )
     restore = commands.index("restore")
-    assert "systemctl stop omnigent.target" in commands[failed_start + 1 : restore]
+    assert (
+        "systemctl stop omnigent.target omnigent-host.service omnigent-server.service"
+        in commands[failed_start + 1 : restore]
+    )
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT value FROM state").fetchone() == ("original",)
 
@@ -247,5 +256,31 @@ def test_failed_backup_never_restores_an_incomplete_snapshot(deployment) -> None
     )
     assert result.returncode == 1, result.stderr
     assert (app / "current").resolve().name == "previous"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT value FROM state").fetchone() == ("original",)
+
+
+def test_successful_deployment_waits_for_both_services_before_switching(deployment) -> None:
+    app, database, log, env, script = deployment
+    result = subprocess.run(
+        [str(script)], env=dict(env, MODE="success"), capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert (app / "current").resolve().name == "candidate"
+    assert (app / "previous").resolve().name == "previous"
+    assert not (app / "pending").exists()
+    commands = log.read_text().splitlines()
+    stop = commands.index(
+        "systemctl stop omnigent.target omnigent-host.service omnigent-server.service"
+    )
+    backup = commands.index("backup")
+    start = commands.index(
+        "systemctl start omnigent.target omnigent-server.service omnigent-host.service"
+    )
+    assert stop < backup < start < commands.index("health-check")
+    assert "restore" not in commands
+    saved_database = next((app / "backups").glob("*/chat.db"))
+    with sqlite3.connect(saved_database) as connection:
+        assert connection.execute("SELECT value FROM state").fetchone() == ("original",)
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT value FROM state").fetchone() == ("original",)

@@ -58,7 +58,7 @@ recover() {
     trap - EXIT
     if (( result != 0 && stopped == 1 )); then
         echo "Deployment failed. Restoring the prior code and saved application state." >&2
-        systemctl stop omnigent.target
+        systemctl stop omnigent.target omnigent-host.service omnigent-server.service
         as_agent /usr/bin/python3 - "$app" "$previous" "$backup" <<'PY'
 import shutil
 import sys
@@ -77,13 +77,15 @@ if (backup / "complete").exists():
     for suffix in ("-wal", "-shm"):
         (state / ("chat.db" + suffix)).unlink(missing_ok=True)
 PY
-        systemctl start omnigent.target || echo "Service recovery needs attention." >&2
+        systemctl start omnigent.target omnigent-server.service omnigent-host.service || echo "Service recovery needs attention." >&2
     fi
     exit "$result"
 }
 trap recover EXIT
 
-systemctl stop omnigent.target
+# Wait for both processes: stopping a target alone can return while its
+# propagated service jobs are still queued, and a subsequent start cancels them.
+systemctl stop omnigent.target omnigent-host.service omnigent-server.service
 stopped=1
 as_agent /usr/bin/python3 - "$app" "$candidate" "$previous" "$backup" <<'PY'
 import shutil
@@ -113,7 +115,7 @@ for command in ("omnigent", "omni"):
     temporary.replace(target)
 PY
 
-systemctl start omnigent.target
+systemctl start omnigent.target omnigent-server.service omnigent-host.service
 for attempt in {1..30}; do
     if systemctl is-active --quiet omnigent-server.service \
         && systemctl is-active --quiet omnigent-host.service \
