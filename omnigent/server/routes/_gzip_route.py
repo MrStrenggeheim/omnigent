@@ -98,10 +98,8 @@ class _StateAwareGZipResponder(GZipResponder):
 
     The flag can only be read at send time: the handler sets it while running,
     which is after ``handle`` dispatches but before the response body is
-    emitted. Reuses Starlette's own ``content_type_is_excluded`` opt-out — the
-    flag it already sets for ``text/event-stream`` — so an excluded response
-    takes the library's untouched pass-through path rather than a parallel one
-    here.
+    emitted. Select pass-through when the response starts, before Starlette
+    can buffer its headers. Forward all messages unchanged for that response.
 
     :param app: The wrapped ASGI app (the route's own ``handle``).
     :param minimum_size: Minimum body size to compress, e.g. ``1024``.
@@ -120,22 +118,20 @@ class _StateAwareGZipResponder(GZipResponder):
     ) -> None:
         super().__init__(app, minimum_size, compresslevel=compresslevel)
         self._state = state
+        self._skip_compression = False
 
     async def send_with_compression(self, message: Message) -> None:
         """
-        Widen Starlette's exclusion set when the handler opted out.
+        Preserve response ordering when the handler opts out of compression.
 
         :param message: The outgoing ASGI message.
         :returns: None.
         """
-        if (
-            message["type"] == "http.response.body"
-            and not self.started
-            and self._state.get(SKIP_GZIP_STATE_KEY)
-        ):
-            # Starlette reads this flag on the first body message, then emits
-            # the start message it buffered — untouched.
-            self.content_type_is_excluded = True
+        if message["type"] == "http.response.start":
+            self._skip_compression = bool(self._state.get(SKIP_GZIP_STATE_KEY))
+        if self._skip_compression:
+            await self.send(message)
+            return
         await super().send_with_compression(message)
 
 
