@@ -277,6 +277,74 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("Explorer tree actions", () => {
+  it("downloads the file under the browsed folder rather than the workspace root", async () => {
+    const urls: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      urls.push(this.getAttribute("href") ?? "");
+    });
+    useDirectoriesMock.mockReturnValue(new Map());
+    render(
+      <FolderTree
+        conversationId="conv_scoped_download"
+        browseLocation="src"
+        files={[file("a.ts")]}
+        changedFiles={[]}
+        isLoading={false}
+        isError={false}
+        error={null}
+        showHidden={false}
+        sort="alpha"
+        onFileSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Download a.ts" }));
+    await waitFor(() => expect(urls).toHaveLength(1));
+    expect(urls[0]).toContain("/filesystem/src/a.ts?download=true");
+    click.mockRestore();
+  });
+
+  it("supports keyboard navigation, collapse all, and touch selection in the tree", async () => {
+    renderPanel({
+      conversationId: "conv_explorer_keyboard",
+      files: [file("src/a.ts"), file("src/b.ts")],
+    });
+    const folder = screen.getByRole("button", { name: "src/" });
+    fireEvent.focus(folder);
+    fireEvent.keyDown(folder, { key: "ArrowDown" });
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "Select src/a.ts" })).toBeChecked(),
+    );
+    fireEvent.keyDown(screen.getByRole("treeitem", { selected: true }), {
+      key: "ArrowDown",
+      shiftKey: true,
+    });
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all folders" }));
+    expect(folder).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("a.ts")).not.toBeInTheDocument();
+  });
+
+  it("hides internal trash and transfer files even when hidden files are shown", () => {
+    renderPanel({
+      conversationId: "conv_explorer_internal",
+      showHidden: true,
+      files: [
+        file("visible.txt"),
+        file(".omnigent-trash/deleted.txt"),
+        file(".omnigent-upload-123"),
+        file(".env"),
+      ],
+    });
+    expect(screen.getByText("visible.txt")).toBeInTheDocument();
+    expect(screen.getByText(".env")).toBeInTheDocument();
+    expect(screen.queryByText("deleted.txt")).not.toBeInTheDocument();
+    expect(screen.queryByText(".omnigent-upload-123")).not.toBeInTheDocument();
+  });
+});
+
 describe("FilesPanel working folder directory", () => {
   it("shows the directory basename with the former heading typography", () => {
     renderPanel({
@@ -692,7 +760,7 @@ describe("FilesPanel changed files search", () => {
     expect(drawer).toHaveClass("shadow-none");
     expect(drawer).not.toHaveClass("shadow-lg");
 
-    const srcFolder = screen.getByRole("button", { name: /src\//i });
+    const srcFolder = screen.getByRole("button", { name: /^src\/$/i });
     expect(srcFolder).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("App.tsx")).toBeInTheDocument();
 
@@ -705,7 +773,7 @@ describe("FilesPanel changed files search", () => {
 
     expect(drawer).toHaveClass("shadow-lg");
     expect(drawer).not.toHaveClass("shadow-none");
-    const drawerSrcFolder = screen.getByRole("button", { name: /src\//i });
+    const drawerSrcFolder = screen.getByRole("button", { name: /^src\/$/i });
     expect(drawerSrcFolder).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("App.tsx")).toBeNull();
   });
@@ -1045,7 +1113,7 @@ describe("FilesPanel tree (Explore) search", () => {
     });
 
     // Tree is back — the top-level src/ folder button is visible again
-    expect(screen.getByRole("button", { name: /src\//i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^src\/$/i })).toBeInTheDocument();
     // Flat search result is gone
     expect(screen.queryByText("abc/test.md")).toBeNull();
   });
@@ -1106,7 +1174,7 @@ describe("FilesPanel tree (Explore) search", () => {
     // Both row types are a wrapper div carrying the indent, with the clickable
     // element nested inside — folders included, so the copy button can be a
     // sibling of the toggle rather than a button inside a button.
-    const folderButton = screen.getByRole("button", { name: /src\//i });
+    const folderButton = screen.getByRole("button", { name: /^src\/$/i });
     const folderRow = folderButton.closest("div");
     const fileRow = screen.getByText("README.md").closest("div");
     if (!folderRow || !fileRow) throw new Error("row container not found");

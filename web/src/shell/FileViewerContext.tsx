@@ -55,6 +55,8 @@ interface FileViewerContextType {
   workspaceHome: string | null;
   /** Host running the session, so desktop-only file actions can check it is this machine. */
   sessionHostId?: string | null;
+  /** Most recently active file, used to reveal it when returning to the tree. */
+  activeFilePath?: string | null;
 }
 
 export const FileViewerContext = createContext<FileViewerContextType | null>(null);

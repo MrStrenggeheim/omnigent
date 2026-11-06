@@ -3717,6 +3717,10 @@ class HostProcess:
         from typing import cast
 
         r = cast("WorkspaceReader", reader)
+        if op == "content_search":
+            from omnigent.runner.content_search import search_content_local
+
+            return search_content_local(str(r._root), params)
         if op == "list_or_read":
             return r.list_or_read(
                 str(params.get("path", "")),
@@ -3829,6 +3833,14 @@ class HostProcess:
 
         from omnigent.runner import pr_resource
 
+        if op == "filesystem_operation":
+            from omnigent.runner.filesystem_operations import host_filesystem_operation
+
+            return host_filesystem_operation(workspace, params)
+        if op == "content_replace":
+            from omnigent.runner.content_replace import replace_content_local
+
+            return replace_content_local(workspace, params, str(params.get("session_id", "")))
         if op == "github_set_preference":
             return pr_resource.set_pr_preference(
                 workspace,

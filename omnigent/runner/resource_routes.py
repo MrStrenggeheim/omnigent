@@ -1037,6 +1037,9 @@ def register_resource_routes(
         q: str = Query(min_length=1, max_length=4096, pattern=r".*\S.*"),
         case_sensitive: bool = False,
         regex: bool = False,
+        whole_word: bool = False,
+        use_ignore: bool = True,
+        path: str = "",
         include: str = Query(default="", max_length=4096),
         exclude: str = Query(default="", max_length=4096),
         limit: int = Query(default=500, ge=1, le=500),
@@ -1052,11 +1055,32 @@ def register_resource_routes(
             q,
             case_sensitive=case_sensitive,
             regex=regex,
+            whole_word=whole_word,
+            use_ignore=use_ignore,
+            path=path,
             include=include,
             exclude=exclude,
             limit=limit,
         )
         return JSONResponse(result)
+
+    @app.post("/v1/sessions/{session_id}/resources/environments/{environment_id}/content-replace")
+    async def replace_environment_content(
+        session_id: str,
+        environment_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        """Preview, apply or undo edits against exact search snapshots."""
+        from omnigent.runner.content_replace import replace_content
+
+        agent_spec = await _require_os_env(session_id)
+        await _ensure_session_registered(session_id)
+        env = resource_registry.resolve_environment(session_id, environment_id, agent_spec)
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("path", ""), str):
+            raise HTTPException(status_code=400, detail="Invalid replacement request")
+        result = await replace_content(env, body, session_id=session_id, path=body.get("path", ""))
+        return JSONResponse(result, status_code=400 if result.get("error") else 200)
 
     @app.get("/v1/sessions/{session_id}/resources/environments/{environment_id}/search")
     async def search_environment_files(
@@ -1514,6 +1538,33 @@ def register_resource_routes(
             name=name,
             content=await request.body(),
         )
+
+    @app.post(
+        "/v1/sessions/{session_id}/resources/environments/{environment_id}/filesystem-operations"
+    )
+    async def operate_environment_filesystem(
+        session_id: str, environment_id: str, request: Request
+    ) -> JSONResponse:
+        from omnigent.runner.filesystem_operations import filesystem_operation
+
+        agent_spec = await _require_os_env(session_id)
+        environment = resource_registry.resolve_environment(session_id, environment_id, agent_spec)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Expected a filesystem operation")
+        try:
+            result = await filesystem_operation(environment, body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if filesystem_registry is not None:
+            removed = {entry["source"] for entry in result.get("moved", [])}
+            if body["operation"] in {"trash", "delete"}:
+                removed.update(result.get("affected_paths", []))
+            for path in result.get("affected_paths", []):
+                filesystem_registry.record_change(
+                    path, "deleted" if path in removed else "modified", session_id
+                )
+        return JSONResponse(status_code=result.get("status", 200), content=result)
 
     @app.get(
         "/v1/sessions/{session_id}/resources/environments"

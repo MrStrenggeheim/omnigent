@@ -15,6 +15,14 @@ import { FileDownloadButton } from "./FileDownloadButton";
 import { useRevealMenu } from "./RevealInFileManager";
 import { useCursorTooltip } from "./useCursorTooltip";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
+import {
+  ExplorerRowActions,
+  explorerRowClass,
+  useExplorerRow,
+  useExplorerTree,
+} from "./ExplorerActions";
+import { useMemo } from "react";
+import { isExplorerInternalPath } from "@/lib/explorerOperations";
 
 export type { ChangedSort } from "@/lib/changedSort";
 import type { ChangedSort } from "@/lib/changedSort";
@@ -83,6 +91,7 @@ function FileListItem({
 }) {
   const { handlers, tooltip } = useCursorTooltip(file.path);
   const reveal = useRevealMenu(isDeleted ? null : file.path);
+  const explorer = useExplorerRow(file.path, false, isDeleted);
   const slash = file.path.lastIndexOf("/");
   const dir = slash > 0 ? file.path.slice(0, slash) : "";
   const hasDownload = !isDeleted && Boolean(conversationId);
@@ -90,10 +99,13 @@ function FileListItem({
   return (
     <li>
       <div
-        onContextMenu={reveal.onContextMenu}
+        {...explorer.props}
+        onContextMenu={explorer.props.onContextMenu ?? reveal.onContextMenu}
         className={cn(
           "group flex w-full min-w-0 items-center gap-2 rounded-md py-0.5 pr-1 pl-2",
           isDeleted ? "opacity-50" : "hover:bg-muted",
+          explorerRowClass,
+          explorer.selected && "bg-accent",
         )}
       >
         <button
@@ -111,6 +123,7 @@ function FileListItem({
           </span>
           {dir && <span className="truncate text-muted-foreground text-sm">{dir}</span>}
         </button>
+        <ExplorerRowActions path={file.path} deleted={isDeleted} />
         {/* Fixed-width and always rendered: a variable diffstat ("+7 −1" vs
             "+1204 −318") would otherwise shift the copy button and status
             letter to a different x on every row. */}
@@ -208,6 +221,23 @@ export function FlatFileList({
    */
   runnerWentOffline?: boolean;
 }) {
+  const explorerEntries = useMemo(
+    () => ({
+      entries: (files ?? [])
+        .filter(
+          (file) =>
+            !isExplorerInternalPath(file.path) &&
+            file.status !== "deleted" &&
+            (showHidden || !file.path.split("/").some((part) => part.startsWith("."))) &&
+            (!searchQuery.trim() ||
+              file.path.toLowerCase().includes(searchQuery.trim().toLowerCase())),
+        )
+        .sort(compareChangedFiles(sort))
+        .map((file) => ({ path: file.path, directory: false })),
+    }),
+    [files, showHidden, searchQuery, sort],
+  );
+  useExplorerTree(explorerEntries);
   if (isLoading) {
     return <p className="px-2 py-1 text-muted-foreground text-sm">Loading…</p>;
   }
@@ -231,7 +261,9 @@ export function FlatFileList({
   }
   const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
   const visibleFiles = files.filter(
-    (f) => showHidden || !f.path.split("/").some((seg) => seg.startsWith(".")),
+    (f) =>
+      !isExplorerInternalPath(f.path) &&
+      (showHidden || !f.path.split("/").some((seg) => seg.startsWith("."))),
   );
   const sorted = visibleFiles
     .filter(

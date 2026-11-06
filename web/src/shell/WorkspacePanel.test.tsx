@@ -42,6 +42,7 @@ vi.mock("./FileViewer", () => ({
   ),
 }));
 vi.mock("./FilesPanel", () => ({
+  readBrowseLocation: () => "",
   // Echo the fixed scope so tests can prove the Files tab renders the tree
   // (flatView=false) and the Changes tab the changed-only list (flatView=true).
   FilesPanel: ({ flatView, conversationId }: { flatView: boolean; conversationId: string }) => (
@@ -56,8 +57,21 @@ vi.mock("./SubagentsPanel", () => ({
   SubagentsPanel: () => <div data-testid="subagents-stub" />,
 }));
 vi.mock("./ContentSearchPanel", () => ({
-  ContentSearchPanel: ({ inputRef }: { inputRef: RefObject<HTMLInputElement | null> }) => (
-    <input data-testid="content-search-stub" ref={inputRef} />
+  ContentSearchPanel: ({
+    inputRef,
+    scope,
+    replaceOpen,
+  }: {
+    inputRef: RefObject<HTMLInputElement | null>;
+    scope?: string;
+    replaceOpen?: boolean;
+  }) => (
+    <input
+      data-testid="content-search-stub"
+      ref={inputRef}
+      data-scope={scope}
+      data-replace={String(replaceOpen)}
+    />
   ),
 }));
 vi.mock("@/components/BrowserPane/BrowserPane", () => ({
@@ -335,6 +349,31 @@ describe("WorkspacePanel surface presentation", () => {
     expect(fireEvent.keyDown(window, { code: "KeyF", ctrlKey: true, shiftKey: true })).toBe(false);
     expect(desktop.onReveal).toHaveBeenCalledOnce();
     expect(desktop.onRightRailTabChange).toHaveBeenCalledWith("content-search");
+  });
+
+  it("opens replacement with Ctrl+Shift+H and scopes folder search to the active session", () => {
+    const { onRightRailTabChange } = renderWorkspace({ showContentSearch: true });
+    fireEvent.keyDown(window, { code: "KeyH", ctrlKey: true, shiftKey: true });
+    expect(onRightRailTabChange).toHaveBeenCalledWith("content-search");
+    expect(screen.getByTestId("content-search-stub")).toHaveAttribute("data-replace", "true");
+    fireEvent(
+      window,
+      new CustomEvent("omnigent:open-content-search", {
+        detail: { conversationId: "other-session", location: "/unrelated" },
+      }),
+    );
+    expect(screen.getByTestId("content-search-stub")).toHaveAttribute("data-scope", "");
+    fireEvent(
+      window,
+      new CustomEvent("omnigent:open-content-search", {
+        detail: { conversationId: "conv_ws", location: "/home/agent/project", replace: false },
+      }),
+    );
+    expect(screen.getByTestId("content-search-stub")).toHaveAttribute(
+      "data-scope",
+      "/home/agent/project",
+    );
+    expect(screen.getByTestId("content-search-stub")).toHaveAttribute("data-replace", "false");
   });
 
   it("gates content search and exposes it in the tab strip and panel picker", async () => {

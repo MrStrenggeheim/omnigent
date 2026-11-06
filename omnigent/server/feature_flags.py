@@ -128,7 +128,8 @@ FEATURE_DEFINITIONS: tuple[FeatureDefinition, ...] = (
     ),
     FeatureDefinition(
         feature=Feature.WORKSPACE_CONTENT_SEARCH,
-        description="Search workspace file contents through the session runner",
+        description="Search and replace workspace file contents through the runner or host",
+        default_enabled=True,
         owner="web",
         review_by_release="0.20.0",
     ),

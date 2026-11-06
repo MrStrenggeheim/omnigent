@@ -85,6 +85,7 @@ vi.mock("@/hooks/useAgents", () => ({
 }));
 vi.mock("./Sidebar", () => ({ Sidebar: () => <div data-testid="sidebar" /> }));
 vi.mock("./FilesPanel", () => ({
+  readBrowseLocation: () => "",
   FilesPanel: () => <div data-testid="files-panel" />,
 }));
 vi.mock("./FileViewer", () => ({

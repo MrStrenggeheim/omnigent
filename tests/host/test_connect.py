@@ -9953,3 +9953,56 @@ async def test_host_publishes_stored_workspace_at_startup(
 
     assert host._origin_workspace_id == "1965859176160743"
     assert os.environ[debug_logging.ORIGIN_WORKSPACE_ID_ENV_VAR] == "1965859176160743"
+
+
+async def test_idle_explorer_operations_frames_preserve_grants_and_recovery(
+    tmp_path: Path,
+) -> None:
+    """The idle host serves the same typed actions without bypassing issued grants."""
+    from omnigent.host.frames import HostFsWriteFrame
+
+    host = _make_host_process()
+    params = {
+        "operation": "create_file",
+        "path": "recover.txt",
+        "_owner": "owner@example.com",
+        "_roots": [{"path": str(tmp_path), "access": "read", "kind": "tree"}],
+        "_unconfined": False,
+    }
+
+    def send(parameters):
+        return host._handle_fs_write(
+            HostFsWriteFrame(
+                request_id="explorer",
+                op="filesystem_operation",
+                workspace=str(tmp_path),
+                session_id="session",
+                params=parameters,
+            )
+        )
+
+    try:
+        denied = send(params)
+        assert denied.status == "ok"
+        assert denied.payload["status"] == 403
+        assert not (tmp_path / "recover.txt").exists()
+        params["_roots"][0]["access"] = "write"
+        created = send(params)
+        assert created.status == "ok", created
+        assert created.payload["affected_paths"] == ["recover.txt"]
+        (tmp_path / "recover.txt").write_text("important")
+        trashed = send({**params, "operation": "trash", "path": "", "paths": ["recover.txt"]})
+        assert trashed.status == "ok", trashed
+        assert not (tmp_path / "recover.txt").exists()
+        restored = send(
+            {
+                **params,
+                "operation": "restore",
+                "path": "",
+                "ids": [trashed.payload["items"][0]["id"]],
+            }
+        )
+        assert restored.status == "ok", restored
+        assert (tmp_path / "recover.txt").read_text() == "important"
+    finally:
+        _cleanup_host(host)

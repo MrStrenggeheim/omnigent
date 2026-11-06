@@ -588,6 +588,7 @@ def register_resources_routes(
         runner_params: dict[str, str] | None = None,
         host_workspace_resolver: Callable[[], Awaitable[str]] | None = None,
         runner_timeout: float = 10.0,
+        unsupported_endpoint_message: str | None = None,
     ) -> dict[str, Any]:
         """Serve a filesystem read, falling back to the host when offline.
 
@@ -631,6 +632,7 @@ def register_resources_routes(
                 conversation,
                 params=runner_params,
                 timeout=runner_timeout,
+                unsupported_endpoint_message=unsupported_endpoint_message,
             )
         except OmnigentError as exc:
             # Only the runner-offline case is a candidate for the host
@@ -640,7 +642,15 @@ def register_resources_routes(
                 raise
             runner_offline = exc
 
-        host_workspace = await host_workspace_resolver() if host_workspace_resolver else None
+        host_available = (
+            host_registry is not None
+            and conversation.host_id
+            and conversation.workspace
+            and host_registry.get(conversation.host_id) is not None
+        )
+        host_workspace = (
+            await host_workspace_resolver() if host_workspace_resolver and host_available else None
+        )
         payload = await _read_workspace_via_host(
             session_id,
             conversation,
@@ -2596,32 +2606,130 @@ def register_resources_routes(
         q: str = Query(min_length=1, max_length=4096, pattern=r".*\S.*"),
         case_sensitive: bool = False,
         regex: bool = False,
+        whole_word: bool = False,
+        use_ignore: bool = True,
+        path: str = Query(default="", max_length=4096),
         include: str = Query(default="", max_length=4096),
         exclude: str = Query(default="", max_length=4096),
         limit: int = Query(default=500, ge=1, le=500),
     ) -> Any:
-        """Search the session workspace with the same access gate as file reads."""
+        """Search workspace or browsed-folder text through the runner or idle host."""
         flags = getattr(request.app.state, "feature_flags", FeatureFlags())
         if not flags.enabled(Feature.WORKSPACE_CONTENT_SEARCH):
             raise HTTPException(status_code=404, detail="Workspace content search is disabled")
-        conv = await _authorize_browse_read(session_id, request)
-        return await _proxy_get_to_runner(
+        _, path = _resolve_browse_path(request, path)
+        if ".." in path.split("/"):
+            raise HTTPException(status_code=400, detail="Parent path segments are not permitted")
+        conv = await _authorize_browse_read(session_id, request, path)
+        params = {
+            "q": q,
+            "case_sensitive": str(case_sensitive).lower(),
+            "regex": str(regex).lower(),
+            "whole_word": str(whole_word).lower(),
+            "use_ignore": str(use_ignore).lower(),
+            "path": path,
+            "include": include,
+            "exclude": exclude,
+            "limit": str(limit),
+        }
+
+        async def host_root() -> str:
+            root = path if path.startswith("/") else str(Path(conv.workspace or "") / path)
+            return await _authorize_absolute_browse(conv, root)
+
+        return await _fs_get_with_host_fallback(
             session_id,
-            f"/v1/sessions/{session_id}/resources/environments/{environment_id}/content-search",
             conv,
-            params={
-                "q": q,
-                "case_sensitive": str(case_sensitive).lower(),
-                "regex": str(regex).lower(),
+            op="content_search",
+            host_params={
+                "query": q,
+                "case_sensitive": case_sensitive,
+                "regex": regex,
+                "whole_word": whole_word,
+                "use_ignore": use_ignore,
                 "include": include,
                 "exclude": exclude,
-                "limit": str(limit),
+                "limit": limit,
+                "path_prefix": path,
             },
-            timeout=25.0,
+            runner_path=f"/v1/sessions/{session_id}/resources/environments/{_runner_environment_segment(environment_id)}/content-search",
+            runner_params=params,
+            host_workspace_resolver=host_root,
+            runner_timeout=25.0,
             unsupported_endpoint_message=(
                 "Session runner does not support content search; update the host and restart the session"
             ),
         )
+
+    @router.post(
+        "/sessions/{session_id}/resources/environments/{environment_id}/content-replace",
+        response_model=None,
+        dependencies=[Depends(require_json_content_type)],
+    )
+    async def replace_environment_content(
+        request: Request,
+        session_id: str,
+        environment_id: str,
+    ) -> Any:
+        """Require write access before previewing, applying or undoing replacements."""
+        flags = getattr(request.app.state, "feature_flags", FeatureFlags())
+        if not flags.enabled(Feature.WORKSPACE_CONTENT_SEARCH):
+            raise HTTPException(status_code=404, detail="Workspace content search is disabled")
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("path", ""), str):
+            raise HTTPException(status_code=400, detail="Invalid replacement request")
+        body = {**body, "_actor": str(_get_user_id(request, auth_provider) or "local")}
+        path = body.get("path", "")
+        if ".." in path.split("/"):
+            raise HTTPException(status_code=400, detail="Parent path segments are not permitted")
+        conv = await _validate_session(
+            session_id, request, _browse_level(path, within_workspace=LEVEL_EDIT)
+        )
+        runner_path = f"/v1/sessions/{session_id}/resources/environments/{_runner_environment_segment(environment_id)}/content-replace"
+        try:
+            status, payload = await _proxy_post_to_runner(
+                session_id, runner_path, body, conv, timeout=35.0
+            )
+        except (OmnigentError, HTTPException) as error:
+            if isinstance(error, OmnigentError) and error.code != ErrorCode.RUNNER_UNAVAILABLE:
+                raise
+            if isinstance(error, HTTPException) and not (
+                error.status_code == 502
+                and error.detail == "no runner available for resource access"
+            ):
+                raise
+            from omnigent.runner.environment_filesystem import resolve_browse_target
+
+            reach = await _environment_reach_for_session(conv)
+            if reach is None:
+                raise HTTPException(
+                    status_code=403, detail="Session has no writable filesystem"
+                ) from error
+            roots, unconfined, workspace = reach
+            root = str(
+                resolve_browse_target(
+                    path if path.startswith("/") else str(Path(workspace) / path),
+                    roots,
+                    unconfined=unconfined,
+                    need_write=True,
+                )
+            )
+            payload = await _write_workspace_via_host(
+                session_id,
+                conv,
+                "content_replace",
+                {"root": root, "body": body},
+                timeout=35.0,
+                uncertain_failure_detail="Replacement result unavailable. Refresh files before retrying.",
+            )
+            if payload is None:
+                raise error
+            status = 400 if payload.get("error") else 200
+        if status >= 400:
+            return JSONResponse(payload, status_code=status)
+        if body.get("action") in {"apply", "undo"}:
+            _publish_changed_files_invalidated(session_id, environment_id)
+        return payload
 
     @router.get(
         "/sessions/{session_id}/resources/environments/{environment_id}/search",
@@ -3029,6 +3137,89 @@ def register_resources_routes(
             ),
         )
 
+    @router.post(
+        "/sessions/{session_id}/resources/environments/{environment_id}/filesystem-operations",
+        dependencies=[Depends(require_json_content_type)],
+        response_model=None,
+    )
+    async def operate_environment_filesystem(
+        session_id: str, environment_id: str, request: Request
+    ) -> Any:
+        from omnigent.runner.filesystem_operations import operation_paths
+
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > 256 * 1024:
+                raise HTTPException(status_code=413, detail="Filesystem request exceeds 256 KiB")
+        import json
+
+        try:
+            body = json.loads(raw)
+            if not isinstance(body, dict):
+                raise ValueError("Expected a filesystem operation")
+            paths = operation_paths(body)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if body["operation"].startswith("archive"):
+            conv, _owner = await _authorize_browse_read_with_owner(
+                session_id, request, paths[0][0]
+            )
+            for path, _write in paths[1:]:
+                await _authorize_browse_read_with_owner(session_id, request, path)
+        else:
+            conv = await _validate_session(
+                session_id,
+                request,
+                max(_browse_level(path, within_workspace=LEVEL_EDIT) for path, _write in paths),
+            )
+        body = {key: value for key, value in body.items() if not key.startswith("_")}
+        body["_owner"] = _get_user_id(request, auth_provider) or "local-owner"
+        runner_path = (
+            f"/v1/sessions/{session_id}/resources/environments/"
+            f"{_runner_environment_segment(environment_id)}/filesystem-operations"
+        )
+        try:
+            status, result = await _proxy_post_to_runner(
+                session_id, runner_path, body, conv, timeout=125
+            )
+        except OmnigentError as exc:
+            if exc.code != ErrorCode.RUNNER_UNAVAILABLE:
+                raise
+            reach = await _environment_reach_for_session(conv)
+            if reach is None or environment_id != "default":
+                raise
+            roots, unconfined, _workspace = reach
+            host_body = {
+                **body,
+                "_roots": [
+                    {"path": str(root.path), "access": root.access, "kind": root.kind}
+                    for root in roots
+                ],
+                "_unconfined": unconfined,
+            }
+            result = await _write_workspace_via_host(
+                session_id,
+                conv,
+                op="filesystem_operation",
+                host_params=host_body,
+                timeout=125,
+                uncertain_failure_detail="Filesystem operation lost its response; refresh before retrying because it may have completed",
+            )
+            if result is None:
+                raise
+            status = result.get("status", 200)
+        if result.get("affected_paths"):
+            _publish_changed_files_invalidated(session_id, environment_id)
+        if status >= 400:
+            raise HTTPException(
+                status_code=status,
+                detail=result.get("error")
+                or result.get("detail")
+                or "Filesystem operation failed",
+            )
+        return result
+
     @router.put(
         "/sessions/{session_id}/resources/environments"
         "/{environment_id}/filesystem/{relative_path:path}",
@@ -3105,6 +3296,7 @@ def register_resources_routes(
         session_id: str,
         environment_id: str,
         relative_path: str,
+        recursive: bool = Query(default=False),
     ) -> Any:
         """
         Delete a file or directory in an environment.
@@ -3117,6 +3309,8 @@ def register_resources_routes(
         """
         _, relative_path = _resolve_browse_path(request, relative_path)
         path = _mutating_runner_path(session_id, environment_id, relative_path)
+        if recursive:
+            path += "?recursive=true"
         return await _proxy_fs_response(
             session_id,
             "DELETE",

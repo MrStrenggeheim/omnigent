@@ -905,6 +905,9 @@ async def test_content_search_forwards_options(
         "include": "src/**, *.{py,txt}",
         "exclude": "**/tests/**, a & b/**",
         "limit": "7",
+        "whole_word": "false",
+        "use_ignore": "true",
+        "path": "",
     }
     response = await client.get(
         path, params=params, headers={"X-Forwarded-Email": "owner@example.com"}
@@ -1111,3 +1114,122 @@ async def test_pr_edit_requires_a_json_body(
 
     assert resp.status_code == 415, resp.text
     assert runner_client.posts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("caller", "operation", "parameters", "expected"),
+    [
+        ("viewer@example.com", "mkdir", {"path": "new"}, 403),
+        ("owner@example.com", "mkdir", {"path": "new"}, 200),
+        ("owner@example.com", "mkdir", {"path": "/private/new"}, 403),
+        ("owner@example.com", "mkdir", {"path": r"C:\\private\\new"}, 403),
+        ("real-owner@example.com", "mkdir", {"path": "/private/new"}, 200),
+        (
+            "owner@example.com",
+            "copy",
+            {"entries": [{"source": "/private/file", "destination": "file"}]},
+            403,
+        ),
+        (
+            "owner@example.com",
+            "copy",
+            {"entries": [{"source": "file", "destination": "/private/file"}]},
+            403,
+        ),
+        ("viewer@example.com", "archive", {"paths": ["file"]}, 403),
+        ("owner@example.com", "mkdir", {"path": "../escape"}, 400),
+        ("owner@example.com", "mkdir", {"path": ".omnigent-trash/item"}, 400),
+    ],
+)
+async def test_explorer_operations_gate_every_source_and_destination(
+    client: httpx.AsyncClient,
+    runner_client: _RecordingRunnerClient,
+    caller: str,
+    operation: str,
+    parameters: dict[str, Any],
+    expected: int,
+) -> None:
+    endpoint = "/v1/sessions/conv_share/resources/environments/default/filesystem-operations"
+    response = await client.post(
+        endpoint,
+        json={"operation": operation, **parameters, "_owner": "forged", "_unconfined": True},
+        headers={"X-Forwarded-Email": caller},
+    )
+    assert response.status_code == expected, response.text
+    if expected == 200:
+        forwarded = runner_client.posts[-1][1]
+        assert forwarded["_owner"] == caller
+        assert "_unconfined" not in forwarded
+    else:
+        assert runner_client.posts == []
+
+
+@pytest.mark.asyncio
+async def test_explorer_archive_obeys_workspace_sharing_and_request_bounds(
+    client: httpx.AsyncClient, runner_client: _RecordingRunnerClient
+) -> None:
+    endpoint = "/v1/sessions/conv_open/resources/environments/default/filesystem-operations"
+    response = await client.post(
+        endpoint,
+        json={"operation": "archive_begin", "paths": ["file"]},
+        headers={"X-Forwarded-Email": "viewer@example.com"},
+    )
+    assert response.status_code == 200, response.text
+    runner_client.posts.clear()
+    oversized = await client.post(
+        endpoint,
+        json={"operation": "upload", "path": "file", "content_base64": "x" * 300000},
+        headers={"X-Forwarded-Email": "real-owner@example.com"},
+    )
+    assert oversized.status_code == 413
+    assert runner_client.posts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "caller,path,expected",
+    [
+        ("viewer@example.com", "", 403),
+        ("owner@example.com", "", 200),
+        ("owner@example.com", "/private", 403),
+        ("real-owner@example.com", "/private", 200),
+    ],
+)
+async def test_content_replace_requires_edit_and_absolute_scope_owner(
+    client: httpx.AsyncClient,
+    runner_client: _RecordingRunnerClient,
+    caller: str,
+    path: str,
+    expected: int,
+) -> None:
+    endpoint = "/v1/sessions/conv_share/resources/environments/default/content-replace"
+    response = await client.post(
+        endpoint,
+        json={"action": "preview", "path": path, "matches": [], "_actor": "forged"},
+        headers={"X-Forwarded-Email": caller},
+    )
+    assert response.status_code == expected, response.text
+    assert bool(runner_client.posts) is (expected == 200)
+    if expected == 200:
+        assert runner_client.posts[0][1]["_actor"] == caller
+
+
+@pytest.mark.asyncio
+async def test_content_replace_does_not_retry_dispatched_transport_failure(
+    client: httpx.AsyncClient,
+    runner_client: _RecordingRunnerClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    post = AsyncMock(side_effect=ConnectionError("response was lost"))
+    monkeypatch.setattr(runner_client, "post", post)
+    response = await client.post(
+        "/v1/sessions/conv_share/resources/environments/default/content-replace",
+        json={"action": "apply", "matches": []},
+        headers={"X-Forwarded-Email": "owner@example.com"},
+    )
+    assert response.status_code == 502
+    assert post.await_count == 1
+    assert "unavailable" in response.text

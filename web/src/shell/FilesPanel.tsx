@@ -44,6 +44,7 @@ import { type ChangedSort, FlatFileList } from "./FlatFileList";
 import { FolderTree } from "./FolderTree";
 import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { useScrollRestore } from "./useScrollRestore";
+import { ExplorerActionsProvider, ExplorerToolbar } from "./ExplorerActions";
 
 interface FilesPanelProps {
   conversationId?: string;
@@ -229,6 +230,13 @@ function SearchFilterInput({
  */
 const browseLocationCache = new Map<string, string>();
 
+export function readBrowseLocation(
+  conversationId: string,
+  workspaceRoot: string | null = null,
+): string {
+  return relativizeToWorkspace(browseLocationCache.get(conversationId) ?? null, workspaceRoot);
+}
+
 /**
  * Right-side Files card. Always visible on desktop.
  *
@@ -307,6 +315,8 @@ export function FilesPanel({
     () => (conversationId && browseLocationCache.get(conversationId)) || null,
   );
   const [browseError, setBrowseError] = useState<string | null>(null);
+  const [revealPath, setRevealPath] = useState<string | null>(null);
+  const [revealToken, setRevealToken] = useState(0);
   // On an in-place conversation switch (no remount), land on the NEW
   // session's own cached location or its root — never the previous
   // session's directory. The ref keeps mount itself from wiping the seed.
@@ -335,6 +345,11 @@ export function FilesPanel({
         else browseLocationCache.set(conversationId, next);
       }
       setBrowseLocation(next);
+      window.dispatchEvent(
+        new CustomEvent("omnigent:browse-location-changed", {
+          detail: { conversationId, location: relativizeToWorkspace(next, workspaceRoot) },
+        }),
+      );
     },
     [workspaceRoot, conversationId],
   );
@@ -470,160 +485,150 @@ export function FilesPanel({
   // cached before it slept still renders.
   const showAsleepHint = sandboxAsleep && !dataReady;
 
+  // The host may change files while its session runner sleeps. Refresh only
+  // the visible panel and expanded directories, never a recursive home scan.
+  const liveRefresh = useRef(refreshFiles);
+  liveRefresh.current = refreshFiles;
+  useEffect(() => {
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void liveRefresh.current();
+    };
+    const timer = setInterval(refreshVisible, 10_000);
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [conversationId, locationParam]);
+
   return (
-    <div
-      className={cn(
-        "@container/filespanel overflow-hidden bg-card",
-        fillHeight ? "flex h-full min-h-0 flex-col" : "flex min-h-0 flex-col",
-      )}
+    <ExplorerActionsProvider
+      key={`${conversationId}:${flatView}:${locationParam}`}
+      conversationId={conversationId}
+      base={flatView ? "" : locationParam}
+      workspaceRoot={workspaceRoot}
+      hostId={session?.hostId ?? null}
+      writable={
+        (session?.permissionLevel == null || session.permissionLevel >= 2) &&
+        (!locationParam.startsWith("/") || isOwnerLevel(session?.permissionLevel ?? null))
+      }
+      onRefresh={refreshFiles}
+      onRevealFile={(path) => {
+        exitTreeSearch();
+        const absolute = path.startsWith("/")
+          ? path
+          : joinBrowseLocation(workspaceRoot ?? "", path);
+        if (workingDir && !absolute.startsWith(`${workingDir.replace(/\/$/, "")}/`)) {
+          navigateTo(absolute.slice(0, absolute.lastIndexOf("/")) || "/");
+        }
+        if (path.split("/").some((part) => part.startsWith("."))) onShowHiddenChange(true);
+        setRevealPath(relativizeToWorkspace(path, workspaceRoot));
+        setRevealToken((token) => token + 1);
+      }}
     >
-      {/* Header — single row: [workingDir] [copy] [close?] */}
-      <div className="flex h-11 shrink-0 items-center gap-[2px] px-2">
-        {flatView && <h2 className="shrink-0 pl-1 font-medium text-ui">Changes</h2>}
-        {!flatView && workingDir && workspaceRoot && (
-          <BrowseLocationBar
-            current={workingDir}
-            workspace={workspaceRoot}
-            hostId={session?.hostId ?? null}
-            canBrowseOutside={isOwnerLevel(session?.permissionLevel ?? null)}
-            reach={envQuery.data?.reachable ?? null}
-            onNavigate={navigateTo}
-            error={locationError}
-          />
+      <div
+        className={cn(
+          "@container/filespanel overflow-hidden bg-card",
+          fillHeight ? "flex h-full min-h-0 flex-col" : "flex min-h-0 flex-col",
         )}
-        {servedFromHost && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  data-testid="files-host-served-badge"
-                  className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                >
-                  <MoonIcon className="size-3 shrink-0" />
-                  Asleep
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                Agent is asleep — files shown live from the host. Send a message to wake it.
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-        <div className="ml-auto flex items-center gap-[2px]">
-          {!flatView && workingDir && (
-            // Its own provider: the header has no TooltipProvider ancestor
-            // (each control here brings one), unlike the file rows.
+      >
+        {/* Header — single row: [workingDir] [copy] [close?] */}
+        <div className="flex h-11 shrink-0 items-center gap-[2px] px-2">
+          {flatView && <h2 className="shrink-0 pl-1 font-medium text-ui">Changes</h2>}
+          {!flatView && workingDir && workspaceRoot && (
+            <BrowseLocationBar
+              current={workingDir}
+              workspace={workspaceRoot}
+              hostId={session?.hostId ?? null}
+              canBrowseOutside={isOwnerLevel(session?.permissionLevel ?? null)}
+              reach={envQuery.data?.reachable ?? null}
+              onNavigate={navigateTo}
+              error={locationError}
+            />
+          )}
+          {servedFromHost && (
             <TooltipProvider>
-              <CopyPathButton path={workingDir} label="Copy folder path" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    data-testid="files-host-served-badge"
+                    className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                  >
+                    <MoonIcon className="size-3 shrink-0" />
+                    Asleep
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Agent is asleep — files shown live from the host. Send a message to wake it.
+                </TooltipContent>
+              </Tooltip>
             </TooltipProvider>
           )}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Refresh files"
-                  disabled={refreshingFiles}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
-                  onClick={() => void refreshFiles()}
-                >
-                  <RefreshCwIcon className={cn(refreshingFiles && "animate-spin")} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Refresh files</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {onClose && (
-            <button
-              type="button"
-              aria-label="Close files"
-              className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={onClose}
-            >
-              <XIcon className="size-4" />
-            </button>
-          )}
+          <div className="ml-auto flex items-center gap-[2px]">
+            {!flatView && workingDir && (
+              // Its own provider: the header has no TooltipProvider ancestor
+              // (each control here brings one), unlike the file rows.
+              <TooltipProvider>
+                <CopyPathButton path={workingDir} label="Copy folder path" />
+              </TooltipProvider>
+            )}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Refresh files"
+                    disabled={refreshingFiles}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    onClick={() => void refreshFiles()}
+                  >
+                    <RefreshCwIcon className={cn(refreshingFiles && "animate-spin")} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Refresh files</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {onClose && (
+              <button
+                type="button"
+                aria-label="Close files"
+                className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={onClose}
+              >
+                <XIcon className="size-4" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      {/* Content */}
-      <div className="shrink-0 border-t border-border" />
-      {/* Search toolbar — the Changed | All scope switch leads, then the
+        {/* Content */}
+        <ExplorerToolbar />
+        <div className="shrink-0 border-t border-border" />
+        {/* Search toolbar — the Changed | All scope switch leads, then the
               search field, then the per-view trailing control (Sort for the
               changed list, glob filters for the tree). Lives outside the
               scroll container so negative margins aren't clipped. */}
-      {flatView && (
-        <div
-          className="shrink-0 flex items-center gap-2 px-2 py-2 @max-[400px]/filespanel:flex-col @max-[400px]/filespanel:items-stretch"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-[2px]">
-            <div className="flex min-w-0 flex-1 items-center gap-[6px] rounded-lg border border-border px-[10px] py-[4px] transition-colors focus-within:border-border-strong">
-              <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-              <input
-                aria-label="Search changed files"
-                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                onChange={(event) => setChangedSearch(event.target.value)}
-                placeholder="Find changed files by name"
-                type="search"
-                value={changedSearch}
-              />
-            </div>
-            <SortSelector sort={changedSort} onChange={onSortChange} />
-            <HiddenFilesToggle
-              showHidden={showHidden}
-              onToggle={() => onShowHiddenChange(!showHidden)}
-              hiddenCount={hiddenFilesCount}
-            />
-          </div>
-        </div>
-      )}
-      {!flatView && (
-        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-2 px-2 py-2 @max-[400px]/filespanel:flex-col @max-[400px]/filespanel:items-stretch">
+        {flatView && (
+          <div
+            className="shrink-0 flex items-center gap-2 px-2 py-2 @max-[400px]/filespanel:flex-col @max-[400px]/filespanel:items-stretch"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex min-w-0 flex-1 items-center gap-[2px]">
               <div className="flex min-w-0 flex-1 items-center gap-[6px] rounded-lg border border-border px-[10px] py-[4px] transition-colors focus-within:border-border-strong">
                 <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
                 <input
-                  aria-label="Search all files"
+                  aria-label="Search changed files"
                   className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  onChange={(event) => setTreeSearch(event.target.value)}
-                  placeholder="Find files by name"
+                  onChange={(event) => setChangedSearch(event.target.value)}
+                  placeholder="Find changed files by name"
                   type="search"
-                  value={treeSearch}
+                  value={changedSearch}
                 />
               </div>
               <SortSelector sort={changedSort} onChange={onSortChange} />
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={showSearchFilters ? "Hide search filters" : "Show search filters"}
-                      aria-expanded={showSearchFilters}
-                      className={cn(
-                        "shrink-0",
-                        showSearchFilters || treeFiltersActive
-                          ? "text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() => setShowSearchFilters((v) => !v)}
-                    >
-                      <FilterIcon />
-                      {treeFiltersActive && !showSearchFilters && (
-                        <span
-                          className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-primary"
-                          aria-hidden
-                        />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Files to include / exclude</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
               <HiddenFilesToggle
                 showHidden={showHidden}
                 onToggle={() => onShowHiddenChange(!showHidden)}
@@ -631,84 +636,145 @@ export function FilesPanel({
               />
             </div>
           </div>
-          {showSearchFilters && (
-            <div className="flex flex-col gap-1.5 border-border border-t px-3 py-2">
-              <SearchFilterInput
-                label="files to include"
-                placeholder="e.g. *.ts, src/**"
-                value={treeInclude}
-                onChange={setTreeInclude}
-              />
-              <SearchFilterInput
-                label="files to exclude"
-                placeholder="e.g. **/node_modules, *.test.ts"
-                value={treeExclude}
-                onChange={setTreeExclude}
-              />
+        )}
+        {!flatView && (
+          <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 px-2 py-2 @max-[400px]/filespanel:flex-col @max-[400px]/filespanel:items-stretch">
+              <div className="flex min-w-0 flex-1 items-center gap-[2px]">
+                <div className="flex min-w-0 flex-1 items-center gap-[6px] rounded-lg border border-border px-[10px] py-[4px] transition-colors focus-within:border-border-strong">
+                  <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <input
+                    aria-label="Search all files"
+                    className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    onChange={(event) => setTreeSearch(event.target.value)}
+                    placeholder="Find files by name"
+                    type="search"
+                    value={treeSearch}
+                  />
+                </div>
+                <SortSelector sort={changedSort} onChange={onSortChange} />
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={
+                          showSearchFilters ? "Hide search filters" : "Show search filters"
+                        }
+                        aria-expanded={showSearchFilters}
+                        className={cn(
+                          "shrink-0",
+                          showSearchFilters || treeFiltersActive
+                            ? "text-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() => setShowSearchFilters((v) => !v)}
+                      >
+                        <FilterIcon />
+                        {treeFiltersActive && !showSearchFilters && (
+                          <span
+                            className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-primary"
+                            aria-hidden
+                          />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Files to include / exclude</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <HiddenFilesToggle
+                  showHidden={showHidden}
+                  onToggle={() => onShowHiddenChange(!showHidden)}
+                  hiddenCount={hiddenFilesCount}
+                />
+              </div>
             </div>
+            {showSearchFilters && (
+              <div className="flex flex-col gap-1.5 border-border border-t px-3 py-2">
+                <SearchFilterInput
+                  label="files to include"
+                  placeholder="e.g. *.ts, src/**"
+                  value={treeInclude}
+                  onChange={setTreeInclude}
+                />
+                <SearchFilterInput
+                  label="files to exclude"
+                  placeholder="e.g. **/node_modules, *.test.ts"
+                  value={treeExclude}
+                  onChange={setTreeExclude}
+                />
+              </div>
+            )}
+          </div>
+        )}
+        <section
+          role="tree"
+          aria-label={flatView ? "Changed files" : "Workspace files"}
+          aria-multiselectable="true"
+          ref={scrollRef}
+          className={cn(
+            "overflow-y-auto px-2 pb-2",
+            flatView ? "pt-1" : "pt-0",
+            fillHeight ? "min-h-0 flex-1" : "max-h-72",
           )}
-        </div>
-      )}
-      <section
-        ref={scrollRef}
-        className={cn(
-          "overflow-y-auto px-2 pb-2",
-          flatView ? "pt-1" : "pt-0",
-          fillHeight ? "min-h-0 flex-1" : "max-h-72",
-        )}
-        onScroll={handleScroll}
-      >
-        {showAsleepHint && <RunnerAsleepHint sandboxOffline />}
-        {!showAsleepHint && flatView && (
-          <FlatFileList
-            files={changedQuery.data?.data}
-            isLoading={changedQuery.isLoading}
-            isError={changedQuery.isError}
-            error={changedQuery.error}
-            onFileSelect={onFileSelect}
-            showHidden={showHidden}
-            onShowHidden={() => onShowHiddenChange(true)}
-            searchQuery={changedSearch}
-            sort={changedSort}
-            conversationId={conversationId}
-            runnerWentOffline={runnerWentOffline}
-          />
-        )}
-        {!showAsleepHint && !flatView && (
-          <FolderTree
-            files={allFilesQuery.data?.data}
-            isLoading={allFilesQuery.isLoading}
-            isError={allFilesQuery.isError}
-            error={allFilesQuery.error}
-            onFileSelect={openTreeFile}
-            conversationId={conversationId}
-            showHidden={showHidden}
-            onShowHidden={() => onShowHiddenChange(true)}
-            changedFiles={changedQuery.data?.data}
-            sort={changedSort}
-            runnerWentOffline={runnerWentOffline}
-            searchQuery={debouncedTreeSearch}
-            // Suppress keep-previous placeholder data: while a new query is in
-            // flight React Query returns the PRIOR term's results (isPlaceholderData),
-            // which would otherwise render as if they matched the new term. Drop
-            // them so the tree shows "Searching…" until the real results land.
-            searchResults={
-              treeSearchQuery.isPlaceholderData ? undefined : treeSearchQuery.data?.files
-            }
-            searchTruncated={
-              !treeSearchQuery.isPlaceholderData && (treeSearchQuery.data?.truncated ?? false)
-            }
-            isSearching={treeSearchQuery.isFetching}
-            isSearchError={treeSearchQuery.isError}
-            searchError={treeSearchQuery.error instanceof Error ? treeSearchQuery.error : null}
-            browseLocation={locationParam}
-            onNavigateDir={navigateToChild}
-            onExitSearch={exitTreeSearch}
-            scrollParentRef={scrollRef}
-            refreshToken={directoryRefreshToken}
-          />
-        )}
-      </section>
-    </div>
+          onScroll={handleScroll}
+        >
+          {showAsleepHint && <RunnerAsleepHint sandboxOffline />}
+          {!showAsleepHint && flatView && (
+            <FlatFileList
+              files={changedQuery.data?.data}
+              isLoading={changedQuery.isLoading}
+              isError={changedQuery.isError}
+              error={changedQuery.error}
+              onFileSelect={onFileSelect}
+              showHidden={showHidden}
+              onShowHidden={() => onShowHiddenChange(true)}
+              searchQuery={changedSearch}
+              sort={changedSort}
+              conversationId={conversationId}
+              runnerWentOffline={runnerWentOffline}
+            />
+          )}
+          {!showAsleepHint && !flatView && (
+            <FolderTree
+              files={allFilesQuery.data?.data}
+              isLoading={allFilesQuery.isLoading}
+              isError={allFilesQuery.isError}
+              error={allFilesQuery.error}
+              onFileSelect={openTreeFile}
+              conversationId={conversationId}
+              showHidden={showHidden}
+              onShowHidden={() => onShowHiddenChange(true)}
+              changedFiles={changedQuery.data?.data}
+              sort={changedSort}
+              runnerWentOffline={runnerWentOffline}
+              searchQuery={debouncedTreeSearch}
+              // Suppress keep-previous placeholder data: while a new query is in
+              // flight React Query returns the PRIOR term's results (isPlaceholderData),
+              // which would otherwise render as if they matched the new term. Drop
+              // them so the tree shows "Searching…" until the real results land.
+              searchResults={
+                treeSearchQuery.isPlaceholderData ? undefined : treeSearchQuery.data?.files
+              }
+              searchTruncated={
+                !treeSearchQuery.isPlaceholderData && (treeSearchQuery.data?.truncated ?? false)
+              }
+              isSearching={treeSearchQuery.isFetching}
+              isSearchError={treeSearchQuery.isError}
+              searchError={treeSearchQuery.error instanceof Error ? treeSearchQuery.error : null}
+              browseLocation={locationParam}
+              onNavigateDir={navigateToChild}
+              onExitSearch={exitTreeSearch}
+              scrollParentRef={scrollRef}
+              refreshToken={directoryRefreshToken}
+              revealPath={revealPath}
+              revealToken={revealToken}
+            />
+          )}
+        </section>
+      </div>
+    </ExplorerActionsProvider>
   );
 }

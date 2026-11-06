@@ -113,6 +113,8 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 ## Features
 
+- [Workspace Explorer](./workspace-explorer.md) covers file operations, transfers, selection, recovery and navigation on desktop and mobile.
+
 - [Session orchestration](./session-orchestration.md) covers private-owner
   messaging, top-level worker creation, polling results and sharing restrictions.
 
@@ -182,7 +184,7 @@ map an area, remove it here in the same change.
   native edit-tool approvals are mapped)
 - Sub-agents and the agent info popover: `tests/e2e_ui/agents/` (only Claude-native
   discovery and idle-runner performance are mapped in Native harnesses)
-- Files and the workspace browser: `tests/e2e_ui/files/`, `tests/browser_ui/files/`
+- Files and the workspace browser: `tests/e2e_ui/files/`, `tests/browser_ui/files/` (Explorer operations and content search are mapped; other file previews remain partly mapped)
 - Comments: `tests/e2e_ui/comments/`
 - Sharing and session permissions: `tests/e2e_ui/collaboration/`
 - GitHub integration: `tests/e2e_ui/github/`

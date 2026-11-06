@@ -68,6 +68,7 @@ vi.mock("./PullRequestPanel", () => ({
   PullRequestPanel: () => <div data-testid="github-panel">Pull request details</div>,
 }));
 vi.mock("./FilesPanel", () => ({
+  readBrowseLocation: () => "",
   FilesPanel: () => <div data-testid="files-panel" />,
 }));
 vi.mock("./FileViewer", () => ({

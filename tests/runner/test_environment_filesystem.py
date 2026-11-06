@@ -3406,3 +3406,282 @@ def test_download_over_the_wire_fails_instead_of_truncating(
     message = str(excinfo.value)
     assert str(_DOWNLOAD_CHUNK) in message
     assert str(_SHRINK_SIZE) in message
+
+
+@pytest.mark.asyncio
+async def test_explorer_operations_transport_upload_archive_and_trash(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    """Real sandbox helpers preserve binary chunks across the runner endpoint."""
+    import base64
+    import io
+    import zipfile
+
+    endpoint = "/v1/sessions/conv_test/resources/environments/default/filesystem-operations"
+    binary = os.urandom(140000)
+    begin = await client.post(
+        endpoint,
+        json={"operation": "upload_begin", "path": "new/sub/data.bin", "size": len(binary)},
+    )
+    assert begin.status_code == 200, begin.text
+    common = {"path": "new/sub/data.bin", "upload_id": begin.json()["upload_id"]}
+    for offset in range(0, len(binary), 65536):
+        response = await client.post(
+            endpoint,
+            json={
+                **common,
+                "operation": "upload_chunk",
+                "offset": offset,
+                "content_base64": base64.b64encode(binary[offset : offset + 65536]).decode(),
+            },
+        )
+        assert response.status_code == 200, response.text
+    finished = await client.post(endpoint, json={**common, "operation": "upload_finish"})
+    assert finished.status_code == 200, finished.text
+    assert (workspace / "new/sub/data.bin").read_bytes() == binary
+    outside = workspace.parent / "outside-private.txt"
+    outside.write_text("target contents stay outside the archive")
+    (workspace / "new/sub/external-link").symlink_to(outside)
+    copied_link = await client.post(
+        endpoint,
+        json={
+            "operation": "copy",
+            "entries": [{"source": "new/sub/external-link", "destination": "new/sub/copied-link"}],
+        },
+    )
+    assert copied_link.status_code == 200, copied_link.text
+    assert (workspace / "new/sub/copied-link").is_symlink()
+    archived = await client.post(endpoint, json={"operation": "archive_begin", "paths": ["new"]})
+    assert archived.status_code == 200, archived.text
+    archive = await client.post(
+        endpoint,
+        json={
+            "operation": "archive_chunk",
+            "paths": ["new"],
+            "archive_id": archived.json()["archive_id"],
+            "offset": 0,
+        },
+    )
+    assert archive.status_code == 200, archive.text
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode(archive.json()["content_base64"]))) as data:
+        assert data.read("new/sub/data.bin") == binary
+        assert data.read("new/sub/external-link") == os.fsencode(outside)
+    cleanup = await client.post(
+        endpoint,
+        json={
+            "operation": "archive_cancel",
+            "paths": ["new"],
+            "archive_id": archived.json()["archive_id"],
+        },
+    )
+    assert cleanup.status_code == 200
+    trashed = await client.post(
+        endpoint, json={"operation": "trash", "path": "", "paths": ["new"]}
+    )
+    assert trashed.status_code == 200, trashed.text
+    assert not (workspace / "new").exists()
+    restored = await client.post(
+        endpoint,
+        json={"operation": "restore", "path": "", "ids": [trashed.json()["items"][0]["id"]]},
+    )
+    assert restored.status_code == 200, restored.text
+    assert (workspace / "new/sub/data.bin").read_bytes() == binary
+
+
+@pytest.mark.asyncio
+async def test_content_search_occurrences_scope_and_ignore_controls(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    import hashlib
+
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    (workspace / "src" / "matches.txt").write_text("😀 needle needlework NEEDLE\n")
+    (workspace / "src" / ".gitignore").write_text("ignored.txt\n")
+    (workspace / "src" / "ignored.txt").write_text("needle\n")
+    (workspace / "src" / ".omnigent-trash").mkdir()
+    (workspace / "src" / ".omnigent-trash" / "private.txt").write_text("needle\n")
+    (workspace / "outside.txt").write_text("needle\n")
+    endpoint = "/v1/sessions/conv_test/resources/environments/default/content-search"
+    result = (
+        await client.get(endpoint, params={"q": "needle", "path": "src", "whole_word": "true"})
+    ).json()
+    assert [(match["path"], match["column"]) for match in result["matches"]] == [
+        ("src/matches.txt", 4),
+        ("src/matches.txt", 22),
+    ]
+    content = (workspace / "src" / "matches.txt").read_bytes()
+    assert all(
+        match["sha256"] == hashlib.sha256(content).hexdigest() for match in result["matches"]
+    )
+    assert (
+        content[result["matches"][0]["start_byte"] : result["matches"][0]["end_byte"]] == b"needle"
+    )
+    result = (
+        await client.get(endpoint, params={"q": "needle", "path": "src", "use_ignore": "false"})
+    ).json()
+    assert {match["path"] for match in result["matches"]} == {"src/matches.txt", "src/ignored.txt"}
+    assert len(result["matches"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_content_replace_preview_apply_undo_and_stale_guard(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    target = workspace / "src" / "replace.txt"
+    target.write_text("😀 needle Needle NEEDLE\r\n")
+    base = "/v1/sessions/conv_test/resources/environments/default"
+    matches = (
+        await client.get(base + "/content-search", params={"q": "needle", "path": "src"})
+    ).json()["matches"]
+    assert len(matches) == 3
+    body = {
+        "action": "preview",
+        "path": "src",
+        "query": "needle",
+        "replacement": "thread",
+        "preserve_case": True,
+        "matches": matches,
+    }
+    result = (await client.post(base + "/content-replace", json=body)).json()
+    assert result["errors"] == []
+    assert [preview["after"] for preview in result["previews"]] == ["thread", "Thread", "THREAD"]
+    assert b"needle" in target.read_bytes()
+    result = (
+        await client.post(base + "/content-replace", json={**body, "action": "apply"})
+    ).json()
+    assert result["applied"] == ["replace.txt"]
+    assert target.read_bytes() == "😀 thread Thread THREAD\r\n".encode()
+    stale = (await client.post(base + "/content-replace", json={**body, "action": "apply"})).json()
+    assert stale["applied"] == []
+    assert "changed since search" in stale["errors"][0]["error"]
+    restored = (
+        await client.post(
+            base + "/content-replace",
+            json={"action": "undo", "path": "src", "undo_id": result["undo_id"]},
+        )
+    ).json()
+    assert restored["restored"] == ["replace.txt"]
+    assert target.read_bytes() == "😀 needle Needle NEEDLE\r\n".encode()
+
+
+@pytest.mark.asyncio
+async def test_content_replace_capture_groups_selection_and_undo_conflict(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    target = workspace / "src" / "groups.txt"
+    target.write_text("name=one name=two\n")
+    base = "/v1/sessions/conv_test/resources/environments/default"
+    query = "name=(\\w+)"
+    matches = (
+        await client.get(base + "/content-search", params={"q": query, "regex": "true"})
+    ).json()["matches"]
+    body = {
+        "action": "apply",
+        "query": query,
+        "regex": True,
+        "replacement": "$1=$$value",
+        "matches": [matches[1]],
+    }
+    result = (await client.post(base + "/content-replace", json=body)).json()
+    assert result["matches"] == 1
+    assert target.read_text() == "name=one two=$value\n"
+    target.write_text("newer external edit\n")
+    undo = (
+        await client.post(
+            base + "/content-replace", json={"action": "undo", "undo_id": result["undo_id"]}
+        )
+    ).json()
+    assert undo["restored"] == []
+    assert "newer edits" in undo["errors"][0]["error"]
+    assert undo["undo_id"] == result["undo_id"]
+    assert target.read_text() == "newer external edit\n"
+
+
+@pytest.mark.asyncio
+async def test_content_replace_rejects_symlinks_and_traversal(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    import hashlib
+
+    outside = workspace.parent / "replace-outside.txt"
+    outside.write_text("needle")
+    (workspace / "link.txt").symlink_to(outside)
+    base = "/v1/sessions/conv_test/resources/environments/default/content-replace"
+    for relative in ("link.txt", "../replace-outside.txt"):
+        match = {
+            "path": relative,
+            "sha256": hashlib.sha256(b"needle").hexdigest(),
+            "start_byte": 0,
+            "end_byte": 6,
+        }
+        result = (
+            await client.post(
+                base, json={"action": "apply", "replacement": "changed", "matches": [match]}
+            )
+        ).json()
+        assert result["applied"] == []
+        assert result["errors"]
+    assert outside.read_text() == "needle"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["runner", "idle-host"])
+async def test_content_replace_full_result_limit_avoids_argument_size_limit(
+    client: httpx.AsyncClient, workspace: Path, transport: str
+) -> None:
+    from omnigent.runner.content_replace import replace_content_local
+
+    target = workspace / "src" / "full-result.txt"
+    target.write_text(("x" * 195 + "needle" + "x" * 195 + "\n") * 500)
+    endpoint = "/v1/sessions/conv_test/resources/environments/default"
+    searched = (await client.get(endpoint + "/content-search", params={"q": "needle"})).json()
+    assert len(searched["matches"]) == 500
+    body = {
+        "action": "preview",
+        "query": "needle",
+        "replacement": "thread",
+        "matches": searched["matches"],
+    }
+    assert len(repr(body).encode()) > 128 * 1024
+    if transport == "runner":
+        preview = (await client.post(endpoint + "/content-replace", json=body)).json()
+    else:
+        preview = replace_content_local(str(workspace), {"body": body}, "full-limit-test")
+    assert "error" not in preview, preview
+    assert preview["errors"] == []
+    assert len(preview["previews"]) == 500
+    body["action"] = "apply"
+    if transport == "runner":
+        applied = (await client.post(endpoint + "/content-replace", json=body)).json()
+    else:
+        applied = replace_content_local(str(workspace), {"body": body}, "full-limit-test")
+    assert applied["matches"] == 500, applied
+    assert "needle" not in target.read_text()
+    assert target.read_text().count("thread") == 500
+
+
+@pytest.mark.asyncio
+async def test_content_replace_regex_anchors_match_later_lines(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    target = workspace / "src" / "anchors.txt"
+    target.write_text("keep\nalpha one\nalpha two\n")
+    endpoint = "/v1/sessions/conv_test/resources/environments/default"
+    query = "^alpha (\\w+)$"
+    result = (
+        await client.get(endpoint + "/content-search", params={"q": query, "regex": "true"})
+    ).json()
+    assert [match["line"] for match in result["matches"]] == [2, 3]
+    response = await client.post(
+        endpoint + "/content-replace",
+        json={
+            "action": "apply",
+            "query": query,
+            "regex": True,
+            "replacement": "$1 beta",
+            "matches": result["matches"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["errors"] == []
+    assert target.read_text() == "keep\none beta\ntwo beta\n"

@@ -1,0 +1,504 @@
+import userEvent from "@testing-library/user-event";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ExplorerActionsProvider,
+  ExplorerRowActions,
+  ExplorerToolbar,
+  useExplorerRow,
+  useExplorerTree,
+} from "./ExplorerActions";
+import { downloadBlob, filesystemOperation } from "@/lib/explorerOperations";
+import type { ExplorerEntry, FilesystemOperationResult } from "@/lib/explorerOperations";
+import type * as ExplorerOperationsModule from "@/lib/explorerOperations";
+import { ExplorerTransfersStatus } from "./ExplorerTransfersStatus";
+import {
+  dismissExplorerTransfer,
+  getExplorerTransfers,
+  transferIsActive,
+} from "@/lib/explorerTransfers";
+
+vi.mock("@/lib/explorerOperations", async (original) => ({
+  ...(await original<typeof ExplorerOperationsModule>()),
+  filesystemOperation: vi.fn(),
+  downloadBlob: vi.fn(),
+}));
+vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn(async () => {}) }));
+
+const entries = [
+  { path: "a.txt", directory: false },
+  { path: "b.txt", directory: false },
+  { path: "folder", directory: true },
+];
+const controls = { entries };
+const refresh = vi.fn(async () => {});
+function Row({ entry }: { entry: ExplorerEntry }) {
+  const row = useExplorerRow(entry.path, entry.directory);
+  return (
+    <div {...row.props} data-testid={`row-${entry.path}`}>
+      <button type="button">{entry.path}</button>
+      <ExplorerRowActions path={entry.path} directory={entry.directory} />
+    </div>
+  );
+}
+function Tree() {
+  useExplorerTree(controls);
+  return (
+    <>
+      {entries.map((entry) => (
+        <Row key={entry.path} entry={entry} />
+      ))}
+    </>
+  );
+}
+function setup({ writable = true, base = "src", conversationId = "test" } = {}) {
+  return render(
+    <>
+      <ExplorerActionsProvider
+        conversationId={conversationId}
+        base={base}
+        workspaceRoot="/work"
+        hostId="host"
+        writable={writable}
+        onRefresh={refresh}
+      >
+        <div>
+          <ExplorerToolbar />
+          <Tree />
+        </div>
+      </ExplorerActionsProvider>
+      <ExplorerTransfersStatus />
+    </>,
+  );
+}
+async function rowMenu(path: string) {
+  fireEvent.click(screen.getByRole("button", { name: `Actions for ${path}` }));
+  await screen.findByRole("menu");
+}
+const operation = vi.mocked(filesystemOperation);
+beforeEach(() => {
+  vi.clearAllMocks();
+  operation.mockReset().mockResolvedValue({});
+  for (const transfer of getExplorerTransfers()) dismissExplorerTransfer(transfer.conversationId);
+});
+afterEach(cleanup);
+
+describe("Explorer actions", () => {
+  it("creates files at the browsed location and reports collisions without closing the dialog", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "New file" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "new.txt" },
+    });
+    operation.mockRejectedValueOnce(new Error("File already exists"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("File already exists");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "next.txt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(operation).toHaveBeenLastCalledWith("test", {
+      operation: "create_file",
+      path: "src/next.txt",
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets touch users select multiple rows and trash them through the toolbar", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select a.txt" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select b.txt" }));
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to trash…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move to trash" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith("test", {
+        operation: "trash",
+        path: "src",
+        paths: ["src/a.txt", "src/b.txt"],
+      }),
+    );
+  });
+
+  it("handles Shift range selection and keyboard rename", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "a.txt" }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "folder" }), { shiftKey: true });
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByTestId("row-b.txt"), { key: "F2" });
+    expect(screen.getByRole("dialog", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("b.txt");
+  });
+
+  it("normalizes renamed paths in the event used to reconcile open tabs", async () => {
+    const changed = vi.fn();
+    window.addEventListener("omnigent:workspace-files-changed", changed);
+    setup();
+    await rowMenu("a.txt");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "renamed.txt" },
+    });
+    operation.mockResolvedValueOnce({
+      moved: [{ source: "/work/src/a.txt", destination: "/work/src/renamed.txt" }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(changed).toHaveBeenCalled());
+    expect((changed.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      conversationId: "test",
+      moves: [{ source: "src/a.txt", destination: "src/renamed.txt" }],
+      removed: [],
+    });
+    window.removeEventListener("omnigent:workspace-files-changed", changed);
+  });
+
+  it("keeps copies in workspace-relative scope when pasting into a folder", async () => {
+    setup();
+    await rowMenu("a.txt");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "New file" })).not.toBeDisabled(),
+    );
+    await rowMenu("folder");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Paste" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith("test", {
+        operation: "copy",
+        entries: [{ source: "src/a.txt", destination: "src/folder/a.txt" }],
+        overwrite: false,
+      }),
+    );
+  });
+
+  it("requires an explicit replace action before retrying a paste collision", async () => {
+    setup();
+    await rowMenu("a.txt");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "New file" })).not.toBeDisabled(),
+    );
+    operation.mockRejectedValueOnce(new Error("Destination already exists"));
+    await rowMenu("folder");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Paste" }));
+    const dialog = await screen.findByRole("dialog", { name: "Replace existing files?" });
+    expect(operation).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenLastCalledWith("test", {
+        operation: "copy",
+        entries: [{ source: "src/a.txt", destination: "src/folder/a.txt" }],
+        overwrite: true,
+      }),
+    );
+  });
+
+  it("moves a dragged selection into its target folder", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select a.txt" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select b.txt" }));
+    const payload = new Map<string, string>();
+    const transfer = {
+      setData: (type: string, value: string) => payload.set(type, value),
+      getData: (type: string) => payload.get(type) ?? "",
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    fireEvent.dragStart(screen.getByTestId("row-a.txt"), { dataTransfer: transfer });
+    fireEvent.drop(screen.getByTestId("row-folder"), { dataTransfer: transfer });
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith("test", {
+        operation: "move",
+        entries: [
+          { source: "src/a.txt", destination: "src/folder/a.txt" },
+          { source: "src/b.txt", destination: "src/folder/b.txt" },
+        ],
+        overwrite: false,
+      }),
+    );
+  });
+
+  it("disables mutations for read-only viewers and still offers folder search", async () => {
+    const search = vi.fn();
+    window.addEventListener("omnigent:open-content-search", search);
+    setup({ writable: false });
+    expect(screen.getByRole("button", { name: "New file" })).toBeDisabled();
+    await rowMenu("folder");
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Search in folder…" }));
+    expect((search.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      conversationId: "test",
+      location: "src/folder",
+    });
+    window.removeEventListener("omnigent:open-content-search", search);
+  });
+
+  it("lists and restores recoverable deletions", async () => {
+    operation.mockResolvedValueOnce({
+      items: [
+        { id: "deleted", original_path: "/work/src/old.txt", trashed_at: "today", type: "file" },
+      ],
+    });
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restore deleted files…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Restore deleted files" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith("test", {
+        operation: "restore",
+        path: "src",
+        ids: ["deleted"],
+      }),
+    );
+  });
+
+  it("downloads folder archives in chunks and cleans the staged ZIP", async () => {
+    operation.mockImplementation(async (_id, body) => {
+      if (body.operation === "archive_begin")
+        return { archive_id: "zip", size: 4, filename: "folder.zip" };
+      if (body.operation === "archive_chunk")
+        return { content_base64: body.offset === 0 ? "AAE=" : "Av8=" };
+      return {};
+    });
+    setup();
+    await rowMenu("folder");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Download as ZIP" }));
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalled());
+    expect(vi.mocked(downloadBlob).mock.calls[0][0].size).toBe(4);
+    expect(vi.mocked(downloadBlob).mock.calls[0][1]).toBe("folder.zip");
+    expect(operation).toHaveBeenLastCalledWith("test", {
+      operation: "archive_cancel",
+      paths: ["src/folder"],
+      archive_id: "zip",
+    });
+  });
+
+  it("uploads binary chunks with ordered offsets and only commits after completion", async () => {
+    const file = new File([new Uint8Array([0, 1, 2, 255])], "binary.dat");
+    vi.spyOn(file, "slice").mockImplementation(
+      (start = 0, end = 4) =>
+        ({
+          arrayBuffer: async () => new Uint8Array([0, 1, 2, 255]).slice(start, end).buffer,
+        }) as Blob,
+    );
+    operation.mockImplementation(async (_id, body): Promise<FilesystemOperationResult> =>
+      body.operation === "upload_begin" ? { upload_id: "upload", chunk_size: 2 } : {},
+    );
+    setup();
+    fireEvent.change(screen.getByLabelText("Upload files", { selector: "input" }), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith(
+        "test",
+        { operation: "upload_finish", path: "src/binary.dat", upload_id: "upload" },
+        expect.any(AbortSignal),
+      ),
+    );
+    const chunks = operation.mock.calls
+      .map((call) => call[1])
+      .filter((body) => body.operation === "upload_chunk");
+    expect(chunks).toEqual([
+      {
+        operation: "upload_chunk",
+        path: "src/binary.dat",
+        upload_id: "upload",
+        offset: 0,
+        content_base64: "AAE=",
+      },
+      {
+        operation: "upload_chunk",
+        path: "src/binary.dat",
+        upload_id: "upload",
+        offset: 2,
+        content_base64: "Av8=",
+      },
+    ]);
+    await screen.findByText("Upload complete");
+  });
+
+  it("cancels an in-flight upload and removes its staging file without committing", async () => {
+    const file = new File(["data"], "cancel.txt");
+    vi.spyOn(file, "slice").mockReturnValue({
+      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+    } as Blob);
+    operation.mockImplementation(async (_id, body, signal) => {
+      if (body.operation === "upload_begin") return { upload_id: "cancelled", chunk_size: 4 };
+      if (body.operation === "upload_chunk")
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Upload cancelled", "AbortError")),
+            { once: true },
+          );
+        });
+      return {};
+    });
+    const view = setup();
+    fireEvent.change(screen.getByLabelText("Upload files", { selector: "input" }), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() =>
+      expect(operation.mock.calls.some((call) => call[1].operation === "upload_chunk")).toBe(true),
+    );
+    view.unmount();
+    render(<ExplorerTransfersStatus />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel upload" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith("test", {
+        operation: "upload_cancel",
+        path: "src/cancel.txt",
+        upload_id: "cancelled",
+      }),
+    );
+    expect(operation.mock.calls.some((call) => call[1].operation === "upload_finish")).toBe(false);
+    await screen.findByText("Upload cancelled. Completed files are kept.");
+  });
+
+  it("continues uploading through folder and session navigation with its original destination", async () => {
+    const file = new File(["data"], "continue.txt");
+    vi.spyOn(file, "slice").mockReturnValue({
+      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+    } as Blob);
+    let release!: () => void;
+    let chunkSignal: AbortSignal | undefined;
+    operation.mockImplementation(async (_id, body, signal) => {
+      if (body.operation === "upload_begin") return { upload_id: "continuing", chunk_size: 4 };
+      if (body.operation === "upload_chunk") {
+        chunkSignal = signal;
+        return new Promise((resolve) => {
+          release = () => resolve({});
+        });
+      }
+      return {};
+    });
+    const original = setup();
+    fireEvent.change(screen.getByLabelText("Upload files", { selector: "input" }), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    original.unmount();
+    const sameSession = setup({ base: "elsewhere" });
+    expect(chunkSignal?.aborted).toBe(false);
+    expect(screen.getByRole("button", { name: "New file" })).toBeDisabled();
+    sameSession.unmount();
+    setup({ base: "other", conversationId: "another-session" });
+    expect(screen.getByRole("button", { name: "New file" })).not.toBeDisabled();
+    await act(async () => release());
+    await screen.findByText("Upload complete");
+    expect(operation).toHaveBeenCalledWith(
+      "test",
+      { operation: "upload_finish", path: "src/continue.txt", upload_id: "continuing" },
+      expect.any(AbortSignal),
+    );
+    expect(refresh).not.toHaveBeenCalled();
+    expect(getExplorerTransfers().some(transferIsActive)).toBe(false);
+  });
+
+  it("cleans up a staging id when cancellation arrives before upload creation responds", async () => {
+    const file = new File(["data"], "starting.txt");
+    let finishStarting!: () => void;
+    operation.mockImplementation(async (_id, body) => {
+      if (body.operation === "upload_begin")
+        return new Promise((resolve) => {
+          finishStarting = () => resolve({ upload_id: "late-id", chunk_size: 4 });
+        });
+      return {};
+    });
+    const view = setup();
+    fireEvent.change(screen.getByLabelText("Upload files", { selector: "input" }), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(finishStarting).toBeTypeOf("function"));
+    view.unmount();
+    render(<ExplorerTransfersStatus />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel upload" }));
+    expect(screen.getByRole("button", { name: "Cancel upload" })).toBeDisabled();
+    await act(async () => finishStarting());
+    await screen.findByText("Upload cancelled. Completed files are kept.");
+    expect(operation).toHaveBeenCalledWith("test", {
+      operation: "upload_cancel",
+      path: "src/starting.txt",
+      upload_id: "late-id",
+    });
+    expect(
+      operation.mock.calls.some(
+        (call) => call[1].operation === "upload_chunk" || call[1].operation === "upload_finish",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps ZIP download and cleanup alive after the Explorer unmounts", async () => {
+    let release!: () => void;
+    let chunkSignal: AbortSignal | undefined;
+    operation.mockImplementation(async (_id, body, signal) => {
+      if (body.operation === "archive_begin")
+        return { archive_id: "continuing", size: 4, filename: "folder.zip" };
+      if (body.operation === "archive_chunk") {
+        chunkSignal = signal;
+        return new Promise((resolve) => {
+          release = () => resolve({ content_base64: "AAEC/w==" });
+        });
+      }
+      return {};
+    });
+    const view = setup();
+    await rowMenu("folder");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Download as ZIP" }));
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    view.unmount();
+    render(<ExplorerTransfersStatus />);
+    expect(chunkSignal?.aborted).toBe(false);
+    await act(async () => release());
+    await screen.findByText("Download complete");
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "folder.zip");
+    expect(operation).toHaveBeenLastCalledWith("test", {
+      operation: "archive_cancel",
+      paths: ["src/folder"],
+      archive_id: "continuing",
+    });
+  });
+
+  it("retains upload failures for the global status after navigation", async () => {
+    const file = new File(["data"], "failed.txt");
+    vi.spyOn(file, "slice").mockReturnValue({
+      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+    } as Blob);
+    let fail!: () => void;
+    operation.mockImplementation(async (_id, body) => {
+      if (body.operation === "upload_begin") return { upload_id: "failed", chunk_size: 4 };
+      if (body.operation === "upload_chunk")
+        return new Promise((_resolve, reject) => {
+          fail = () => reject(new Error("Connection lost"));
+        });
+      return {};
+    });
+    const view = setup();
+    fireEvent.change(screen.getByLabelText("Upload files", { selector: "input" }), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(fail).toBeTypeOf("function"));
+    view.unmount();
+    render(<ExplorerTransfersStatus />);
+    await act(async () => fail());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connection lost");
+    expect(operation).toHaveBeenCalledWith("test", {
+      operation: "upload_cancel",
+      path: "src/failed.txt",
+      upload_id: "failed",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss upload status" }));
+    expect(screen.queryByRole("complementary", { name: "File transfers" })).not.toBeInTheDocument();
+  });
+});

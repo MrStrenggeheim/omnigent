@@ -10463,11 +10463,9 @@ describe("chatStore — handleSessionEvent (resource events)", () => {
       });
       expect(spy).toHaveBeenCalledWith({
         queryKey: ["workspace-dir", "conv_abc"],
-        refetchType: "none",
       });
       expect(spy).toHaveBeenCalledWith({
         queryKey: ["workspace-dir-listing", "conv_abc"],
-        refetchType: "none",
       });
       // Environment availability refetches too (default refetchType, so the
       // active AppShell query re-runs): the post-switch runner reset

@@ -19,7 +19,9 @@ from omnigent.server.feature_flags import (
 def test_unset_or_empty_uses_feature_defaults(environ: dict[str, str]) -> None:
     flags = resolve_feature_flags(environ)
 
-    assert flags.enabled_features == frozenset({Feature.CLAUDE_OSC_STATUS})
+    assert flags.enabled_features == frozenset(
+        {Feature.CLAUDE_OSC_STATUS, Feature.WORKSPACE_CONTENT_SEARCH}
+    )
     assert flags.frontend_dict() == {
         "usage_page": False,
         "harness_install": False,
@@ -28,7 +30,7 @@ def test_unset_or_empty_uses_feature_defaults(environ: dict[str, str]) -> None:
         "import_review": False,
         "custom_agents_settings_ui": False,
         "sidebar_grouping_ui": False,
-        "workspace_content_search": False,
+        "workspace_content_search": True,
         "grid_sessions_display_ui": False,
         "automations_v2": False,
         "splittable_terminal_view_ui": False,
@@ -40,7 +42,12 @@ def test_resolves_comma_separated_enabled_set() -> None:
 
     assert flags.enabled(Feature.USAGE_PAGE)
     assert flags.enabled(Feature.HARNESS_INSTALL)
-    assert flags.enabled_names() == ("claude_osc_status", "harness_install", "usage_page")
+    assert flags.enabled_names() == (
+        "claude_osc_status",
+        "harness_install",
+        "usage_page",
+        "workspace_content_search",
+    )
 
 
 @pytest.mark.parametrize(
@@ -54,13 +61,13 @@ def test_resolves_comma_separated_enabled_set() -> None:
 def test_explicit_disable_wins_and_preserves_other_features(features: str) -> None:
     flags = resolve_feature_flags({FEATURES_ENV_VAR: f"usage_page,{features}"})
 
-    assert flags.enabled_names() == ("usage_page",)
+    assert flags.enabled_names() == ("usage_page", "workspace_content_search")
 
 
 def test_default_off_features_can_also_be_explicitly_disabled() -> None:
     flags = resolve_feature_flags({FEATURES_ENV_VAR: "usage_page,-usage_page"})
 
-    assert flags.enabled_names() == ("claude_osc_status",)
+    assert flags.enabled_names() == ("claude_osc_status", "workspace_content_search")
 
 
 def test_removed_harness_install_variable_fails_with_migration_hint() -> None:
@@ -79,7 +86,7 @@ def test_canvas_is_a_frontend_visible_feature() -> None:
 
     assert flags.enabled(Feature.CANVAS)
     assert flags.frontend_dict()["canvas"] is True
-    assert flags.enabled_names() == ("canvas", "claude_osc_status")
+    assert flags.enabled_names() == ("canvas", "claude_osc_status", "workspace_content_search")
 
 
 def test_arca_shutdown_warnings_are_frontend_visible() -> None:

@@ -1951,11 +1951,9 @@ function scheduleWorkspaceFilesystemInvalidation(sessionId: string): void {
     });
     queryClient?.invalidateQueries({
       queryKey: ["workspace-dir", sessionId],
-      refetchType: "none",
     });
     queryClient?.invalidateQueries({
       queryKey: ["workspace-dir-listing", sessionId],
-      refetchType: "none",
     });
     // Environment availability (root/home → the Files tab gate) can
     // change too: the post-switch runner reset publishes this same event
@@ -8722,8 +8720,7 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
       return;
     case "session_changed_files_invalidated":
       // Coarse "something changed" signal. Coalesce bursts into one
-      // changed-files/root refresh, and mark expanded directory caches
-      // stale without immediately refetching every visible folder.
+      // filesystem refresh; active expanded directories refetch too.
       scheduleWorkspaceFilesystemInvalidation(event.sessionId);
       return;
     case "session_terminal_activity":

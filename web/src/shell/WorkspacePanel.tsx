@@ -1,4 +1,5 @@
 import type { FilePosition, OpenFileOptions } from "./FileViewerContext";
+import { FileViewerContext } from "./FileViewerContext";
 import {
   BotIcon,
   CheckIcon,
@@ -27,6 +28,7 @@ import {
   memo,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -82,7 +84,7 @@ import {
 import { SuppressBrowserView } from "@/hooks/useSuppressBrowserView";
 import { readPreferredShell, resolveDefaultShell, writePreferredShell } from "./preferredShell";
 import { WorkspaceTabsScroller } from "./WorkspaceTabsScroller";
-import { FilesPanel } from "./FilesPanel";
+import { FilesPanel, readBrowseLocation } from "./FilesPanel";
 import { ContentSearchPanel } from "./ContentSearchPanel";
 import { FileViewer } from "./FileViewer";
 import { ResponsiveViewerSlot } from "./ResponsiveViewerSlot";
@@ -865,6 +867,16 @@ function WorkspacePanelImpl({
   const terminalShown = selectedTerminalKey !== null && openTerminals.includes(selectedTerminalKey);
   const contentSearchInputRef = useRef<HTMLInputElement>(null);
   const [contentSearchFocusSession, setContentSearchFocusSession] = useState<string | null>(null);
+  const workspaceRoot = useContext(FileViewerContext)?.workspaceRoot ?? null;
+  const [contentSearchScope, setContentSearchScope] = useState(() =>
+    readBrowseLocation(conversationId, workspaceRoot),
+  );
+  const [contentReplaceOpen, setContentReplaceOpen] = useState(false);
+  const [contentReplaceFocusNonce, setContentReplaceFocusNonce] = useState(0);
+  useEffect(() => {
+    setContentSearchScope(readBrowseLocation(conversationId, workspaceRoot));
+    setContentReplaceOpen(false);
+  }, [conversationId, workspaceRoot]);
   const browsers = useBrowserTabs(conversationId);
   const closeBrowserTab = async (tabId: string) => {
     const closed = await browsers.close(tabId);
@@ -1009,9 +1021,46 @@ function WorkspacePanelImpl({
   const isMobile = mobileViewport && !contained;
   useEffect(() => {
     if (!showContentSearch || !showFilesPanel || pending || isMobile) return;
+    const openSearch = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          conversationId: string;
+          location: string;
+          replace?: boolean;
+        }>
+      ).detail;
+      if (!detail || detail.conversationId !== conversationId) return;
+      setContentSearchScope(detail.location);
+      setContentReplaceOpen(detail.replace === true);
+      setContentReplaceFocusNonce((nonce) => nonce + 1);
+      onRightRailTabChange("content-search");
+      onReveal?.();
+      setContentSearchFocusSession(conversationId);
+    };
+    const followBrowseLocation = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId: string; location: string }>).detail;
+      if (detail?.conversationId === conversationId) setContentSearchScope(detail.location);
+    };
+    window.addEventListener("omnigent:open-content-search", openSearch);
+    window.addEventListener("omnigent:browse-location-changed", followBrowseLocation);
+    return () => {
+      window.removeEventListener("omnigent:open-content-search", openSearch);
+      window.removeEventListener("omnigent:browse-location-changed", followBrowseLocation);
+    };
+  }, [
+    showContentSearch,
+    showFilesPanel,
+    pending,
+    isMobile,
+    conversationId,
+    onRightRailTabChange,
+    onReveal,
+  ]);
+  useEffect(() => {
+    if (!showContentSearch || !showFilesPanel || pending || isMobile) return;
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
-        event.code !== "KeyF" ||
+        (event.code !== "KeyF" && event.code !== "KeyH") ||
         !hasCommandModifier(event) ||
         !event.shiftKey ||
         event.altKey ||
@@ -1021,6 +1070,8 @@ function WorkspacePanelImpl({
         return;
       event.preventDefault();
       event.stopPropagation();
+      setContentReplaceOpen(event.code === "KeyH");
+      setContentReplaceFocusNonce((nonce) => nonce + 1);
       onRightRailTabChange("content-search");
       onReveal?.();
       setContentSearchFocusSession(conversationId);
@@ -1701,7 +1752,7 @@ function WorkspacePanelImpl({
           (tree vs changed-only list); Subagents lists the root's children +
           a "main" link back to the parent. */}
         <div data-workspace-panel-content className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {showContentSearch && showFilesPanel && !pending && (
+          {showContentSearch && showFilesPanel && !pending && !isMobile && (
             <div
               className={cn(
                 "min-h-0 flex-1 flex-col",
@@ -1715,6 +1766,9 @@ function WorkspacePanelImpl({
                 key={conversationId}
                 conversationId={conversationId}
                 onFileSelect={openFileViewer}
+                scope={contentSearchScope}
+                replaceOpen={contentReplaceOpen}
+                replaceFocusNonce={contentReplaceFocusNonce}
               />
             </div>
           )}

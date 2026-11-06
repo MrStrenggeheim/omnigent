@@ -146,6 +146,7 @@ vi.mock("./Sidebar", () => ({
   ),
 }));
 vi.mock("./FilesPanel", () => ({
+  readBrowseLocation: () => "",
   // Scope-only stand-in matching the real FilesPanel after the open-file tabs
   // and the FileViewer moved up to WorkspacePanel. It echoes its fixed scope
   // (data-flat-view) and exposes file-select buttons; the scope is now the
@@ -3542,6 +3543,41 @@ describe("Right workspace card visibility", () => {
     expect(screen.getByTitle("a.ts")).toBeInTheDocument();
     expect(screen.getByTitle("b.ts")).toBeInTheDocument();
     expect(screen.getByTestId("file-viewer-inline")).toHaveAttribute("data-path", "b.ts");
+  });
+
+  it("reconciles open tabs after folder moves and closes deleted files only in their session", () => {
+    writeSessionWorkspaceState("conv_files_changed", {
+      open: true,
+      openFiles: ["src/a.ts", "other.ts"],
+      selectedFilePath: "src/a.ts",
+    });
+    useEnvironmentMock.mockReturnValue({
+      data: { available: true, root: null, home: null },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useWorkspaceEnvironment>);
+    mockConversations([{ id: "conv_files_changed", permission_level: null }]);
+    renderShell("/c/conv_files_changed");
+    const detail = {
+      conversationId: "another-session",
+      moves: [{ source: "src", destination: "lib" }],
+      removed: [],
+    };
+    fireEvent(window, new CustomEvent("omnigent:workspace-files-changed", { detail }));
+    expect(screen.getByTitle("src/a.ts")).toBeInTheDocument();
+    detail.conversationId = "conv_files_changed";
+    fireEvent(window, new CustomEvent("omnigent:workspace-files-changed", { detail }));
+    expect(screen.getByTitle("lib/a.ts")).toBeInTheDocument();
+    expect(screen.queryByTitle("src/a.ts")).toBeNull();
+    expect(screen.getByTestId("file-viewer-inline")).toHaveAttribute("data-path", "lib/a.ts");
+    fireEvent(
+      window,
+      new CustomEvent("omnigent:workspace-files-changed", {
+        detail: { conversationId: "conv_files_changed", moves: [], removed: ["lib"] },
+      }),
+    );
+    expect(screen.queryByTitle("lib/a.ts")).toBeNull();
+    expect(screen.getByTitle("other.ts")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-viewer-inline")).toBeNull();
   });
 
   it("restores the focused shell per session (switch away and back keeps its xterm)", () => {

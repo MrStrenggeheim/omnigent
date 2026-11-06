@@ -8,8 +8,10 @@ import {
   type WorkspaceChangedFile,
   type WorkspaceFile,
   useWorkspaceDirectories,
+  joinBrowseLocation,
 } from "@/hooks/useWorkspaceChangedFiles";
 import { cn } from "@/lib/utils";
+import { isExplorerInternalPath } from "@/lib/explorerOperations";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { type ChangedSort, compareChangedFiles, type SortableFile } from "./FlatFileList";
@@ -26,6 +28,12 @@ import { FileDownloadButton } from "./FileDownloadButton";
 import { RevealBaseContext, useRevealMenu } from "./RevealInFileManager";
 import { useCursorTooltip } from "./useCursorTooltip";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
+import {
+  ExplorerRowActions,
+  explorerRowClass,
+  useExplorerRow,
+  useExplorerTree,
+} from "./ExplorerActions";
 
 // VS Code–style indentation: folder chevron and file icon share the same x
 // at each depth. GUIDE_OFFSET centers the indent-guide line under the chevron.
@@ -107,6 +115,7 @@ function buildTree(files: WorkspaceFile[], sort: ChangedSort = "alpha"): TreeNod
   const root: DirNode = { type: "dir", name: "", path: "", children: [] };
 
   for (const file of files) {
+    if (isExplorerInternalPath(file.path)) continue;
     const parts = file.path.split("/");
     let node = root;
 
@@ -205,20 +214,22 @@ function lazyChildrenToNodes(
   sort: ChangedSort,
   overlay: TreeNode[] = [],
 ): TreeNode[] {
-  const nodes = entries.map((file): TreeNode => {
-    if (file.type === "directory") {
-      return {
-        type: "dir",
-        name: file.name,
-        path: file.path,
-        children: [],
-        modifiedAt: file.modified_at,
-        gitIgnored: file.git_ignored,
-        lazy: true,
-      };
-    }
-    return { type: "file", name: file.name, file };
-  });
+  const nodes = entries
+    .filter((file) => !isExplorerInternalPath(file.path))
+    .map((file): TreeNode => {
+      if (file.type === "directory") {
+        return {
+          type: "dir",
+          name: file.name,
+          path: file.path,
+          children: [],
+          modifiedAt: file.modified_at,
+          gitIgnored: file.git_ignored,
+          lazy: true,
+        };
+      }
+      return { type: "file", name: file.name, file };
+    });
   const byPath = new Map(
     nodes.map((node) => [node.type === "dir" ? node.path : node.file.path, node]),
   );
@@ -435,6 +446,8 @@ function FolderTreeInner({
   onExitSearch,
   scrollParentRef,
   refreshToken = 0,
+  revealPath,
+  revealToken = 0,
 }: {
   files: WorkspaceFile[] | undefined;
   isLoading: boolean;
@@ -493,6 +506,9 @@ function FolderTreeInner({
   scrollParentRef?: RefObject<HTMLElement | null>;
   /** Changes when the user explicitly refreshes expanded directory listings. */
   refreshToken?: number;
+  /** Workspace-relative or host-absolute active file requested by the toolbar. */
+  revealPath?: string | null;
+  revealToken?: number;
 }) {
   // Initialise from the module-level cache so expanded state survives
   // unmount/remount (e.g. opening the FileViewer and navigating back).
@@ -523,7 +539,7 @@ function FolderTreeInner({
         bytes: file.bytes,
         modified_at: file.modified_at,
       }));
-    return [...files, ...changedOnly];
+    return [...files, ...changedOnly].filter((file) => !isExplorerInternalPath(file.path));
   }, [files, scopedChangedFiles]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
     if (!cacheKey) return new Set();
@@ -687,6 +703,13 @@ function FolderTreeInner({
     [cacheKey, onExitSearch],
   );
 
+  useEffect(() => {
+    if (!revealPath) return;
+    const prefix = browseLocation ? `${browseLocation.replace(/\/$/, "")}/` : "";
+    if (prefix && !revealPath.startsWith(prefix)) return;
+    revealDirectory(prefix ? revealPath.slice(prefix.length) : revealPath);
+  }, [revealPath, revealToken, browseLocation, revealDirectory]);
+
   // Build the nested top-level tree once per files/sort/showHidden change.
   // Hoisted above the early returns (Rules of Hooks) and memoized so an
   // unrelated re-render (a background refetch toggling isFetching, a store tick)
@@ -746,6 +769,128 @@ function FolderTreeInner({
     getItemKey: (index) => flatRows[index]?.key ?? index,
   });
 
+  const explorerControls = useMemo(
+    () => ({
+      entries:
+        searchQuery.trim() && searchResults
+          ? [...searchResults]
+              .filter(
+                (file) =>
+                  !isExplorerInternalPath(file.path) &&
+                  (showHidden || !file.path.split("/").some((part) => part.startsWith("."))) &&
+                  changedFileMap.get(file.path) !== "deleted",
+              )
+              .sort((a, b) =>
+                a.type !== b.type
+                  ? a.type === "directory"
+                    ? -1
+                    : 1
+                  : compareChangedFiles(sort)(a, b),
+              )
+              .map((file) => ({ path: file.path, directory: file.type === "directory" }))
+          : flatRows
+              .filter(
+                (row) =>
+                  row.kind === "node" &&
+                  !(row.node.type === "file" && changedFileMap.get(row.key) === "deleted"),
+              )
+              .map((row) => ({
+                path: row.key,
+                directory: row.kind === "node" && row.node.type === "dir",
+              })),
+      collapse: () => {
+        for (const timer of motionTimers.current.values()) clearTimeout(timer);
+        motionTimers.current.clear();
+        setPathMotions(new Map());
+        setExpandedPaths(new Set());
+        if (cacheKey) expandedPathsCache.set(cacheKey, new Set());
+      },
+      reveal: (canonical: string) => {
+        const prefix = browseLocation ? `${browseLocation.replace(/\/$/, "")}/` : "";
+        if (prefix && !canonical.startsWith(prefix)) return;
+        revealDirectory(prefix ? canonical.slice(prefix.length) : canonical);
+      },
+      navigate: (canonical: string, key: string) => {
+        const prefix = browseLocation ? `${browseLocation.replace(/\/$/, "")}/` : "";
+        const local =
+          prefix && canonical.startsWith(prefix) ? canonical.slice(prefix.length) : canonical;
+        if (searchQuery.trim()) {
+          const container = scrollParentRef?.current ?? ownScrollRef.current;
+          const elements = Array.from(
+            container?.querySelectorAll<HTMLElement>("[data-explorer-entry]") ?? [],
+          );
+          const index = elements.findIndex(
+            (element) => element.dataset.explorerEntry === canonical,
+          );
+          const next =
+            key === "Home"
+              ? elements[0]
+              : key === "End"
+                ? elements.at(-1)
+                : elements[index + (key === "ArrowUp" ? -1 : 1)];
+          if (!next || key === "ArrowLeft" || key === "ArrowRight") return null;
+          next.focus();
+          const target = next.dataset.explorerEntry!;
+          return prefix && target.startsWith(prefix) ? target.slice(prefix.length) : target;
+        }
+        const rows = flatRows.filter((row) => row.kind === "node");
+        const index = rows.findIndex((row) => row.key === local);
+        const current = rows[index];
+        let next =
+          key === "Home"
+            ? rows[0]
+            : key === "End"
+              ? rows.at(-1)
+              : rows[index + (key === "ArrowUp" ? -1 : 1)];
+        if (key === "ArrowRight" || key === "ArrowLeft") {
+          if (
+            current?.kind === "node" &&
+            current.node.type === "dir" &&
+            ((key === "ArrowRight" && !current.open) || (key === "ArrowLeft" && current.open))
+          ) {
+            togglePath(local);
+            return null;
+          }
+          if (key === "ArrowLeft")
+            next = rows.find((row) => row.key === local.split("/").slice(0, -1).join("/"));
+        }
+        if (!next) return null;
+        const target = next.key;
+        rowVirtualizer.scrollToIndex(
+          flatRows.findIndex((row) => row.key === target),
+          { align: "auto" },
+        );
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const container = scrollParentRef?.current ?? ownScrollRef.current;
+            const element = Array.from(
+              container?.querySelectorAll<HTMLElement>("[data-explorer-entry]") ?? [],
+            ).find(
+              (item) => item.dataset.explorerEntry === joinBrowseLocation(browseLocation, target),
+            );
+            element?.focus();
+          }),
+        );
+        return target;
+      },
+    }),
+    [
+      searchQuery,
+      searchResults,
+      showHidden,
+      changedFileMap,
+      sort,
+      flatRows,
+      cacheKey,
+      browseLocation,
+      revealDirectory,
+      togglePath,
+      rowVirtualizer,
+      scrollParentRef,
+    ],
+  );
+  useExplorerTree(explorerControls);
+
   // Once a revealed directory's row exists in the flat tree (its ancestors'
   // lazy listings have landed), smooth-scroll it into view and start the
   // highlight flash — exactly once. Re-runs as `flatRows` changes so it can
@@ -784,9 +929,11 @@ function FolderTreeInner({
         </p>
       );
     }
-    const visibleResults = showHidden
-      ? searchResults
-      : searchResults.filter((f) => !f.path.split("/").some((seg) => seg.startsWith(".")));
+    const visibleResults = searchResults.filter(
+      (file) =>
+        !isExplorerInternalPath(file.path) &&
+        (showHidden || !file.path.split("/").some((seg) => seg.startsWith("."))),
+    );
     if (visibleResults.length === 0) {
       // There are matches but all are in hidden directories — distinguish from
       // a true zero-match result so the user knows to toggle hidden files.
@@ -981,14 +1128,18 @@ function FileRowItem({
         : undefined;
   const { handlers, tooltip } = useCursorTooltip(path);
   const reveal = useRevealMenu(isDeleted ? null : path);
+  const explorer = useExplorerRow(path, false, isDeleted);
 
   return (
     <li className="list-none">
       <div
-        onContextMenu={reveal.onContextMenu}
+        {...explorer.props}
+        onContextMenu={explorer.props.onContextMenu ?? reveal.onContextMenu}
         className={cn(
           "group relative flex w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 pr-1",
           isDeleted ? "opacity-50" : "hover:bg-muted",
+          explorerRowClass,
+          explorer.selected && "bg-accent",
         )}
         style={{ paddingLeft: `${indentFor(depth)}px` }}
       >
@@ -1035,6 +1186,7 @@ function FileRowItem({
             </span>
           )}
         </button>
+        <ExplorerRowActions path={path} deleted={isDeleted} />
         {/* One trailing column, always rendered so every row (directories
             included) shares it: metadata at rest, the copy/download pair on
             hover. */}
@@ -1048,11 +1200,11 @@ function FileRowItem({
           )}
           <span className="absolute inset-0 flex items-center justify-end gap-1">
             {!isDeleted && conversationId ? (
-              <FileDownloadButton conversationId={conversationId} path={path} />
+              <FileDownloadButton conversationId={conversationId} path={explorer.path} />
             ) : (
               <span className={cn("shrink-0", ROW_ACTION_SIZE_CLASS)} aria-hidden />
             )}
-            <CopyPathButton path={path} revealOnHover />
+            <CopyPathButton path={explorer.path} revealOnHover />
           </span>
         </span>
         {reveal.menu}
@@ -1115,11 +1267,17 @@ function SearchDirRow({
   onRevealDir: (path: string) => void;
 }) {
   const reveal = useRevealMenu(file.path, true);
+  const explorer = useExplorerRow(file.path, true);
   return (
     <li className="list-none">
       <div
-        onContextMenu={reveal.onContextMenu}
-        className="group relative flex w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 pr-1 pl-2 hover:bg-muted"
+        {...explorer.props}
+        onContextMenu={explorer.props.onContextMenu ?? reveal.onContextMenu}
+        className={cn(
+          "group relative flex w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 pr-1 pl-2 hover:bg-muted",
+          explorerRowClass,
+          explorer.selected && "bg-accent",
+        )}
       >
         <button
           type="button"
@@ -1142,12 +1300,13 @@ function SearchDirRow({
             <bdi>{file.path}/</bdi>
           </span>
         </button>
+        <ExplorerRowActions path={file.path} directory />
         <span
           className={cn("relative flex shrink-0 items-center justify-end", ROW_META_SLOT_CLASS)}
         >
           <span className="absolute inset-0 flex items-center justify-end gap-0.5">
             <span className={cn("shrink-0", ROW_ACTION_SIZE_CLASS)} aria-hidden />
-            <CopyPathButton path={file.path} label="Copy folder path" revealOnHover />
+            <CopyPathButton path={explorer.path} label="Copy folder path" revealOnHover />
           </span>
         </span>
         {reveal.menu}
@@ -1224,6 +1383,10 @@ const TreeNodeRow = memo(function TreeNodeRow({
   highlighted?: boolean;
 }) {
   const reveal = useRevealMenu(node.type === "file" ? null : node.path, true);
+  const explorer = useExplorerRow(
+    node.type === "dir" ? node.path : node.file.path,
+    node.type === "dir",
+  );
   if (node.type === "file") {
     return (
       <TreeFileRow
@@ -1250,12 +1413,15 @@ const TreeNodeRow = memo(function TreeNodeRow({
     // The row is a div so the copy control can remain a sibling of the folder
     // toggle rather than nesting one button inside another.
     <div
-      onContextMenu={reveal.onContextMenu}
+      {...explorer.props}
+      onContextMenu={explorer.props.onContextMenu ?? reveal.onContextMenu}
       className={cn(
         "group relative flex w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 pr-1 hover:bg-muted",
         // Reveal flash: reuse the chat nav-jump ring pulse so a folder opened
         // from search catches the eye briefly, then settles.
         highlighted && "animate-user-msg-flash",
+        explorerRowClass,
+        explorer.selected && "bg-accent",
       )}
       style={{ paddingLeft: `${indentFor(depth)}px` }}
     >
@@ -1306,6 +1472,7 @@ const TreeNodeRow = memo(function TreeNodeRow({
           </span>
         )}
       </button>
+      <ExplorerRowActions path={node.path} directory />
       {/* The same trailing column as a file row. A folder has no size and
           nothing to download, so the column shows only the copy button — with
           the download's footprint reserved beside it so that button lands in
@@ -1313,7 +1480,7 @@ const TreeNodeRow = memo(function TreeNodeRow({
       <span className={cn("relative flex shrink-0 items-center justify-end", ROW_META_SLOT_CLASS)}>
         <span className="absolute inset-0 flex items-center justify-end gap-1">
           <span className={cn("shrink-0", ROW_ACTION_SIZE_CLASS)} aria-hidden />
-          <CopyPathButton path={node.path} label="Copy folder path" revealOnHover />
+          <CopyPathButton path={explorer.path} label="Copy folder path" revealOnHover />
         </span>
       </span>
       {reveal.menu}

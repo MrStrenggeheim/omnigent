@@ -10626,3 +10626,41 @@ async def test_host_write_timeout_preserves_comment_uncertainty(
         )
     else:
         assert response.json()["error"]["code"] == "runner_unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 409])
+async def test_explorer_operations_fall_back_to_authorized_idle_host(
+    offline_env_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    from omnigent.server.routes import _host_filesystem
+
+    captured: dict[str, Any] = {}
+
+    async def write(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return (
+            {"operation": "mkdir", "affected_paths": []}
+            if status == 200
+            else {"status": status, "error": "Destination already exists"}
+        )
+
+    monkeypatch.setattr(_host_filesystem, "write_workspace_from_host", write)
+    response = await offline_env_client.post(
+        f"/v1/sessions/{_OFFLINE_SESSION}/resources/environments/default/filesystem-operations",
+        json={
+            "operation": "mkdir",
+            "path": "new",
+            "_roots": [{"path": "/", "access": "write"}],
+            "_owner": "forged",
+        },
+    )
+    assert response.status_code == status, response.text
+    assert captured["op"] == "filesystem_operation"
+    assert captured["workspace"] == _OFFLINE_WORKSPACE
+    assert captured["params"]["_owner"] != "forged"
+    assert captured["params"]["_unconfined"] is True
+    assert captured["params"]["_roots"]
+    assert captured["params"]["_roots"][0]["path"] == _OFFLINE_WORKSPACE
+    if status == 409:
+        assert response.json()["detail"] == "Destination already exists"

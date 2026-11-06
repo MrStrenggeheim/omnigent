@@ -1,4 +1,6 @@
 import { useLoadedConversations } from "@/hooks/useSidebarData";
+import { ContentSearchPanel } from "./ContentSearchPanel";
+import { ExplorerTransfersStatus } from "./ExplorerTransfersStatus";
 import { GridSessionsProvider, useGridSessions } from "@/grid/GridSessionsContext";
 import { GridWorkspace } from "@/grid/GridWorkspace";
 import {
@@ -13,6 +15,7 @@ import {
   useState,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { reconcileWorkspaceFilePath, type WorkspaceFilesChanged } from "@/lib/workspaceFileEvents";
 import { toast } from "sonner";
 import { Outlet, useLocation, useParams, useRebasePath, useSearchParams } from "@/lib/routing";
 import { CANVAS_CONVERSATION_MIN_WIDTH } from "@/canvas/CanvasWorkspace";
@@ -473,6 +476,11 @@ function AppShellImpl() {
   const [panelInitialKey, setPanelInitialKeyState] = useState<string | null>(null);
   const [executionLogsKey, setExecutionLogsKey] = useState<string | null>(null);
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
+  const [mobileSearch, setMobileSearch] = useState<{
+    conversationId: string;
+    location: string;
+    replace: boolean;
+  } | null>(null);
   // Mobile-only full-screen drawers for the rail tabs that have no desktop
   // push panel of their own. On desktop these are tabs in the workspace rail;
   // on a phone they open as full-screen overlays from the session-menu FAB.
@@ -1465,6 +1473,43 @@ function AppShellImpl() {
       { replace: true },
     );
   }, [setSearchParams]);
+  useEffect(() => {
+    const handleFilesChanged = (event: Event) => {
+      const changes = (event as CustomEvent<WorkspaceFilesChanged>).detail;
+      if (!changes || changes.conversationId !== conversationId) return;
+      setOpenFiles((paths) => [
+        ...new Set(
+          paths.flatMap((path) => {
+            const next = reconcileWorkspaceFilePath(path, changes);
+            return next === null ? [] : [next];
+          }),
+        ),
+      ]);
+      setFileNavigation((navigation) => {
+        if (!navigation || navigation.conversationId !== conversationId) return navigation;
+        const path = reconcileWorkspaceFilePath(navigation.path, changes);
+        return path === null ? undefined : { ...navigation, path };
+      });
+      if (selectedFilePath === null) return;
+      const next = reconcileWorkspaceFilePath(selectedFilePath, changes);
+      if (next === selectedFilePath) return;
+      setSelectedFilePath(next);
+      if (next === null) clearFileViewerUrl();
+      else
+        setSearchParams(
+          (previous) => {
+            const params = new URLSearchParams(previous);
+            params.set("file", next);
+            params.delete("comment");
+            params.delete("diff");
+            return params;
+          },
+          { replace: true },
+        );
+    };
+    window.addEventListener("omnigent:workspace-files-changed", handleFilesChanged);
+    return () => window.removeEventListener("omnigent:workspace-files-changed", handleFilesChanged);
+  }, [conversationId, selectedFilePath, clearFileViewerUrl, setSearchParams]);
   const restoreSelectedFileUrl = useCallback(() => {
     if (!selectedFilePath) return;
     setSearchParams(
@@ -1476,6 +1521,26 @@ function AppShellImpl() {
       { replace: true },
     );
   }, [selectedFilePath, setSearchParams]);
+  useEffect(() => {
+    const openMobileSearch = (event: Event) => {
+      if (!isMobileViewport() || !railTabsAvailable["content-search"]) return;
+      const detail = (
+        event as CustomEvent<{
+          conversationId: string;
+          location: string;
+          replace?: boolean;
+        }>
+      ).detail;
+      if (detail?.conversationId !== conversationId) return;
+      setFilesPanelOpen(false);
+      setSelectedFilePath(null);
+      clearFileViewerUrl();
+      setMobileSearch({ ...detail, replace: detail.replace === true });
+    };
+    window.addEventListener("omnigent:open-content-search", openMobileSearch);
+    return () => window.removeEventListener("omnigent:open-content-search", openMobileSearch);
+  }, [conversationId, railTabsAvailable, clearFileViewerUrl]);
+  useEffect(() => setMobileSearch(null), [conversationId]);
 
   // Toggle the right (Workspace) sidebar — shared by the header's collapse
   // button and the ⌘⌥]/Ctrl+Alt+] hotkey so they can't drift. Beyond flipping the
@@ -2154,6 +2219,12 @@ function AppShellImpl() {
       workspaceRoot,
       workspaceHome,
       sessionHostId: activeSession?.hostId ?? null,
+      activeFilePath:
+        selectedFilePath ??
+        (fileNavigation && fileNavigation.conversationId === conversationId
+          ? fileNavigation.path
+          : openFiles.at(-1)) ??
+        null,
     }),
     [
       openFileViewer,
@@ -2164,6 +2235,9 @@ function AppShellImpl() {
       workspaceRoot,
       workspaceHome,
       activeSession?.hostId,
+      selectedFilePath,
+      fileNavigation,
+      openFiles,
     ],
   );
 
@@ -2687,6 +2761,25 @@ function AppShellImpl() {
                   onSortChange={handleFilesSortChange}
                 />
               )}
+              {conversationId && railTabsAvailable["content-search"] && (
+                <MobilePanelDrawer
+                  open={mobileSearch?.conversationId === conversationId}
+                  title="Search and replace"
+                  onClose={() => setMobileSearch(null)}
+                  testId="content-search-panel-drawer"
+                >
+                  <ContentSearchPanel
+                    key={conversationId}
+                    conversationId={conversationId}
+                    scope={mobileSearch?.location ?? ""}
+                    replaceOpen={mobileSearch?.replace}
+                    onFileSelect={(path, options) => {
+                      setMobileSearch(null);
+                      openFileViewer(path, options);
+                    }}
+                  />
+                </MobilePanelDrawer>
+              )}
               {/* Mobile-only full-screen drawers for the rail tabs that have no
           desktop push panel of their own. `MobilePanelDrawer` is `md:hidden`,
           so these never collide with the desktop rail; they're opened from
@@ -2805,6 +2898,7 @@ function AppShellImpl() {
           {/* Keyboard-shortcuts reference. Self-contained (owns its open state +
               ⌘/Ctrl+/ opener); ungated so it works on every route. */}
           <KeyboardShortcutsDialog />
+          <ExplorerTransfersStatus />
           {/* Opens the import modal once per newly connected host. */}
           {!isEmbedded && <ImportReviewGate />}
           {/* Keep this after Outlet so a visible chat banner wins before the toast effect runs. */}
