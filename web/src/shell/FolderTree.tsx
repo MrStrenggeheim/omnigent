@@ -15,16 +15,7 @@ import { isExplorerInternalPath } from "@/lib/explorerOperations";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { type ChangedSort, compareChangedFiles, type SortableFile } from "./FlatFileList";
-import {
-  ROW_ACTION_SIZE_CLASS,
-  ROW_META_SLOT_CLASS,
-  ROW_STATUS_SLOT_CLASS,
-  formatBytes,
-  gitStatusLabel,
-  gitStatusLetter,
-} from "./fileStatusUtils";
-import { CopyPathButton } from "./CopyPathButton";
-import { FileDownloadButton } from "./FileDownloadButton";
+import { ROW_STATUS_SLOT_CLASS, gitStatusLabel, gitStatusLetter } from "./fileStatusUtils";
 import { RevealBaseContext, useRevealMenu } from "./RevealInFileManager";
 import { useCursorTooltip } from "./useCursorTooltip";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
@@ -445,7 +436,6 @@ function FolderTreeInner({
   onNavigateDir,
   onExitSearch,
   scrollParentRef,
-  refreshToken = 0,
   revealPath,
   revealToken = 0,
 }: {
@@ -504,8 +494,6 @@ function FolderTreeInner({
    * own internal scroll container.
    */
   scrollParentRef?: RefObject<HTMLElement | null>;
-  /** Changes when the user explicitly refreshes expanded directory listings. */
-  refreshToken?: number;
   /** Workspace-relative or host-absolute active file requested by the toolbar. */
   revealPath?: string | null;
   revealToken?: number;
@@ -731,7 +719,7 @@ function FolderTreeInner({
   // all the way down, and it converges the same whether listings arrive async
   // or are already cached.
   const [lazyPaths, setLazyPaths] = useState<string[]>([]);
-  const dirData = useWorkspaceDirectories(conversationId, lazyPaths, browseLocation, refreshToken);
+  const dirData = useWorkspaceDirectories(conversationId, lazyPaths, browseLocation);
   useEffect(() => {
     const next = visibleTree
       ? expandedLazyPaths(visibleTree, expandedPaths, showHidden, sort, dirData)
@@ -984,10 +972,10 @@ function FolderTreeInner({
     );
   }
 
-  if (isLoading) {
+  if (isLoading && !files) {
     return <p className="px-2 py-1 text-muted-foreground text-sm">Loading…</p>;
   }
-  if (isError) {
+  if (isError && !files) {
     // Runner not connected. If it went offline after being up (host
     // restarted), show the same reconnect hint as the Changed tab; if the
     // session just hasn't started, fall through to the empty state.
@@ -1186,27 +1174,12 @@ function FileRowItem({
             </span>
           )}
         </button>
-        <ExplorerRowActions path={path} deleted={isDeleted} />
-        {/* One trailing column, always rendered so every row (directories
-            included) shares it: metadata at rest, the copy/download pair on
-            hover. */}
-        <span
-          className={cn("relative flex shrink-0 items-center justify-end", ROW_META_SLOT_CLASS)}
-        >
-          {bytes !== null && !isDeleted && (
-            <span className="text-muted-foreground text-sm group-hover:invisible">
-              {formatBytes(bytes)}
-            </span>
-          )}
-          <span className="absolute inset-0 flex items-center justify-end gap-1">
-            {!isDeleted && conversationId ? (
-              <FileDownloadButton conversationId={conversationId} path={explorer.path} />
-            ) : (
-              <span className={cn("shrink-0", ROW_ACTION_SIZE_CLASS)} aria-hidden />
-            )}
-            <CopyPathButton path={explorer.path} revealOnHover />
-          </span>
-        </span>
+        <ExplorerRowActions
+          path={path}
+          deleted={isDeleted}
+          bytes={bytes}
+          conversationId={conversationId}
+        />
         {reveal.menu}
       </div>
       {tooltip}
@@ -1301,14 +1274,6 @@ function SearchDirRow({
           </span>
         </button>
         <ExplorerRowActions path={file.path} directory />
-        <span
-          className={cn("relative flex shrink-0 items-center justify-end", ROW_META_SLOT_CLASS)}
-        >
-          <span className="absolute inset-0 flex items-center justify-end gap-0.5">
-            <span className={cn("shrink-0", ROW_ACTION_SIZE_CLASS)} aria-hidden />
-            <CopyPathButton path={explorer.path} label="Copy folder path" revealOnHover />
-          </span>
-        </span>
         {reveal.menu}
       </div>
     </li>
@@ -1473,16 +1438,6 @@ const TreeNodeRow = memo(function TreeNodeRow({
         )}
       </button>
       <ExplorerRowActions path={node.path} directory />
-      {/* The same trailing column as a file row. A folder has no size and
-          nothing to download, so the column shows only the copy button — with
-          the download's footprint reserved beside it so that button lands in
-          the same x as every file row's. */}
-      <span className={cn("relative flex shrink-0 items-center justify-end", ROW_META_SLOT_CLASS)}>
-        <span className="absolute inset-0 flex items-center justify-end gap-1">
-          <span className={cn("shrink-0", ROW_ACTION_SIZE_CLASS)} aria-hidden />
-          <CopyPathButton path={explorer.path} label="Copy folder path" revealOnHover />
-        </span>
-      </span>
       {reveal.menu}
     </div>
   );

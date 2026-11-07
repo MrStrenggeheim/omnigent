@@ -110,8 +110,8 @@ export function fileContentToBlob(data: FileContentResponse): Blob {
  * Programmatically trigger a browser file download for the given ``Blob``.
  *
  * Creates a temporary object URL, clicks a synthetic ``<a>`` element to
- * initiate the download, then immediately cleans up both the element and
- * the URL.
+ * initiate the download and removes the element, then releases the URL after
+ * the browser has had time to begin saving it.
  *
  * :param blob: The file data to download.
  * :param filename: The suggested filename presented to the browser's save dialog.
@@ -119,7 +119,7 @@ export function fileContentToBlob(data: FileContentResponse): Blob {
 export function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   clickDownloadLink(url, filename);
-  URL.revokeObjectURL(url);
+  window.setTimeout(URL.revokeObjectURL.bind(URL, url), 1000);
 }
 
 function clickDownloadLink(href: string, filename: string): void {

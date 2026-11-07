@@ -23,6 +23,7 @@ interface CopyPathButtonProps {
    * Tailwind ``group`` class. Omit for always-visible placements (the header).
    */
   revealOnHover?: boolean;
+  size?: "icon-xs" | "icon-sm";
 }
 
 /**
@@ -41,6 +42,7 @@ export function CopyPathButton({
   path,
   label = "Copy path",
   revealOnHover = false,
+  size = "icon-sm",
 }: CopyPathButtonProps) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
@@ -84,7 +86,7 @@ export function CopyPathButton({
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
+          size={size}
           aria-label={`${label}: ${filename}`}
           className={cn(
             "transition-opacity",

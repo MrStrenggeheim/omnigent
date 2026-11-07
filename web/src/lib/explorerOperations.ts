@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "@/lib/identity";
+import { triggerBrowserDownload } from "@/hooks/useFileContent";
 
 /* eslint-disable no-await-in-loop -- Directory readers return batches in order and nested reads depend on their parents. */
 
@@ -131,14 +132,7 @@ export function downloadBase64(content: string, filename: string, mimeType: stri
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  triggerBrowserDownload(blob, filename);
 }
 
 export interface UploadItem {

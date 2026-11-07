@@ -10,6 +10,7 @@ import { DownloadIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { downloadWorkspaceFile } from "@/hooks/useFileContent";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface FileDownloadButtonProps {
@@ -17,6 +18,8 @@ interface FileDownloadButtonProps {
   conversationId: string;
   /** Workspace-relative file path, e.g. ``"src/main.py"``. */
   path: string;
+  revealOnHover?: boolean;
+  onDownload?: () => Promise<void>;
 }
 
 /**
@@ -32,7 +35,12 @@ interface FileDownloadButtonProps {
  * :param conversationId: Session ID used to fetch file content from the API.
  * :param path: Workspace-relative path of the file to download.
  */
-export function FileDownloadButton({ conversationId, path }: FileDownloadButtonProps) {
+export function FileDownloadButton({
+  conversationId,
+  path,
+  revealOnHover = true,
+  onDownload,
+}: FileDownloadButtonProps) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(false);
   const errorTimerRef = useRef<number>(0);
@@ -50,7 +58,8 @@ export function FileDownloadButton({ conversationId, path }: FileDownloadButtonP
     setDownloading(true);
     setDownloadError(false);
     try {
-      await downloadWorkspaceFile(conversationId, path);
+      if (onDownload) await onDownload();
+      else await downloadWorkspaceFile(conversationId, path);
     } catch {
       setDownloadError(true);
       window.clearTimeout(errorTimerRef.current);
@@ -65,21 +74,22 @@ export function FileDownloadButton({ conversationId, path }: FileDownloadButtonP
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           aria-label={`Download ${filename}`}
           className={cn(
-            "shrink-0 cursor-pointer rounded p-0.5 transition-opacity",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "transition-opacity text-muted-foreground",
             downloadError
               ? "text-destructive opacity-100"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+              : revealOnHover && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
           )}
           onClick={handleClick}
           disabled={downloading}
         >
           <DownloadIcon className="size-3.5" />
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom">
         {downloadError ? "Download failed" : "Download"}

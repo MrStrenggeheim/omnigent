@@ -3,15 +3,11 @@ import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
-  ROW_ACTION_SIZE_CLASS,
   ROW_META_SLOT_CLASS,
   ROW_STATUS_SLOT_CLASS,
-  formatBytes,
   gitStatusLabel,
   gitStatusLetter,
 } from "./fileStatusUtils";
-import { CopyPathButton } from "./CopyPathButton";
-import { FileDownloadButton } from "./FileDownloadButton";
 import { useRevealMenu } from "./RevealInFileManager";
 import { useCursorTooltip } from "./useCursorTooltip";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
@@ -94,7 +90,6 @@ function FileListItem({
   const explorer = useExplorerRow(file.path, false, isDeleted);
   const slash = file.path.lastIndexOf("/");
   const dir = slash > 0 ? file.path.slice(0, slash) : "";
-  const hasDownload = !isDeleted && Boolean(conversationId);
 
   return (
     <li>
@@ -123,7 +118,6 @@ function FileListItem({
           </span>
           {dir && <span className="truncate text-muted-foreground text-sm">{dir}</span>}
         </button>
-        <ExplorerRowActions path={file.path} deleted={isDeleted} />
         {/* Fixed-width and always rendered: a variable diffstat ("+7 −1" vs
             "+1204 −318") would otherwise shift the copy button and status
             letter to a different x on every row. */}
@@ -163,25 +157,12 @@ function FileListItem({
             {gitStatusLetter(file.status)}
           </span>
         </span>
-        {/* File size at rest, replaced by copy/download actions on hover — the
-            same far-right slot used by the Files tree. */}
-        <span
-          className={cn("relative flex shrink-0 items-center justify-end", ROW_META_SLOT_CLASS)}
-        >
-          {file.bytes !== null && !isDeleted && (
-            <span className="text-muted-foreground text-sm group-hover:invisible">
-              {formatBytes(file.bytes)}
-            </span>
-          )}
-          <span className="absolute inset-0 flex items-center justify-end gap-1">
-            {hasDownload && conversationId ? (
-              <FileDownloadButton conversationId={conversationId} path={file.path} />
-            ) : (
-              <span className={cn("shrink-0", ROW_ACTION_SIZE_CLASS)} aria-hidden />
-            )}
-            <CopyPathButton path={file.path} revealOnHover />
-          </span>
-        </span>
+        <ExplorerRowActions
+          path={file.path}
+          deleted={isDeleted}
+          bytes={file.bytes}
+          conversationId={conversationId}
+        />
         {reveal.menu}
       </div>
       {tooltip}
@@ -238,10 +219,10 @@ export function FlatFileList({
     [files, showHidden, searchQuery, sort],
   );
   useExplorerTree(explorerEntries);
-  if (isLoading) {
+  if (isLoading && !files) {
     return <p className="px-2 py-1 text-muted-foreground text-sm">Loading…</p>;
   }
-  if (isError) {
+  if (isError && !files) {
     // Runner not connected. If it went offline after being up (host
     // restarted), guide the user to send a message to reconnect. If the
     // session just hasn't started, it isn't "asleep" — show the empty

@@ -6,10 +6,12 @@ Filename search remains a separate control in Files.
 ## Sub-features
 
 - `search`: search automatically after a short typing pause, or submit with Enter/Search; cancel an active request.
+- `supersede`: typing a newer query cancels a pending older request and searches the latest input.
 - `options`: match case, whole words, regular expressions, include/exclude globs and readable ignore files.
 - `scope`: follow the browsed folder, search a chosen folder or pin the search folder while browsing elsewhere.
 - `navigate`: group matches by file, collapse groups and open a match at its exact line and column.
 - `replace`: preview one occurrence, a file or checked matches; review before/after text before applying.
+- `selection`: replacement selection uses the shared checkbox, including an indeterminate Select all state for partial selections.
 - `captures`: expand numeric/named capture groups and optionally preserve matched text case.
 - `recovery`: reject stale file snapshots, report per-file failures and undo a replacement without overwriting newer edits.
 - `states`: initial, searching, cancelled, no matches, errors, partial results, preview, applied and restored.

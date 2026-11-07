@@ -11,6 +11,7 @@ import {
 import { authenticatedFetch, getCurrentUserId } from "@/lib/identity";
 import { useCanEdit } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import type { OpenFileOptions } from "./FileViewerContext";
@@ -192,8 +193,16 @@ export function ContentSearchPanel({
       return { ...body, query: snapshot.query, snapshot };
     },
   });
-  const refetchRef = useRef(search.refetch);
-  refetchRef.current = search.refetch;
+  const cancelSearch = useCallback(() => {
+    searchControllers.get(JSON.stringify(searchKey))?.abort();
+    return queryClient.cancelQueries({ queryKey: searchKey, exact: true });
+  }, [queryClient, searchKey]);
+  async function submitSearch() {
+    await cancelSearch();
+    return search.refetch();
+  }
+  const refetchRef = useRef(submitSearch);
+  refetchRef.current = submitSearch;
   useEffect(() => {
     queryClient.setQueryData(["content-search-input", conversationId], input);
   }, [conversationId, input, queryClient]);
@@ -212,7 +221,7 @@ export function ContentSearchPanel({
     return () => window.clearTimeout(timer);
   }, [signature]);
   useEffect(() => {
-    setSelected(new Set((search.data?.matches ?? []).map(matchId)));
+    setSelected(new Set((search.data?.matches ?? []).filter((match) => match.sha256).map(matchId)));
     setPreview(null);
     revision.current += 1;
   }, [search.data]);
@@ -329,9 +338,8 @@ export function ContentSearchPanel({
   }
   const update = <K extends keyof SearchInput>(key: K, value: SearchInput[K]) =>
     setInput((previous) => ({ ...previous, [key]: value }));
-  const selectedMatches = (search.data?.matches ?? []).filter(
-    (match) => selected.has(matchId(match)) && match.sha256,
-  );
+  const replaceableMatches = (search.data?.matches ?? []).filter((match) => match.sha256);
+  const selectedMatches = replaceableMatches.filter((match) => selected.has(matchId(match)));
 
   return (
     <section aria-label="Content search" className="flex min-h-0 flex-1 flex-col">
@@ -339,7 +347,7 @@ export function ContentSearchPanel({
         className="space-y-2 border-b border-border p-3"
         onSubmit={(event) => {
           event.preventDefault();
-          if (input.query.trim()) void search.refetch();
+          if (input.query.trim()) void submitSearch();
         }}
       >
         <div className="flex gap-2">
@@ -369,14 +377,7 @@ export function ContentSearchPanel({
             </Button>
           </div>
           {search.isFetching ? (
-            <Button
-              type="button"
-              aria-label="Cancel search"
-              onClick={() => {
-                searchControllers.get(JSON.stringify(searchKey))?.abort();
-                void queryClient.cancelQueries({ queryKey: searchKey });
-              }}
-            >
+            <Button type="button" aria-label="Cancel search" onClick={() => void cancelSearch()}>
               <XIcon className="size-4" />
             </Button>
           ) : (
@@ -387,26 +388,23 @@ export function ContentSearchPanel({
         </div>
         <div className="flex flex-wrap gap-3 text-xs">
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={input.caseSensitive}
-              onChange={(event) => update("caseSensitive", event.target.checked)}
+              onCheckedChange={(checked) => update("caseSensitive", checked === true)}
             />
             Match case
           </label>
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={input.wholeWord}
-              onChange={(event) => update("wholeWord", event.target.checked)}
+              onCheckedChange={(checked) => update("wholeWord", checked === true)}
             />
             Whole word
           </label>
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={input.regex}
-              onChange={(event) => update("regex", event.target.checked)}
+              onCheckedChange={(checked) => update("regex", checked === true)}
             />
             Regular expression
           </label>
@@ -438,10 +436,9 @@ export function ContentSearchPanel({
             />
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <label className="flex items-center gap-1.5">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={input.preserveCase}
-                  onChange={(event) => update("preserveCase", event.target.checked)}
+                  onCheckedChange={(checked) => update("preserveCase", checked === true)}
                 />
                 Preserve case
               </label>
@@ -509,13 +506,12 @@ export function ContentSearchPanel({
             />
           </label>
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={input.pinned}
-              onChange={(event) =>
+              onCheckedChange={(checked) =>
                 setInput((previous) => ({
                   ...previous,
-                  pinned: event.target.checked,
+                  pinned: checked === true,
                   folder: effectiveFolder,
                 }))
               }
@@ -523,10 +519,9 @@ export function ContentSearchPanel({
             Pin search folder
           </label>
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={input.useIgnore}
-              onChange={(event) => update("useIgnore", event.target.checked)}
+              onCheckedChange={(checked) => update("useIgnore", checked === true)}
             />
             Use ignore files
           </label>
@@ -609,15 +604,19 @@ export function ContentSearchPanel({
           <>
             <div className="flex items-center gap-2 p-2 text-xs text-muted-foreground">
               {showReplace && (
-                <input
-                  type="checkbox"
+                <Checkbox
                   aria-label="Select all matches"
                   checked={
-                    !!search.data.matches.length && selected.size === search.data.matches.length
+                    selectedMatches.length === 0
+                      ? false
+                      : selectedMatches.length === replaceableMatches.length
+                        ? true
+                        : "indeterminate"
                   }
-                  onChange={(event) => {
+                  disabled={busy || !replaceableMatches.length}
+                  onCheckedChange={(checked) => {
                     setSelected(
-                      event.target.checked ? new Set(search.data.matches.map(matchId)) : new Set(),
+                      checked === true ? new Set(replaceableMatches.map(matchId)) : new Set(),
                     );
                     setPreview(null);
                     revision.current += 1;
@@ -686,15 +685,14 @@ export function ContentSearchPanel({
                   matches.map((match) => (
                     <div key={matchId(match)} className="flex items-center">
                       {showReplace && (
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           aria-label={`Select ${path} line ${match.line} column ${match.column}`}
                           checked={selected.has(matchId(match))}
                           disabled={!match.sha256 || busy}
-                          onChange={(event) => {
+                          onCheckedChange={(checked) => {
                             setSelected((previous) => {
                               const next = new Set(previous);
-                              if (event.target.checked) next.add(matchId(match));
+                              if (checked === true) next.add(matchId(match));
                               else next.delete(matchId(match));
                               return next;
                             });

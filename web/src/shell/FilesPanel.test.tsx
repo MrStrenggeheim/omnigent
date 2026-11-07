@@ -1,5 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render as renderComponent,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { useState, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,6 +90,15 @@ const useSearchMock = vi.mocked(useWorkspaceFileSearch);
 const allFilesRefetchMock = vi.fn(() => Promise.resolve());
 const changedFilesRefetchMock = vi.fn(() => Promise.resolve());
 const searchRefetchMock = vi.fn(() => Promise.resolve());
+
+function render(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderComponent(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 function file(path: string, bytes = 10): WorkspaceFile {
   return {
@@ -2015,7 +2032,6 @@ describe("FilesPanel header copy path", () => {
       "conv_refresh_files",
       expect.any(Array),
       "",
-      1,
     );
   });
 

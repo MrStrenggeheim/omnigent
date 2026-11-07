@@ -28,6 +28,11 @@ def _apply_name(page: Page, name: str) -> None:
     expect(dialog).not_to_be_visible(timeout=20_000)
 
 
+def _open_row_actions(panel: Locator, path: str) -> None:
+    _entry(panel, path).hover()
+    panel.get_by_role("button", name=f"Actions for {path}", exact=True).click()
+
+
 def test_explorer_manages_files_transfers_and_recovery(
     page: Page, seeded_session: tuple[str, str], tmp_path: Path
 ) -> None:
@@ -69,9 +74,9 @@ def test_explorer_manages_files_transfers_and_recovery(
         page.keyboard.press("Escape")
         expect(_entry(panel, "duplicate.txt")).to_be_visible()
 
-        panel.get_by_role("button", name="Actions for renamed.txt", exact=True).click()
+        _open_row_actions(panel, "renamed.txt")
         page.get_by_role("menuitem", name="Copy", exact=True).click()
-        panel.get_by_role("button", name="Actions for library", exact=True).click()
+        _open_row_actions(panel, "library")
         with page.expect_response(
             lambda response: (
                 response.request.method == "POST" and "/filesystem-operations" in response.url
@@ -81,7 +86,7 @@ def test_explorer_manages_files_transfers_and_recovery(
         assert copied.value.ok
         assert _read_file(base_url, session_id, "library/renamed.txt") == ""
 
-        panel.get_by_role("button", name="Actions for duplicate.txt", exact=True).click()
+        _open_row_actions(panel, "duplicate.txt")
         page.get_by_role("menuitem", name="Move to…", exact=True).click()
         dialog = page.get_by_role("dialog")
         dialog.get_by_role("textbox", name="Destination folder").fill("library")
@@ -154,9 +159,7 @@ def test_workspace_search_replace_preview_and_undo(
             page.get_by_role("menuitem", name="Files", exact=True).click()
             page.get_by_role("button", name="New file", exact=True).filter(visible=True).click()
             _apply_name(page, "phone.txt")
-            page.get_by_role("button", name="Actions for phone.txt", exact=True).filter(
-                visible=True
-            ).click()
+            _open_row_actions(page.get_by_test_id("files-panel-drawer"), "phone.txt")
             page.get_by_role("menuitem", name="Rename…", exact=True).click()
             _apply_name(page, "phone-renamed.txt")
             assert _read_file(base_url, session_id, "phone-renamed.txt") == ""
@@ -268,6 +271,7 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         page.keyboard.press("F2")
         _apply_name(page, "keyboard.txt")
         expect(_entry(panel, "keyboard.txt")).to_be_visible()
+        _entry(panel, "keyboard.txt").hover()
         panel.get_by_role("checkbox", name="Select keyboard.txt", exact=True).check()
         panel.get_by_role("checkbox", name="Select b.txt", exact=True).check()
         expect(panel.get_by_text("2 selected", exact=True)).to_be_visible()
@@ -306,4 +310,82 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         _seed_file(base_url, session_id, "target/external.txt", "Changed outside the Explorer.\n")
         expect(_entry(panel, "target/external.txt")).to_be_visible(timeout=20_000)
     finally:
+        _cleanup_session_workdir(session_id)
+
+
+def test_explorer_background_refresh_and_shared_hover_controls(
+    page: Page, seeded_session: tuple[str, str]
+) -> None:
+    base_url, session_id = seeded_session
+    for path in ("a.txt", "b.txt", "parent/nested/kept.txt"):
+        _seed_file(base_url, session_id, path, "contents\n")
+    held: list[Route] = []
+
+    def delay_refresh(route: Route) -> None:
+        held.append(route)
+
+    endpoint = re.compile(
+        rf"/sessions/{session_id}/resources/environments/default/filesystem/parent/nested(?:\?|$)"
+    )
+    try:
+        page.goto(f"{base_url}/c/{session_id}?view=explore")
+        panel = page.get_by_role("complementary", name="Workspace")
+        first = _entry(panel, "a.txt")
+        expect(first).to_be_visible(timeout=30_000)
+        search = panel.get_by_role("searchbox", name="Search all files")
+        search.click()
+        expect(first.locator("[data-file-actions]")).to_have_css("opacity", "0")
+        expect(first.locator("[data-file-size]")).to_be_visible()
+        expect(first.get_by_role("checkbox").locator("..")).to_have_css("opacity", "0")
+        first.hover()
+        expect(first.locator("[data-file-actions]")).to_have_css("opacity", "1")
+        expect(first.locator("[data-file-size]")).not_to_be_visible()
+        assert first.locator("[data-explorer-action] button").evaluate_all(
+            "buttons => buttons.map(button => button.getAttribute('aria-label'))"
+        ) == ["Select a.txt", "Download a.txt", "Copy path: a.txt", "Actions for a.txt"]
+        first.get_by_role("checkbox", name="Select a.txt").check()
+        search.click()
+        search.hover()
+        second = _entry(panel, "b.txt")
+        expect(second.get_by_role("checkbox").locator("..")).to_have_css("opacity", "1")
+        expect(second.locator("[data-file-actions]")).to_have_css("opacity", "0")
+        expect(second.locator("[data-file-size]")).to_be_visible()
+        first.hover()
+        first.get_by_role("checkbox", name="Select a.txt").uncheck()
+        _entry(panel, "parent").get_by_role("button", name="parent/", exact=True).click()
+        nested = _entry(panel, "parent/nested")
+        expect(nested).to_be_visible(timeout=15_000)
+        nested.get_by_role("button", name="nested/", exact=True).click()
+        kept = _entry(panel, "parent/nested/kept.txt")
+        expect(kept).to_be_visible(timeout=15_000)
+        page.route(endpoint, delay_refresh)
+        # The existing poll must update the same queries, retaining nested rows in flight.
+        with page.expect_request(
+            lambda request: bool(endpoint.search(request.url)), timeout=20_000
+        ):
+            search.click()
+        expect(kept).to_be_visible()
+        expect(nested.get_by_role("button", name="nested/", exact=True)).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        assert len(held) == 1
+        held.pop().continue_()
+        page.unroute(endpoint, delay_refresh)
+        expect(kept).to_be_visible()
+        files = page.evaluate_handle("""() => {
+            const transfer = new DataTransfer();
+            transfer.items.add(new File(['dropped'], 'drop.txt', {type: 'text/plain'}));
+            return transfer;
+        }""")
+        first.dispatch_event("dragenter", {"dataTransfer": files})
+        overlay = panel.get_by_test_id("file-drop-overlay")
+        expect(overlay).to_be_visible()
+        expect(overlay.locator(".border-dashed")).to_have_count(1)
+        first.dispatch_event("drop", {"dataTransfer": files})
+        expect(overlay).not_to_be_visible()
+        expect(page.get_by_role("dialog", name="Upload 1 file(s)")).to_be_visible()
+        page.get_by_role("dialog").get_by_role("button", name="Cancel", exact=True).click()
+    finally:
+        for route in held:
+            route.continue_()
         _cleanup_session_workdir(session_id)

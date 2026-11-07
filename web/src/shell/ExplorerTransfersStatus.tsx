@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   cancelExplorerTransfer,
   dismissExplorerTransfer,
@@ -32,7 +33,10 @@ export function ExplorerTransfersStatus() {
             </span>
           </div>
           {transferIsActive(transfer) && (
-            <progress className="w-full" max={transfer.total || 1} value={transfer.completed} />
+            <Progress
+              aria-label={`${transfer.kind} progress`}
+              value={Math.min(100, (transfer.completed / (transfer.total || 1)) * 100)}
+            />
           )}
           <div className="flex items-center justify-between gap-2">
             <span

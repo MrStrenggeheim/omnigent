@@ -12,6 +12,7 @@ import { downloadBlob, filesystemOperation } from "@/lib/explorerOperations";
 import type { ExplorerEntry, FilesystemOperationResult } from "@/lib/explorerOperations";
 import type * as ExplorerOperationsModule from "@/lib/explorerOperations";
 import { ExplorerTransfersStatus } from "./ExplorerTransfersStatus";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   dismissExplorerTransfer,
   getExplorerTransfers,
@@ -53,7 +54,7 @@ function Tree() {
 }
 function setup({ writable = true, base = "src", conversationId = "test" } = {}) {
   return render(
-    <>
+    <TooltipProvider>
       <ExplorerActionsProvider
         conversationId={conversationId}
         base={base}
@@ -68,7 +69,7 @@ function setup({ writable = true, base = "src", conversationId = "test" } = {}) 
         </div>
       </ExplorerActionsProvider>
       <ExplorerTransfersStatus />
-    </>,
+    </TooltipProvider>,
   );
 }
 async function rowMenu(path: string) {
@@ -201,6 +202,9 @@ describe("Explorer actions", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select b.txt" }));
     const payload = new Map<string, string>();
     const transfer = {
+      get types() {
+        return [...payload.keys()];
+      },
       setData: (type: string, value: string) => payload.set(type, value),
       getData: (type: string) => payload.get(type) ?? "",
       effectAllowed: "",

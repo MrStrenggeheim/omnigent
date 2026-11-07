@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useFileDropTarget } from "./useFileDropTarget";
@@ -30,6 +30,35 @@ function state(): string {
 afterEach(cleanup);
 
 describe("useFileDropTarget", () => {
+  it("shares drag tracking with internal selections and raw directory drops", () => {
+    const onDrop = vi.fn((event: DragEvent) => event.stopPropagation());
+    const onFiles = vi.fn();
+    const target = document.createElement("div");
+    document.body.append(target);
+    const inner = document.createElement("div");
+    target.append(inner);
+    const { result, unmount } = renderHook(() =>
+      useFileDropTarget(target, onFiles, {
+        additionalTypes: ["application/x-project-files"],
+        capture: true,
+        onDrop,
+      }),
+    );
+    const transfer = { types: ["application/x-project-files"], files: [] };
+    fireEvent.dragEnter(inner, { dataTransfer: transfer });
+    expect(result.current).toBe(true);
+    fireEvent.drop(inner, { dataTransfer: transfer });
+    expect(result.current).toBe(false);
+    expect(onDrop).toHaveBeenCalledTimes(1);
+    expect(onDrop.mock.calls[0][0].dataTransfer).toBe(transfer);
+    expect(onFiles).not.toHaveBeenCalled();
+    fireEvent.dragEnter(inner, { dataTransfer: transfer });
+    fireEvent.dragEnd(window);
+    expect(result.current).toBe(false);
+    unmount();
+    target.remove();
+  });
+
   it("attaches files dropped anywhere inside the target", () => {
     const onFiles = vi.fn();
     render(<Harness onFiles={onFiles} />);

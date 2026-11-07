@@ -35,6 +35,7 @@ import {
   useWorkspaceAllFiles,
   useWorkspaceChangedFiles,
   useWorkspaceDirectory,
+  useWorkspaceDirectories,
   useWorkspaceEnvironment,
   useWorkspaceFileExists,
   useWorkspaceFileSearch,
@@ -1667,6 +1668,71 @@ describe("runner-offline retry liveness gate", () => {
 });
 
 describe("browse-location listings normalize to paths relative to the location", () => {
+  it("keeps nested directory data and cache identities while refreshing in the background", async () => {
+    onlineMock.mockReturnValue(true);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    const paths = ["src", "src/nested"];
+    const cachedEntries = [
+      { path: "src/nested/kept.txt", name: "kept.txt", type: "file", bytes: 1, modified_at: null },
+    ];
+    for (const path of paths)
+      client.setQueryData(["workspace-dir", "stable-tree", path, ""], cachedEntries);
+    let finish!: (response: Response) => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useWorkspaceDirectories("stable-tree", paths), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const initialKeys = client
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.queryHash);
+    let refreshing!: Promise<void>;
+    act(() => {
+      refreshing = client.invalidateQueries({
+        queryKey: ["workspace-dir", "stable-tree", "src/nested"],
+      });
+    });
+    expect(result.current.get("src/nested")).toEqual({
+      data: cachedEntries,
+      isLoading: false,
+      isError: false,
+    });
+    await act(async () => {
+      finish(
+        jsonResponse({
+          data: [
+            {
+              path: "src/nested/new.txt",
+              name: "new.txt",
+              type: "file",
+              bytes: 2,
+              modified_at: null,
+            },
+          ],
+          has_more: false,
+        }),
+      );
+      await refreshing;
+    });
+    await waitFor(() => expect(result.current.get("src/nested")?.data?.[0].name).toBe("new.txt"));
+    expect(result.current.get("src")?.data).toEqual(cachedEntries);
+    expect(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.queryHash),
+    ).toEqual(initialKeys);
+  });
+
   // The runner answers the two wire forms with DIFFERENT path shapes: a
   // relative location is echoed back as a prefix on every entry, an absolute
   // one is not. The panel picks the wire form on authorization grounds, so it

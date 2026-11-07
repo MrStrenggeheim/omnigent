@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -178,10 +178,13 @@ it("keeps an in-flight search across switches without mixing conversations", asy
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "first" } });
   fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
   await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(1));
+  const firstSignal = vi.mocked(authenticatedFetch).mock.calls[0][1]?.signal;
   rerender(view("session-two"));
+  expect(firstSignal?.aborted).toBe(false);
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "second" } });
   fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
   expect(await screen.findByText("No matches for “second”.")).toBeInTheDocument();
+  expect(firstSignal?.aborted).toBe(false);
   rerender(view("session-one"));
   expect(screen.getByText("Searching…")).toBeInTheDocument();
   expect(screen.getByRole("searchbox")).toHaveValue("first");
@@ -193,6 +196,51 @@ it("keeps an in-flight search across switches without mixing conversations", asy
   expect(await screen.findByText("No matches for “first”.")).toBeInTheDocument();
   expect(authenticatedFetch).toHaveBeenCalledTimes(2);
 });
+
+it.each(["typing", "submit"])(
+  "supersedes a pending first search through %s and ignores its late response",
+  async (trigger) => {
+    let resolveFirst!: (response: Response) => void;
+    vi.mocked(authenticatedFetch)
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ matches: [], truncated: false, warning: null })),
+      );
+    const client = new QueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <ContentSearchPanel conversationId="superseded" onFileSelect={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "first" } });
+    fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(1));
+    const firstSignal = vi.mocked(authenticatedFetch).mock.calls[0][1]?.signal;
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "second" } });
+    if (trigger === "submit") fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
+    expect(await screen.findByText("No matches for “second”.")).toBeVisible();
+    expect(firstSignal?.aborted).toBe(true);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(2);
+    const latestUrl = new URL(
+      String(vi.mocked(authenticatedFetch).mock.calls[1][0]),
+      "http://test",
+    );
+    expect(latestUrl.searchParams.get("q")).toBe("second");
+    await act(async () => {
+      resolveFirst(new Response(JSON.stringify({ matches: [], truncated: false, warning: null })));
+    });
+    expect(screen.getByText("No matches for “second”.")).toBeVisible();
+    expect(screen.queryByText("No matches for “first”.")).not.toBeInTheDocument();
+    expect(client.getQueryData(["content-search-result", "superseded", ""])).toMatchObject({
+      query: "second",
+    });
+  },
+);
 
 it("hides a previous error while retrying and displays runner warnings", async () => {
   let resolveRetry!: (response: Response) => void;
@@ -341,6 +389,8 @@ it("previews selected replacements, applies searched snapshots and can undo them
     await screen.findByRole("button", { name: "Open src/main.py at line 1" }),
   ).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Replace with"), { target: { value: "thread" } });
+  fireEvent.click(screen.getByLabelText("Preserve case"));
+  expect(screen.getByLabelText("Preserve case")).toBeChecked();
   fireEvent.click(screen.getByRole("button", { name: "Preview replacements (1)" }));
   expect(await screen.findByText("Review replacements")).toBeInTheDocument();
   expect(posts[0]).toMatchObject({
@@ -348,6 +398,7 @@ it("previews selected replacements, applies searched snapshots and can undo them
     path: "src",
     query: "needle",
     replacement: "thread",
+    preserve_case: true,
     matches: [match],
   });
   expect(posts).toHaveLength(1);
@@ -360,6 +411,55 @@ it("previews selected replacements, applies searched snapshots and can undo them
   fireEvent.click(screen.getByRole("button", { name: "Undo replacement" }));
   expect(await screen.findByText("Restored 1 files.")).toBeInTheDocument();
   expect(posts[2]).toMatchObject({ action: "undo", path: "src", undo_id: "undo-token" });
+});
+
+it("uses shared replacement checkboxes with mixed, all and empty selection states", async () => {
+  const matches = [1, 2, 3].map((line) => ({
+    id: `a:${line}`,
+    path: "a.txt",
+    line,
+    column: 1,
+    text: "needle",
+    match_start: 0,
+    match_end: 6,
+    sha256: line === 3 ? null : "snapshot",
+  }));
+  vi.mocked(authenticatedFetch).mockResolvedValue(
+    new Response(JSON.stringify({ matches, truncated: false, warning: null })),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ContentSearchPanel conversationId="selection" replaceOpen onFileSelect={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "needle" } });
+  fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
+  const all = await screen.findByRole("checkbox", { name: "Select all matches" });
+  const first = screen.getByRole("checkbox", { name: "Select a.txt line 1 column 1" });
+  const second = screen.getByRole("checkbox", { name: "Select a.txt line 2 column 1" });
+  const unavailable = screen.getByRole("checkbox", { name: "Select a.txt line 3 column 1" });
+  expect(all).toBeChecked();
+  expect(unavailable).toBeDisabled();
+  expect(unavailable).not.toBeChecked();
+  fireEvent.click(first);
+  expect(all).toBePartiallyChecked();
+  expect(screen.getByRole("button", { name: "Preview replacements (1)" })).toBeEnabled();
+  fireEvent.click(all);
+  expect(all).toBeChecked();
+  expect(first).toBeChecked();
+  expect(second).toBeChecked();
+  expect(unavailable).not.toBeChecked();
+  fireEvent.click(all);
+  expect(all).not.toBeChecked();
+  expect(all).not.toBePartiallyChecked();
+  expect(first).not.toBeChecked();
+  expect(second).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "Preview replacements (0)" })).toBeDisabled();
+  fireEvent.click(first);
+  expect(all).toBePartiallyChecked();
+  fireEvent.click(second);
+  expect(all).toBeChecked();
+  expect(screen.getByRole("button", { name: "Preview replacements (2)" })).toBeEnabled();
 });
 
 it("keeps replacement closed for ordinary search focus requests", () => {

@@ -16,10 +16,18 @@ import {
   FolderPlusIcon,
   ListCollapseIcon,
   MoreHorizontalIcon,
+  XIcon,
   SearchIcon,
   UploadIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
+import { CopyPathButton } from "./CopyPathButton";
+import { FileDownloadButton } from "./FileDownloadButton";
+import { formatBytes } from "./fileStatusUtils";
+import { useFileDropTarget } from "@/hooks/useFileDropTarget";
+import { FileDropOverlay } from "@/components/FileDropOverlay";
 import {
   Dialog,
   DialogContent,
@@ -84,6 +92,7 @@ interface TreeControls {
   reveal?: (path: string) => void;
 }
 interface ExplorerContextValue {
+  conversationId: string | undefined;
   base: string;
   writable: boolean;
   selected: Map<string, ExplorerEntry>;
@@ -94,6 +103,7 @@ interface ExplorerContextValue {
   setFocused: (path: string) => void;
   startDrag: (entry: ExplorerEntry, transfer: DataTransfer) => void;
   drop: (entry: ExplorerEntry, transfer: DataTransfer, copy: boolean) => void;
+  download: (entries: ExplorerEntry[]) => Promise<void>;
   newItem: (directory: boolean, parent?: string) => void;
   search: (path: string) => void;
   collapse: () => void;
@@ -102,8 +112,18 @@ interface ExplorerContextValue {
   feedback: ReactNode;
   chooseUpload: (directory: boolean, path?: string) => void;
   busy: boolean;
+  isDragActive: boolean;
 }
 const ExplorerContext = createContext<ExplorerContextValue | null>(null);
+
+function RevealFileMenuItem({ entry }: { entry: ExplorerEntry }) {
+  const target = useRevealTarget(entry.path);
+  return target ? (
+    <DropdownMenuItem onSelect={() => revealInFileManager(target)}>
+      {revealLabel(entry.directory)}
+    </DropdownMenuItem>
+  ) : null;
+}
 
 export function useExplorerTree(controls: TreeControls): void {
   const registerTree = useContext(ExplorerContext)?.registerTree;
@@ -117,6 +137,12 @@ export function useExplorerRow(path: string, directory: boolean, deleted = false
   const entry = { path: canonical, directory };
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
+  useEffect(() => {
+    if (!ctx?.isDragActive) {
+      clearTimeout(timer.current ?? undefined);
+      timer.current = null;
+    }
+  }, [ctx?.isDragActive]);
   if (!ctx || deleted)
     return { selected: false, props: {} as HTMLAttributes<HTMLDivElement>, path: canonical };
   const props: HTMLAttributes<HTMLDivElement> & {
@@ -154,6 +180,12 @@ export function useExplorerRow(path: string, directory: boolean, deleted = false
     onDragOver:
       directory && ctx.writable
         ? (event) => {
+            if (
+              !Array.from(event.dataTransfer.types ?? []).some(
+                (type) => type === "Files" || type === DRAG_TYPE,
+              )
+            )
+              return;
             event.preventDefault();
             event.stopPropagation();
             event.currentTarget.dataset.dropTarget = "true";
@@ -174,17 +206,11 @@ export function useExplorerRow(path: string, directory: boolean, deleted = false
       clearTimeout(timer.current ?? undefined);
       timer.current = null;
     },
-    onDrop:
-      directory && ctx.writable
-        ? (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            delete event.currentTarget.dataset.dropTarget;
-            clearTimeout(timer.current ?? undefined);
-            timer.current = null;
-            ctx.drop(entry, event.dataTransfer, event.ctrlKey || event.metaKey);
-          }
-        : undefined,
+    onDragEnd: (event) => {
+      delete event.currentTarget.dataset.dropTarget;
+      clearTimeout(timer.current ?? undefined);
+      timer.current = null;
+    },
   };
   return { selected: ctx.selected.has(canonical), props, path: canonical };
 }
@@ -226,6 +252,11 @@ export function ExplorerActionsProvider({
   const anchor = useRef<string | null>(null);
   const tree = useRef<TreeControls>({ entries: [] });
   const root = useRef<HTMLDivElement>(null);
+  const [dropTarget, setDropTarget] = useState<HTMLDivElement | null>(null);
+  const setRoot = useCallback((element: HTMLDivElement | null) => {
+    root.current = element;
+    setDropTarget(element);
+  }, []);
   const [point, setPoint] = useState<{ entry: ExplorerEntry; x: number; y: number } | null>(null);
   const [dialog, setDialog] = useState<ActionDialog | null>(null);
   const [value, setValue] = useState("");
@@ -248,7 +279,6 @@ export function ExplorerActionsProvider({
   const uploadDestination = useRef(base);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
-  const revealTarget = useRevealTarget(point?.entry.path ?? null);
   const registerTree = useCallback(
     (controls: TreeControls) => {
       tree.current = {
@@ -506,11 +536,7 @@ export function ExplorerActionsProvider({
         <DropdownMenuItem onSelect={() => void run(() => copyText(target.path))}>
           Copy relative path
         </DropdownMenuItem>
-        {revealTarget && (
-          <DropdownMenuItem onSelect={() => revealInFileManager(revealTarget)}>
-            {revealLabel(target.directory)}
-          </DropdownMenuItem>
-        )}
+        <RevealFileMenuItem entry={target} />
         <DropdownMenuItem disabled={!writable || busy} onSelect={() => void run(loadTrash)}>
           Restore deleted files…
         </DropdownMenuItem>
@@ -574,7 +600,30 @@ export function ExplorerActionsProvider({
     }
   };
 
+  const isDragActive = useFileDropTarget(writable ? dropTarget : null, () => {}, {
+    additionalTypes: [DRAG_TYPE],
+    capture: true,
+    onDrop: (event) => {
+      const folder = (event.target as HTMLElement).closest<HTMLElement>(
+        "[data-explorer-entry][data-directory=true]",
+      );
+      event.stopPropagation();
+      drop(
+        { path: folder?.dataset.explorerEntry ?? base, directory: true },
+        event.dataTransfer!,
+        event.ctrlKey || event.metaKey,
+      );
+    },
+  });
+  useEffect(() => {
+    if (isDragActive) return;
+    root.current
+      ?.querySelectorAll<HTMLElement>("[data-drop-target]")
+      .forEach((element) => delete element.dataset.dropTarget);
+  }, [isDragActive]);
+
   const context: ExplorerContextValue = {
+    conversationId,
     base,
     writable,
     selected,
@@ -585,6 +634,7 @@ export function ExplorerActionsProvider({
     setFocused,
     startDrag,
     drop,
+    download,
     newItem: (directory, parent) =>
       openDialog(directory ? "new-folder" : "new-file", [], parent ?? base),
     search,
@@ -598,12 +648,19 @@ export function ExplorerActionsProvider({
     menu,
     chooseUpload,
     busy,
+    isDragActive,
     feedback: error && !dialog && !upload && !pasteConflict && trash === null && (
       <div role="alert" className="flex gap-2 border-t border-border p-2 text-xs text-destructive">
         <span className="min-w-0 flex-1 break-words">{error}</span>
-        <button type="button" onClick={() => setError(null)} aria-label="Dismiss file error">
-          ×
-        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={() => setError(null)}
+          aria-label="Dismiss file error"
+        >
+          <XIcon />
+        </Button>
       </div>
     ),
   };
@@ -740,25 +797,19 @@ export function ExplorerActionsProvider({
     // eslint-disable-next-line react/jsx-no-constructed-context-values
     <ExplorerContext.Provider value={context}>
       <div
-        ref={root}
-        className="contents"
+        ref={setRoot}
+        className="relative flex min-h-0 flex-1 flex-col"
         onKeyDown={onKeyDown}
         onContextMenu={(event) => {
           if ((event.target as HTMLElement).closest("input,[data-explorer-entry]")) return;
           event.preventDefault();
           openMenu({ path: base, directory: true }, event.clientX, event.clientY);
         }}
-        onDragOver={(event) => {
-          if (writable) event.preventDefault();
-        }}
-        onDrop={(event) => {
-          if (!writable || (event.target as HTMLElement).closest("[data-explorer-entry]")) return;
-          event.preventDefault();
-          event.stopPropagation();
-          drop({ path: base, directory: true }, event.dataTransfer, event.ctrlKey || event.metaKey);
-        }}
       >
         {children}
+        {isDragActive && dropTarget && (
+          <FileDropOverlay container={dropTarget} label="Drop files into this folder" />
+        )}
         <input
           ref={fileInput}
           type="file"
@@ -892,10 +943,9 @@ export function ExplorerActionsProvider({
             dialog?.kind === "duplicate" ||
             dialog?.kind === "rename") && (
             <label className="flex gap-2 text-sm">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={overwrite}
-                onChange={(event) => setOverwrite(event.target.checked)}
+                onCheckedChange={(checked) => setOverwrite(checked === true)}
               />
               Replace existing destination
             </label>
@@ -983,10 +1033,9 @@ export function ExplorerActionsProvider({
             />
           </label>
           <label className="flex gap-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={overwrite}
-              onChange={(event) => setOverwrite(event.target.checked)}
+              onCheckedChange={(checked) => setOverwrite(checked === true)}
             />
             Replace existing files
           </label>
@@ -1093,44 +1142,91 @@ export function ExplorerToolbar() {
   );
 }
 
+/** Shared trailing column for tree, filename results and changed-file rows. */
 export function ExplorerRowActions({
   path,
   directory = false,
   deleted = false,
+  bytes = null,
+  conversationId,
 }: {
   path: string;
   directory?: boolean;
   deleted?: boolean;
+  bytes?: number | null;
+  conversationId?: string;
 }) {
   const ctx = useContext(ExplorerContext);
-  if (!ctx || deleted) return null;
-  const entry = { path: joinBrowseLocation(ctx.base, path), directory };
+  const revealBase = useContext(RevealBaseContext);
+  const entry = { path: joinBrowseLocation(ctx?.base ?? revealBase, path), directory };
+  const sessionId = conversationId ?? ctx?.conversationId;
+  const selecting = !deleted && (ctx?.selected.size ?? 0) > 0;
   return (
     <span
       data-explorer-action
-      className="flex shrink-0 items-center gap-1"
+      className="relative flex h-6 w-[104px] shrink-0 items-center justify-end"
       onClick={(event) => event.stopPropagation()}
     >
-      <input
-        type="checkbox"
-        className="size-3.5 cursor-pointer accent-primary"
-        aria-label={`Select ${path}`}
-        checked={ctx.selected.has(entry.path)}
-        onChange={() => ctx.select(entry, true, false)}
-      />
-      <button
-        type="button"
-        className="rounded p-0.5 text-muted-foreground hover:bg-muted focus-visible:outline focus-visible:outline-ring"
-        aria-label={`Actions for ${path}`}
-        onClick={(event) => {
-          const box = event.currentTarget.getBoundingClientRect();
-          ctx.openMenu(entry, box.left, box.bottom);
-        }}
-      >
-        <MoreHorizontalIcon className="size-3.5" />
-      </button>
+      {bytes !== null && !deleted && (
+        <span
+          data-file-size
+          className="text-sm text-muted-foreground group-hover:invisible group-focus-within:invisible"
+        >
+          {formatBytes(bytes)}
+        </span>
+      )}
+      <span className="absolute inset-0 flex items-center justify-end gap-0.5">
+        {ctx && !deleted && (
+          <span
+            className={cn(
+              "flex size-6 shrink-0 items-center justify-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+              selecting && "opacity-100 pointer-events-auto",
+            )}
+          >
+            <Checkbox
+              aria-label={`Select ${path}`}
+              className="after:inset-0"
+              checked={ctx.selected.has(entry.path)}
+              onCheckedChange={() => ctx.select(entry, true, false)}
+            />
+          </span>
+        )}
+        <span
+          data-file-actions
+          className="flex items-center gap-0.5 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+        >
+          {!deleted && sessionId && (!directory || ctx) && (
+            <FileDownloadButton
+              conversationId={sessionId}
+              path={entry.path}
+              revealOnHover={false}
+              onDownload={directory && ctx ? () => ctx.download([entry]) : undefined}
+            />
+          )}
+          <CopyPathButton
+            path={entry.path}
+            label={directory ? "Copy folder path" : "Copy path"}
+            size="icon-xs"
+          />
+          {ctx && !deleted && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              aria-label={`Actions for ${path}`}
+              onClick={(event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+                ctx.openMenu(entry, box.left, box.bottom);
+              }}
+            >
+              <MoreHorizontalIcon />
+            </Button>
+          )}
+        </span>
+      </span>
     </span>
   );
 }
 
-export const explorerRowClass = "data-[drop-target=true]:ring-2 data-[drop-target=true]:ring-ring";
+export const explorerRowClass = "data-[drop-target=true]:bg-accent";

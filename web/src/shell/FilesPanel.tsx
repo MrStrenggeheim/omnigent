@@ -13,6 +13,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@/lib/routing";
 import { useSession } from "@/hooks/useSession";
 import { isOwnerLevel } from "@/lib/permissionsApi";
@@ -291,7 +292,8 @@ export function FilesPanel({
   const [treeExclude, setTreeExclude] = useState("");
   const [debouncedTreeExclude, setDebouncedTreeExclude] = useState("");
   const [showSearchFilters, setShowSearchFilters] = useState(false);
-  const [directoryRefreshToken, setDirectoryRefreshToken] = useState(0);
+  const queryClient = useQueryClient();
+  const refreshInFlight = useRef(false);
   const [refreshingFiles, setRefreshingFiles] = useState(false);
   // The drawer (onClose) adds an X close button to the header. Both the drawer
   // and the inline rail (frameless) fill their parent's height and drop the
@@ -443,30 +445,42 @@ export function FilesPanel({
   // Highlight the filters toggle when include/exclude carry a value.
   const treeFiltersActive = treeInclude.trim().length > 0 || treeExclude.trim().length > 0;
 
-  const refreshFiles = useCallback(async () => {
-    if (refreshingFiles) return;
-    setRefreshingFiles(true);
-    if (!flatView) setDirectoryRefreshToken((token) => token + 1);
-    try {
-      const refreshes = flatView
-        ? [changedQuery.refetch()]
-        : [
-            allFilesQuery.refetch(),
-            changedQuery.refetch(),
-            ...(debouncedTreeSearch.trim() ? [treeSearchQuery.refetch()] : []),
-          ];
-      await Promise.all(refreshes);
-    } finally {
-      setRefreshingFiles(false);
-    }
-  }, [
-    allFilesQuery,
-    changedQuery,
-    debouncedTreeSearch,
-    flatView,
-    refreshingFiles,
-    treeSearchQuery,
-  ]);
+  const refreshFiles = useCallback(
+    async (background = false) => {
+      if (refreshInFlight.current) return;
+      refreshInFlight.current = true;
+      if (!background) setRefreshingFiles(true);
+      try {
+        const refreshes = flatView
+          ? [changedQuery.refetch()]
+          : [
+              allFilesQuery.refetch(),
+              changedQuery.refetch(),
+              queryClient.invalidateQueries({
+                predicate: ({ queryKey }) =>
+                  queryKey[0] === "workspace-dir" &&
+                  queryKey[1] === conversationId &&
+                  queryKey[3] === locationParam,
+              }),
+              ...(debouncedTreeSearch.trim() ? [treeSearchQuery.refetch()] : []),
+            ];
+        await Promise.all(refreshes);
+      } finally {
+        refreshInFlight.current = false;
+        setRefreshingFiles(false);
+      }
+    },
+    [
+      allFilesQuery,
+      changedQuery,
+      debouncedTreeSearch,
+      flatView,
+      queryClient,
+      conversationId,
+      locationParam,
+      treeSearchQuery,
+    ],
+  );
 
   // Persist/restore the list's scroll position across conversation and view
   // switches. Keyed per conversation + view (Changed vs All) since the two
@@ -491,7 +505,7 @@ export function FilesPanel({
   liveRefresh.current = refreshFiles;
   useEffect(() => {
     const refreshVisible = () => {
-      if (document.visibilityState === "visible") void liveRefresh.current();
+      if (document.visibilityState === "visible") void liveRefresh.current(true);
     };
     const timer = setInterval(refreshVisible, 10_000);
     window.addEventListener("focus", refreshVisible);
@@ -604,6 +618,11 @@ export function FilesPanel({
             )}
           </div>
         </div>
+        {(flatView ? changedQuery : allFilesQuery).isError && dataReady && (
+          <p role="alert" className="px-3 py-1 text-xs text-destructive">
+            Could not refresh files. Showing the last loaded listing.
+          </p>
+        )}
         {/* Content */}
         <ExplorerToolbar />
         <div className="shrink-0 border-t border-border" />
@@ -768,7 +787,6 @@ export function FilesPanel({
               onNavigateDir={navigateToChild}
               onExitSearch={exitTreeSearch}
               scrollParentRef={scrollRef}
-              refreshToken={directoryRefreshToken}
               revealPath={revealPath}
               revealToken={revealToken}
             />

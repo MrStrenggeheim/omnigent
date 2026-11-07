@@ -177,7 +177,7 @@ describe("fileContentToBlob", () => {
 // ---------------------------------------------------------------------------
 
 describe("triggerBrowserDownload", () => {
-  it("creates and clicks a synthetic link then removes it", () => {
+  it("creates and clicks a synthetic link then removes it", async () => {
     const blob = new Blob(["data"], { type: "text/plain" });
     const createdLinks: HTMLAnchorElement[] = [];
     const origCreateElement = document.createElement.bind(document);
@@ -203,7 +203,10 @@ describe("triggerBrowserDownload", () => {
     expect(link.click).toHaveBeenCalledOnce();
     // Element must have been removed from the DOM.
     expect(document.body.contains(link)).toBe(false);
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:fake");
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:fake"), {
+      timeout: 2000,
+    });
 
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

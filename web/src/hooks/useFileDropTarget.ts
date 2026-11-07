@@ -4,9 +4,21 @@
 import { useEffect, useRef, useState } from "react";
 
 /** Files are only readable on drop, so `types` is the only mid-drag signal. */
-function carriesFiles(transfer: DataTransfer | null | undefined): boolean {
+function carriesFiles(
+  transfer: DataTransfer | null | undefined,
+  additionalTypes: readonly string[],
+): boolean {
   if (!transfer) return false;
-  return Array.from(transfer.types ?? []).includes("Files");
+  return Array.from(transfer.types ?? []).some(
+    (type) => type === "Files" || additionalTypes.includes(type),
+  );
+}
+
+interface FileDropOptions {
+  additionalTypes?: readonly string[];
+  /** Handle the raw event when directories or an internal file selection are needed. */
+  onDrop?: (event: DragEvent) => void;
+  capture?: boolean;
 }
 
 /**
@@ -17,31 +29,37 @@ function carriesFiles(transfer: DataTransfer | null | undefined): boolean {
 export function useFileDropTarget(
   target: HTMLElement | null,
   onFiles: (files: File[]) => void,
+  options: FileDropOptions = {},
 ): boolean {
   const [isDragActive, setIsDragActive] = useState(false);
   // A rebind between dragenter and drop would lose the depth count.
   const onFilesRef = useRef(onFiles);
   onFilesRef.current = onFiles;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const capture = options.capture ?? false;
 
   useEffect(() => {
     if (!target) return;
     // Enter/leave fire in pairs as the pointer crosses child elements.
     let depth = 0;
+    const accepts = (event: DragEvent) =>
+      carriesFiles(event.dataTransfer, optionsRef.current.additionalTypes ?? []);
 
     const enter = (e: DragEvent): void => {
-      if (!carriesFiles(e.dataTransfer)) return;
+      if (!accepts(e)) return;
       depth += 1;
       setIsDragActive(true);
     };
 
     const leave = (e: DragEvent): void => {
-      if (!carriesFiles(e.dataTransfer)) return;
+      if (!accepts(e)) return;
       depth = Math.max(0, depth - 1);
       if (depth === 0) setIsDragActive(false);
     };
 
     const over = (e: DragEvent): void => {
-      if (!carriesFiles(e.dataTransfer)) return;
+      if (!accepts(e)) return;
       // Without this no drop event fires, and the browser opens the file.
       e.preventDefault();
       // A drag entering from another window can arrive without a dragenter.
@@ -49,10 +67,14 @@ export function useFileDropTarget(
     };
 
     const drop = (e: DragEvent): void => {
-      if (!carriesFiles(e.dataTransfer)) return;
+      if (!accepts(e)) return;
       e.preventDefault();
       depth = 0;
       setIsDragActive(false);
+      if (optionsRef.current.onDrop) {
+        optionsRef.current.onDrop(e);
+        return;
+      }
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (files.length > 0) onFilesRef.current(files);
     };
@@ -63,20 +85,20 @@ export function useFileDropTarget(
       setIsDragActive(false);
     };
 
-    target.addEventListener("dragenter", enter);
-    target.addEventListener("dragleave", leave);
-    target.addEventListener("dragover", over);
-    target.addEventListener("drop", drop);
-    target.addEventListener("dragend", end);
+    target.addEventListener("dragenter", enter, capture);
+    target.addEventListener("dragleave", leave, capture);
+    target.addEventListener("dragover", over, capture);
+    target.addEventListener("drop", drop, capture);
+    window.addEventListener("dragend", end);
     return () => {
-      target.removeEventListener("dragenter", enter);
-      target.removeEventListener("dragleave", leave);
-      target.removeEventListener("dragover", over);
-      target.removeEventListener("drop", drop);
-      target.removeEventListener("dragend", end);
+      target.removeEventListener("dragenter", enter, capture);
+      target.removeEventListener("dragleave", leave, capture);
+      target.removeEventListener("dragover", over, capture);
+      target.removeEventListener("drop", drop, capture);
+      window.removeEventListener("dragend", end);
       setIsDragActive(false);
     };
-  }, [target]);
+  }, [target, capture]);
 
   return isDragActive;
 }
