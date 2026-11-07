@@ -382,11 +382,11 @@ to switch, or press Escape to cancel.
 
 ## Driving it with the repro environment
 
-- Project archive/restore, independent filtering, reload persistence and unchanged member sessions/settings on desktop and phone: `tests/e2e_ui/sessions/test_sidebar_project_context_menu.py::test_project_archive_filter_restore_preserves_members`.
-
 Preconditions: a running instance (`verify-env start`, then `verify-env
 doctor`), the built web UI, and at least one session (the `seeded_session`
 fixture creates one). Run each test through the instance:
+
+- Project archive/restore, independent filtering, reload persistence and unchanged member sessions/settings on desktop and phone: `tests/e2e_ui/sessions/test_sidebar_project_context_menu.py::test_project_archive_filter_restore_preserves_members`.
 
 ```sh
 verify-env run -- python -m pytest <test> --ui-skip-build --video=on \
