@@ -886,6 +886,19 @@ async def test_write_file(
     assert body["created"] is True
     assert body["bytes_written"] == 11
     assert (workspace / "new.txt").read_text() == "new content"
+    changes_url = "/v1/sessions/conv_test/resources/environments/default/changes"
+    created = await client.get(changes_url, params={"source": "agent"})
+    assert created.status_code == 200, created.text
+    assert (
+        next(row for row in created.json()["data"] if row["path"] == "new.txt")["status"]
+        == "created"
+    )
+    deleted = await client.delete(
+        "/v1/sessions/conv_test/resources/environments/default/filesystem/new.txt"
+    )
+    assert deleted.status_code == 200, deleted.text
+    remaining = await client.get(changes_url, params={"source": "agent"})
+    assert all(row["path"] != "new.txt" for row in remaining.json()["data"])
 
 
 @pytest.mark.asyncio

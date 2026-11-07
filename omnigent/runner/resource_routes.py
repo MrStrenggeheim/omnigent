@@ -1747,7 +1747,9 @@ def register_resource_routes(
             create_parents=create_parents,
         )
         if filesystem_registry is not None:
-            filesystem_registry.record_change(relative_path, result.operation, session_id)
+            filesystem_registry.record_change(
+                relative_path, "created" if result.created else "modified", session_id
+            )
         return JSONResponse(
             status_code=200,
             content={
@@ -1798,7 +1800,7 @@ def register_resource_routes(
         )
         result = await fs.edit_text(relative_path, edit_req)
         if filesystem_registry is not None:
-            filesystem_registry.record_change(relative_path, result.operation, session_id)
+            filesystem_registry.record_change(relative_path, "modified", session_id)
         return JSONResponse(
             status_code=200,
             content={
