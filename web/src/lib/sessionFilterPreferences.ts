@@ -25,6 +25,25 @@ export type SessionFilter = "all" | "mine" | "shared" | "archived";
 export const DEFAULT_SESSION_FILTER: SessionFilter = "mine";
 
 const SESSION_FILTERS = new Set<string>(["all", "mine", "shared", "archived"]);
+const PROJECT_ARCHIVE_FILTER_KEY = "omnigent:show-archived-projects";
+
+export function readShowArchivedProjects(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(PROJECT_ARCHIVE_FILTER_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function writeShowArchivedProjects(value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PROJECT_ARCHIVE_FILTER_KEY, String(value));
+  } catch {
+    // A storage failure must not prevent changing the current view.
+  }
+}
 
 /**
  * Read the persisted session filter. Returns {@link DEFAULT_SESSION_FILTER}

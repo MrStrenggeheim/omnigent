@@ -3,6 +3,8 @@ import {
   DEFAULT_SESSION_FILTER,
   readSessionFilter,
   writeSessionFilter,
+  readShowArchivedProjects,
+  writeShowArchivedProjects,
 } from "./sessionFilterPreferences";
 
 afterEach(() => {
@@ -11,6 +13,15 @@ afterEach(() => {
 });
 
 describe("sessionFilterPreferences", () => {
+  it("persists project archive visibility independently of session visibility", () => {
+    expect(readShowArchivedProjects()).toBe(false);
+    writeSessionFilter("mine");
+    writeShowArchivedProjects(true);
+    expect(readShowArchivedProjects()).toBe(true);
+    expect(readSessionFilter(true)).toBe("mine");
+    writeShowArchivedProjects(false);
+    expect(readShowArchivedProjects()).toBe(false);
+  });
   it('defaults to "mine" when nothing is stored', () => {
     // A first-time viewer lands on their own sessions rather than the whole list.
     expect(DEFAULT_SESSION_FILTER).toBe("mine");

@@ -30,13 +30,14 @@ describe("projectSummary", () => {
 });
 
 describe("cachedProjectSummaries", () => {
-  it("reuses first-class sidebar projects and ignores legacy label folders", () => {
+  it("reuses active first-class projects and ignores legacy and archived folders", () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(
       ["projects"],
       [
         { id: "proj_1", name: "Alpha", icon: "🅰️" },
         { id: null, name: "Legacy", icon: null },
+        { id: "archived", name: "Archived", archived: true, icon: null },
       ],
     );
 

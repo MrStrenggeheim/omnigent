@@ -78,11 +78,12 @@ class ProjectStore(ABC):
         ...
 
     @abstractmethod
-    def list(self, *, user_id: str | None) -> list[Project]:
+    def list(self, *, user_id: str | None, include_archived: bool = False) -> list[Project]:
         """
         List the owner's projects ordered by ``created_at ASC, id ASC``.
 
         :param user_id: The owner whose projects to return.
+        :param include_archived: Include archived projects; defaults to false.
         :returns: List of :class:`Project` instances.
         """
         ...
@@ -95,6 +96,7 @@ class ProjectStore(ABC):
         user_id: str | None,
         name: str | None = None,
         config: dict[str, Any] | None = None,
+        archived: bool | None = None,
     ) -> Project | None:
         """
         Update mutable fields of an owned project.
@@ -108,6 +110,7 @@ class ProjectStore(ABC):
             non-empty, unique among the owner's projects.
         :param config: New config object to replace the stored one, or ``None``
             to leave it unchanged. An empty dict clears the stored defaults.
+        :param archived: New archive state, or ``None`` to leave unchanged.
         :returns: The updated :class:`Project`, or ``None`` if not found.
         :raises OmnigentError: ``ALREADY_EXISTS`` if the new name collides with
             another of the owner's projects.

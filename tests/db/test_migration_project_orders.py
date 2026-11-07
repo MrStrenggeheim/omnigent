@@ -15,6 +15,11 @@ def test_project_orders_migration_round_trip(tmp_path: Path) -> None:
     store = SqlAlchemyProjectStore(uri)
     project = store.create("a" * 32, "Existing", None)
     store.save_order([project.id], user_id=None)
+    project_rows = sa.text(
+        "SELECT id, name, user_id, created_at, updated_at, config FROM projects"
+    )
+    with engine.connect() as connection:
+        projects_before = connection.execute(project_rows).all()
     config = _build_alembic_config(uri)
     with engine.begin() as connection:
         config.attributes["connection"] = connection
@@ -31,7 +36,9 @@ def test_project_orders_migration_round_trip(tmp_path: Path) -> None:
             connection.execute(sa.text("SELECT id FROM users WHERE id = 'local'")).scalar_one()
             == "local"
         )
-    assert store.get(project.id, user_id=None) == project
+    # Historical schemas cannot be read through the current Project ORM mapping.
+    with engine.connect() as connection:
+        assert connection.execute(project_rows).all() == projects_before
     with engine.begin() as connection:
         connection.execute(
             sa.text(

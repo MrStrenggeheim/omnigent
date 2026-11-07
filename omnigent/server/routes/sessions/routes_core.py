@@ -1481,6 +1481,7 @@ def register_core_routes(
     @router.get("/sessions/projects")
     async def list_session_projects(
         request: Request,
+        include_archived: bool = False,
     ) -> list[SessionProjectSummary]:
         """
         Return the caller's project summaries in their preferred display order.
@@ -1498,6 +1499,7 @@ def register_core_routes(
         their owned rows) — a project shared to them but owned by another user
         does not surface as one of their own folders.
 
+        :param include_archived: Include archived projects; defaults to false.
         :returns: Project summaries in custom order, or alphabetical order by default.
         """
         user_id = _require_user(request, auth_provider)
@@ -1506,12 +1508,13 @@ def register_core_routes(
             # First-class first so its id wins when a name exists in both.
             by_name: dict[str, SessionProjectSummary] = {}
             if project_store is not None:
-                for proj in project_store.list(user_id=user_id):
+                for proj in project_store.list(user_id=user_id, include_archived=True):
                     icon = proj.config.get("icon")
                     by_name[proj.name] = SessionProjectSummary(
                         id=proj.id,
                         name=proj.name,
                         icon=icon if isinstance(icon, str) else None,
+                        archived=proj.archived,
                     )
             # Legacy path: label-derived projects (id=None unless already first-class).
             for name in sorted(conversation_store.list_projects(owned_by=user_id)):
@@ -1519,8 +1522,9 @@ def register_core_routes(
             from omnigent.stores.project_store import apply_project_order
 
             order = project_store.get_order(user_id=user_id) if project_store is not None else None
+            # Filter after merging so legacy labels cannot revive archived folders.
             return apply_project_order(
-                list(by_name.values()),
+                [proj for proj in by_name.values() if include_archived or not proj.archived],
                 order,
                 project_id=lambda p: p.id,
                 project_name=lambda p: p.name,

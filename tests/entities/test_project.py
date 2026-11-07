@@ -31,6 +31,7 @@ def test_project_updated_at_defaults_to_none() -> None:
         created_at=1700000000,
     )
     assert proj.updated_at is None
+    assert proj.archived is False
 
 
 def test_project_owner_none_in_single_user_mode() -> None:

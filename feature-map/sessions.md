@@ -9,6 +9,7 @@ the header menu), and each place is a separate entry point.
 
 ## Sub-features
 
+- `project-archive`: archive/restore a project without changing its sessions or settings; Projects has an independent Show archived projects filter that persists across reloads.
 - `session-grid`: behind `grid_sessions_display_ui`, drag sidebar sessions into a
   conversation to split left/right or top/bottom with a hover preview. Up to four
   independent chats fit in two rows and two columns. Grids live at `/grid/<id>`
@@ -120,7 +121,7 @@ the header menu), and each place is a separate entry point.
   composer; sending returns to that board with the new session selected.
 - `canvas-session-health`: an opened Canvas session receives host health and
   live updates even before it appears in the loaded sidebar pages.
-- `view-options`: the one filter menu, on the Projects header, with Grouping
+- `view-options`: the session filter menu on the Sessions header, with Grouping
   (Default / Status / Harness / Created / Updated), Display (All / My / Shared / Archived), Ordering
   (Updated / Created) and Show (Updated / Environment / Repo / Branch) submenus,
   saved per device. Created ordering keeps sessions newest-created first as messages
@@ -203,7 +204,9 @@ offer pin, fork, rename, mark as unread or read, add to project (or move
 session), archive or unarchive, and delete.
 
 **Project folder:** right-click its header or open its three-dot menu, then
-choose Rename project. Start typing as soon as the dialog opens.
+choose Rename project, Archive project or Restore project.
+The Projects header's Filter projects menu toggles Show archived projects independently of session filtering.
+Archiving preserves sessions and project settings; restoration makes the project visible in the default project list again.
 
 **Pinned section drag:** drag a pinned row onto another pinned row to reorder
 the Pinned section, or drop an unpinned row onto a pinned row to pin it into
@@ -242,15 +245,12 @@ choice only when the server supports cleanup.
 **Archived view:** choose Display → Archived sessions in the sidebar filter
 menu, then filter by project.
 
-**Sidebar filter menu:** with `sidebar_grouping_ui` on, the funnel on the
-Projects header holds Grouping, Display, Ordering and Show. In
-Status, Harness, Created or Updated grouping, Projects is hidden and the funnel sits in the same spot on the
-first group's header. The Select sessions button sits beside it and selects
-project, Shared and Sessions rows together; the Sessions header keeps only New
-session. Hovering a row opens
-its tooltip; the repo and PR rows load from the session's GitHub info only once
-the tooltip opens. With the flag off, the funnel sits on the Sessions header and
-offers Display only.
+**Sidebar filter menu:** with `sidebar_grouping_ui` on, the Sessions header holds Grouping, Display, Ordering and Show.
+In grouped views the session filter remains on the first group's header; when only Shared is shown it remains on that section.
+Projects has its own Show archived projects filter, which remains reachable while the section is collapsed.
+The unified Select sessions control stays on Projects in the default grouping.
+With the flag off, the session filter offers Display only.
+Hovering a row opens its tooltip; repo and PR details load from the session's GitHub information only once the tooltip opens.
 
 **Canvas:** choose Canvas in the sidebar, select Main or a project, and click
 a session card once. Expand navigation manually to keep it open while switching
@@ -381,6 +381,8 @@ recent sessions. Continue pressing Tab (or Shift+Tab) to cycle, release Control
 to switch, or press Escape to cancel.
 
 ## Driving it with the repro environment
+
+- Project archive/restore, independent filtering, reload persistence and unchanged member sessions/settings on desktop and phone: `tests/e2e_ui/sessions/test_sidebar_project_context_menu.py::test_project_archive_filter_restore_preserves_members`.
 
 Preconditions: a running instance (`verify-env start`, then `verify-env
 doctor`), the built web UI, and at least one session (the `seeded_session`

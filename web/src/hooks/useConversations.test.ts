@@ -18,6 +18,7 @@ import {
   fetchProjectSessionIds,
   renameConversation,
   useArchiveConversation,
+  useArchiveProject,
   useBulkArchiveConversations,
   useBulkDeleteConversations,
   useBulkStopSessions,
@@ -519,7 +520,7 @@ describe("fetchAllArchivedProjectNames", () => {
       .mockResolvedValueOnce(
         mockResponse({
           data: [
-            { id: "p_alpha", name: "Alpha" },
+            { id: "p_alpha", name: "Alpha", archived: true },
             { id: "p_other", name: "Other" },
           ],
         }),
@@ -530,7 +531,7 @@ describe("fetchAllArchivedProjectNames", () => {
     expect(names).toEqual(["Alpha", "Beta"]);
     // The id→name resolution is one projects list call after the scan.
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toBe("/v1/projects");
+    expect(fetchMock.mock.calls[1][0]).toBe("/v1/projects?include_archived=true");
   });
 });
 
@@ -2409,6 +2410,62 @@ describe("useBulkStopSessions", () => {
 });
 
 describe("useProjects", () => {
+  it("archives a legacy label project by creating its container without editing sessions", async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockResponse({ object: "list", data: [] }))
+      .mockResolvedValueOnce(mockResponse({ id: "promoted", name: "Legacy" }))
+      .mockResolvedValueOnce(mockResponse({ id: "promoted", name: "Legacy", archived: true }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["projects"], [{ id: null, name: "Legacy" }]);
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(() => useArchiveProject(), { wrapper });
+    await act(() => result.current.mutateAsync({ id: null, name: "Legacy", archived: true }));
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/v1/projects",
+      "/v1/projects",
+      "/v1/projects/promoted",
+    ]);
+    expect(client.getQueryData(["projects"])).toEqual([
+      { id: "promoted", name: "Legacy", archived: true },
+    ]);
+  });
+
+  it("keeps archive metadata cached while showing active projects to ordinary pickers", async () => {
+    const projects = [
+      { id: "active", name: "Active", archived: false },
+      { id: "old", name: "Old", archived: true },
+    ];
+    fetchMock.mockResolvedValueOnce(mockResponse(projects));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children);
+    const active = renderHook(() => useProjects(), { wrapper });
+    await waitFor(() => expect(active.result.current.isSuccess).toBe(true));
+    expect(active.result.current.data).toEqual([projects[0]]);
+    const all = renderHook(() => useProjects(true), { wrapper });
+    expect(all.result.current.data).toEqual(projects);
+    expect(client.getQueryData(["projects"])).toEqual(projects);
+  });
+
+  it("archives only the project and refreshes its sidebar metadata", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ id: "p_1", name: "Work", archived: true }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["projects"], [{ id: "p_1", name: "Work", icon: "x" }]);
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(() => useArchiveProject(), { wrapper });
+    await act(() => result.current.mutateAsync({ id: "p_1", name: "Work", archived: true }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/projects/p_1",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ archived: true }) }),
+    );
+    expect(client.getQueryData(["projects"])).toEqual([
+      { id: "p_1", name: "Work", archived: true, icon: "x" },
+    ]);
+  });
+
   it("GETs /v1/sessions/projects and returns the {id, name} project list", async () => {
     const projects = [
       { id: "p_x", name: "Customer X" },
@@ -2422,7 +2479,7 @@ describe("useProjects", () => {
     const { result } = renderHook(() => useProjects(), { wrapper });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(fetchMock.mock.calls[0][0]).toBe("/v1/sessions/projects");
+    expect(fetchMock.mock.calls[0][0]).toBe("/v1/sessions/projects?include_archived=true");
     expect(result.current.data).toEqual(projects);
   });
 

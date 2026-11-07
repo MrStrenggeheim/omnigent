@@ -296,6 +296,53 @@ def test_decode_coerces_non_object_blob_to_empty(store: SqlAlchemyProjectStore) 
 # ── update ─────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("user_id", [None, "alice@example.com"])
+def test_archive_round_trip_and_noop(
+    store: SqlAlchemyProjectStore, user_id: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Archive state persists independently of config and leaves saved order intact."""
+    project = store.create(_uid("archive"), "Work", user_id, {"icon": "🔥"})
+    assert project.archived is False
+    store.save_order([project.id], user_id=user_id)
+    monkeypatch.setattr("omnigent.stores.project_store.sqlalchemy_store.now_epoch", lambda: 123)
+    archived = store.update(project.id, user_id=user_id, archived=True)
+    assert archived is not None and archived.archived is True
+    assert archived.updated_at == 123
+    assert archived.config == project.config
+    reopened = SqlAlchemyProjectStore(store.storage_location)
+    assert reopened.get(project.id, user_id=user_id) == archived
+    assert reopened.list(user_id=user_id) == []
+    assert reopened.list(user_id=user_id, include_archived=True) == [archived]
+    assert reopened.get_order(user_id=user_id) == [project.id]
+
+    monkeypatch.setattr("omnigent.stores.project_store.sqlalchemy_store.now_epoch", lambda: 456)
+    assert reopened.update(project.id, user_id=user_id, archived=True) == archived
+    assert reopened.update(project.id, user_id=user_id, archived=None) == archived
+    renamed = reopened.update(project.id, user_id=user_id, name="Renamed")
+    assert renamed is not None and renamed.archived is True
+    restored = reopened.update(project.id, user_id=user_id, archived=False)
+    assert restored is not None and restored.archived is False
+    assert restored.updated_at == 456
+    assert reopened.list(user_id=user_id) == [restored]
+
+
+def test_archive_owner_and_workspace_isolation(store: SqlAlchemyProjectStore) -> None:
+    from omnigent.db.db_models import workspace_scope
+
+    with workspace_scope(101):
+        project = store.create(_uid("scoped-archive"), "Work", "alice")
+        assert store.update(project.id, user_id="bob", archived=True) is None
+        assert store.get(project.id, user_id="alice") == project
+        archived = store.update(project.id, user_id="alice", archived=True)
+        assert archived is not None and archived.archived is True
+        assert store.list(user_id="bob", include_archived=True) == []
+    with workspace_scope(102):
+        assert store.update(project.id, user_id="alice", archived=False) is None
+        assert store.list(user_id="alice", include_archived=True) == []
+    with workspace_scope(101):
+        assert store.get(project.id, user_id="alice") == archived
+
+
 def test_update_renames_and_stamps_updated_at(store: SqlAlchemyProjectStore) -> None:
     """Renaming changes ``name`` and sets ``updated_at``."""
     store.create(_uid("p1"), "Old", "alice@example.com")

@@ -30,7 +30,7 @@ from fastapi import FastAPI
 from omnigent.runtime import user_session_stream
 from omnigent.runtime.agent_cache import AgentCache
 from omnigent.server.app import create_app
-from omnigent.server.auth import UnifiedAuthProvider
+from omnigent.server.auth import LEVEL_OWNER, UnifiedAuthProvider
 from omnigent.stores.agent_store.sqlalchemy_store import SqlAlchemyAgentStore
 from omnigent.stores.artifact_store.local import LocalArtifactStore
 from omnigent.stores.conversation_store.sqlalchemy_store import (
@@ -87,6 +87,7 @@ async def test_create_project(project_client: httpx.AsyncClient) -> None:
     assert body["object"] == "project"
     assert len(body["id"]) == 32
     assert body["updated_at"] is None
+    assert body["archived"] is False
 
 
 async def test_create_trims_and_rejects_empty(project_client: httpx.AsyncClient) -> None:
@@ -229,9 +230,9 @@ async def test_session_projects_unions_first_class_and_labels(
     resp = await project_client.get("/v1/sessions/projects")
     assert resp.status_code == 200
     assert resp.json() == [
-        {"id": both["id"], "name": "Both", "icon": None},
-        {"id": empty["id"], "name": "Empty FC", "icon": None},
-        {"id": None, "name": "Label Only", "icon": None},
+        {"id": both["id"], "name": "Both", "icon": None, "archived": False},
+        {"id": empty["id"], "name": "Empty FC", "icon": None, "archived": False},
+        {"id": None, "name": "Label Only", "icon": None, "archived": False},
     ]
 
 
@@ -253,12 +254,100 @@ async def test_session_projects_surfaces_config_icon(
     resp = await project_client.get("/v1/sessions/projects")
     assert resp.status_code == 200
     assert resp.json() == [
-        {"id": fire["id"], "name": "Fire", "icon": "🔥"},
-        {"id": plain["id"], "name": "Plain", "icon": None},
+        {"id": fire["id"], "name": "Fire", "icon": "🔥", "archived": False},
+        {"id": plain["id"], "name": "Plain", "icon": None, "archived": False},
     ]
 
 
 # ── Multi-user: projects are owner-private ─────────────────────────────
+
+
+async def test_archived_projects_filter_after_legacy_union(
+    project_client: httpx.AsyncClient, db_uri: str
+) -> None:
+    """Hidden first-class folders cannot reappear through a matching legacy label."""
+    client = project_client
+    projects = []
+    for name in ("Active", "Empty archive", "Label archive"):
+        response = await client.post("/v1/projects", json={"name": name, "config": {"icon": "🔥"}})
+        assert response.status_code == 200
+        projects.append(response.json())
+    conversation_store = SqlAlchemyConversationStore(db_uri)
+    for name in ("Label archive", "Legacy only"):
+        session = conversation_store.create_conversation()
+        conversation_store.set_labels(session.id, {"omni_project": name})
+    order = [project["id"] for project in reversed(projects)]
+    assert (
+        await client.put("/v1/projects/order", json={"ordered_project_ids": order})
+    ).status_code == 200
+    for project in projects[1:]:
+        response = await client.patch(f"/v1/projects/{project['id']}", json={"archived": True})
+        assert response.status_code == 200
+        assert response.json()["archived"] is True
+        assert (await client.get(f"/v1/projects/{project['id']}")).json()["archived"] is True
+
+    for suffix in ("", "?include_archived=false"):
+        response = await client.get(f"/v1/projects{suffix}")
+        assert [project["name"] for project in response.json()["data"]] == ["Active"]
+        response = await client.get(f"/v1/sessions/projects{suffix}")
+        assert [project["name"] for project in response.json()] == ["Active", "Legacy only"]
+        assert all(project["archived"] is False for project in response.json())
+    response = await client.get("/v1/projects?include_archived=true")
+    assert [project["id"] for project in response.json()["data"]] == order
+    response = await client.get("/v1/sessions/projects?include_archived=true")
+    assert response.json() == [
+        {"id": projects[2]["id"], "name": "Label archive", "icon": "🔥", "archived": True},
+        {"id": projects[1]["id"], "name": "Empty archive", "icon": "🔥", "archived": True},
+        {"id": projects[0]["id"], "name": "Active", "icon": "🔥", "archived": False},
+        {"id": None, "name": "Legacy only", "icon": None, "archived": False},
+    ]
+    response = await client.patch(f"/v1/projects/{projects[2]['id']}", json={"archived": False})
+    assert response.status_code == 200
+    assert response.json()["archived"] is False
+    response = await client.get("/v1/sessions/projects")
+    assert [project["name"] for project in response.json()] == [
+        "Label archive",
+        "Active",
+        "Legacy only",
+    ]
+
+
+async def test_archive_routes_require_user_and_keep_owner_scope(
+    multi_user_client: httpx.AsyncClient, db_uri: str
+) -> None:
+    client = multi_user_client
+    response = await client.post("/v1/projects", json={"name": "Private"}, headers=_as_user(ALICE))
+    project = response.json()
+    for archived in (True, False):
+        assert (
+            await client.patch(f"/v1/projects/{project['id']}", json={"archived": archived})
+        ).status_code == 401
+    response = await client.patch(
+        f"/v1/projects/{project['id']}", json={"archived": True}, headers=_as_user(ALICE)
+    )
+    assert response.status_code == 200
+    # Alice's hidden name must not suppress Bob's independently owned label.
+    permissions = SqlAlchemyPermissionStore(db_uri)
+    permissions.ensure_user(BOB)
+    conversations = SqlAlchemyConversationStore(db_uri)
+    session = conversations.create_conversation()
+    permissions.grant(BOB, session.id, LEVEL_OWNER)
+    conversations.set_labels(session.id, {"omni_project": "Private"})
+    for path in ("/v1/projects", "/v1/sessions/projects"):
+        assert (await client.get(f"{path}?include_archived=true")).status_code == 401
+        bob = await client.get(f"{path}?include_archived=true", headers=_as_user(BOB))
+        alice = await client.get(f"{path}?include_archived=true", headers=_as_user(ALICE))
+        assert bob.status_code == alice.status_code == 200
+        if path == "/v1/projects":
+            assert bob.json()["data"] == []
+            assert alice.json()["data"][0]["id"] == project["id"]
+        else:
+            assert bob.json() == [{"id": None, "name": "Private", "icon": None, "archived": False}]
+            assert alice.json() == [
+                {"id": project["id"], "name": "Private", "icon": None, "archived": True}
+            ]
+    response = await client.get("/v1/sessions/projects", headers=_as_user(BOB))
+    assert response.json()[0]["name"] == "Private"
 
 
 @pytest.fixture()
@@ -410,7 +499,7 @@ async def _wait_for_events(events: list[dict], count: int, *, timeout: float = 2
 async def test_project_mutations_announce_projects_changed_to_owner(
     multi_user_client: httpx.AsyncClient,
 ) -> None:
-    """Create, rename, and delete each push ``projects_changed`` to the owner
+    """Create, rename, archive, restore, and delete push changes to the owner
     — and never to another user's channel (projects are owner-private)."""
     async with (
         _collect_discovery_events(ALICE) as alice_events,
@@ -430,13 +519,23 @@ async def test_project_mutations_announce_projects_changed_to_owner(
         assert renamed.status_code == 200
         await _wait_for_events(alice_events, 2)
 
+        for count, archived in enumerate((True, False), start=3):
+            changed = await multi_user_client.patch(
+                f"/v1/projects/{created.json()['id']}",
+                json={"archived": archived},
+                headers=_as_user(ALICE),
+            )
+            assert changed.status_code == 200
+            assert changed.json()["archived"] is archived
+            await _wait_for_events(alice_events, count)
+
         deleted = await multi_user_client.delete(
             f"/v1/projects/{created.json()['id']}", headers=_as_user(ALICE)
         )
         assert deleted.status_code == 200
-        await _wait_for_events(alice_events, 3)
+        await _wait_for_events(alice_events, 5)
 
-        assert alice_events == [{"type": "projects_changed"}] * 3
+        assert alice_events == [{"type": "projects_changed"}] * 5
         # Give any mis-keyed publish a chance to land before asserting silence.
         await asyncio.sleep(0.05)
         assert bob_events == []
@@ -460,6 +559,13 @@ async def test_rejected_project_mutation_announces_nothing(
             headers=_as_user(ALICE),
         )
         assert rename.status_code == 404
+        for archived in (True, False):
+            denied = await multi_user_client.patch(
+                f"/v1/projects/{created.json()['id']}",
+                json={"archived": archived},
+                headers=_as_user(ALICE),
+            )
+            assert denied.status_code == 404
         delete = await multi_user_client.delete(
             f"/v1/projects/{created.json()['id']}", headers=_as_user(ALICE)
         )

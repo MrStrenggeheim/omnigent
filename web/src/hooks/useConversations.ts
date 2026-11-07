@@ -60,6 +60,7 @@ import { isStaleCursorError, useRestartOnStaleCursor } from "@/lib/staleCursor";
 import { sessionRoutingHostId, setSessionHost, setSessionParent } from "@/lib/sessionHost";
 import {
   createProject as apiCreateProject,
+  archiveProject as apiArchiveProject,
   deleteProject as apiDeleteProject,
   getProject as apiGetProject,
   listProjects as apiListProjects,
@@ -2159,6 +2160,7 @@ export { PROJECT_LABEL_KEY };
 export interface ProjectSummary {
   id: string | null;
   name: string;
+  archived?: boolean;
   /** Chosen emoji icon (a unicode grapheme), or null/absent for the default
       folder glyph. Sourced from the project's `config.icon`. */
   icon?: string | null;
@@ -2169,15 +2171,44 @@ export interface ProjectSummary {
  * dual-reads first-class projects (with id, incl. empty ones) and legacy
  * label-projects (id=null), unioned by name and sorted.
  */
-export function useProjects() {
+export function useProjects(includeArchived = false) {
   return useQuery<ProjectSummary[]>({
     queryKey: ["projects"],
     queryFn: async ({ signal }) => {
-      const res = await authenticatedFetch("/v1/sessions/projects", { signal });
+      const res = await authenticatedFetch("/v1/sessions/projects?include_archived=true", {
+        signal,
+      });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       return (await res.json()) as ProjectSummary[];
     },
     staleTime: 30_000,
+    select: (projects) =>
+      includeArchived ? projects : projects.filter((project) => !project.archived),
+  });
+}
+
+export function useArchiveProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      name,
+      archived,
+    }: {
+      id: string | null;
+      name: string;
+      archived: boolean;
+    }) => apiArchiveProject(id ?? (await resolveOrCreateProjectId(name)), archived),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<ProjectSummary[]>(["projects"], (old) =>
+        old?.map((project) =>
+          project.name === updated.name
+            ? { ...project, id: updated.id, archived: updated.archived }
+            : project,
+        ),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
   });
 }
 
@@ -2232,7 +2263,7 @@ export async function fetchAllArchivedProjectNames(): Promise<string[]> {
   if (memberProjectIds.size > 0) {
     // One list call resolves every collected id; an id with no surviving
     // project row (deleted project) is silently dropped.
-    const projects = await apiListProjects();
+    const projects = await apiListProjects(true);
     for (const project of projects) {
       if (memberProjectIds.has(project.id)) names.add(project.name);
     }

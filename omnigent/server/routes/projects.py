@@ -47,6 +47,7 @@ def _to_response(project: Project) -> dict[str, Any]:
         "created_at": project.created_at,
         "updated_at": project.updated_at,
         "config": project.config,
+        "archived": project.archived,
     }
 
 
@@ -90,10 +91,11 @@ def create_projects_router(
         return _to_response(project)
 
     @router.get("/projects")
-    async def list_projects(request: Request) -> dict[str, Any]:
+    async def list_projects(request: Request, include_archived: bool = False) -> dict[str, Any]:
         """List the caller's projects.
 
         :param request: The incoming request, used to identify the user.
+        :param include_archived: Include archived projects; defaults to false.
         :returns: ``{"object": "list", "data": [...]}``.
         :raises OmnigentError: 401 if unauthenticated in multi-user mode.
         """
@@ -101,7 +103,7 @@ def create_projects_router(
 
         def read_projects() -> list[Project]:
             return apply_project_order(
-                project_store.list(user_id=user_id),
+                project_store.list(user_id=user_id, include_archived=include_archived),
                 project_store.get_order(user_id=user_id),
                 project_id=lambda p: p.id,
                 project_name=lambda p: p.name,
@@ -171,10 +173,11 @@ def create_projects_router(
             user_id=user_id,
             name=body.name,
             config=body.config,
+            archived=body.archived,
         )
         if project is None:
             raise OmnigentError("Project not found", code=ErrorCode.NOT_FOUND)
-        # A rename/config change is only ever seen by other connected clients
+        # A project change is only ever seen by other connected clients
         # (another tab, the mobile app) if it is pushed; nothing else refreshes
         # their projects cache until a full reload.
         announce_projects_changed(user_id)

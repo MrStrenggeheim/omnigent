@@ -63,6 +63,7 @@ export interface ProjectConfig {
 export interface Project {
   id: string;
   name: string;
+  archived?: boolean;
   /** Owner user id; `null` in single-user / OSS mode. */
   user_id?: string | null;
   created_at?: number;
@@ -86,8 +87,10 @@ async function readError(res: Response): Promise<string> {
 }
 
 /** List the caller's projects in their preferred display order. */
-export async function listProjects(): Promise<Project[]> {
-  const res = await authenticatedFetch("/v1/projects");
+export async function listProjects(includeArchived = false): Promise<Project[]> {
+  const res = await authenticatedFetch(
+    includeArchived ? "/v1/projects?include_archived=true" : "/v1/projects",
+  );
   if (!res.ok) throw new Error(await readError(res));
   const body = (await res.json()) as ProjectListResponse;
   return body.data;
@@ -120,6 +123,17 @@ export async function renameProject(id: string, name: string): Promise<Project> 
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as Project;
+}
+
+/** Archive or restore a project without changing its sessions or settings. */
+export async function archiveProject(id: string, archived: boolean): Promise<Project> {
+  const res = await authenticatedFetch(`/v1/projects/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archived }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as Project;

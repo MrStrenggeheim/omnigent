@@ -157,6 +157,7 @@ import {
   type Conversation,
   type PinnedConversationsResult,
   useArchiveConversation,
+  useArchiveProject,
   useBulkArchiveConversations,
   useBulkDeleteConversations,
   useBulkMoveToProject,
@@ -223,6 +224,8 @@ import {
   type SessionFilter,
   readSessionFilter,
   writeSessionFilter,
+  readShowArchivedProjects,
+  writeShowArchivedProjects,
 } from "@/lib/sessionFilterPreferences";
 import {
   SIDEBAR_GROUPINGS,
@@ -1433,6 +1436,7 @@ function ProjectFolder({
   name,
   projectId,
   icon,
+  archived = false,
   windowConversations,
   activeConversationId,
   expanded,
@@ -1461,6 +1465,7 @@ function ProjectFolder({
   name: string;
   /** First-class project id, or null for a label-only folder. */
   projectId: string | null;
+  archived?: boolean;
   /** Chosen emoji icon (unicode grapheme), or null/absent for the default
       folder glyph. */
   icon?: string | null;
@@ -1551,6 +1556,7 @@ function ProjectFolder({
     name,
     projectId,
     icon,
+    archived,
   );
 
   const headerDrag = useSortable({
@@ -1599,6 +1605,9 @@ function ProjectFolder({
           )
         }
         active={active}
+        headerStatus={
+          archived ? <span className="text-10 text-muted-foreground">Archived</span> : undefined
+        }
         marker={marker}
         conversations={conversations}
         activeConversationId={activeConversationId}
@@ -1613,7 +1622,9 @@ function ProjectFolder({
         onToggleSelected={onToggleSelected}
         onProjectAssigned={onProjectAssigned}
         emptyMessage={
-          loadingFirstPage ? undefined : (
+          loadingFirstPage ? undefined : archived ? (
+            "No sessions"
+          ) : (
             <span className="block">
               No sessions. Start a{" "}
               <Link
@@ -1807,7 +1818,9 @@ function ConversationList({
 
   // Project folders ({ id, name }) for grouping sessions — first-class id
   // and/or the legacy omni_project label, unioned server-side.
-  const { data: projects = [] } = useProjects();
+  const { data: projects = [] } = useProjects(true);
+  const [showArchivedProjects, setShowArchivedProjects] = useState(readShowArchivedProjects);
+  const visibleProjects = projects.filter((project) => showArchivedProjects || !project.archived);
   const projectOrder = useProjectOrder();
   const saveOrder = useSaveProjectOrder();
   const [draggedProject, setDraggedProject] = useState<string | null>(null);
@@ -1821,16 +1834,24 @@ function ConversationList({
   const { mutate: reorderPins } = useReorderPinnedConversations();
   const moveProject = (name: string, destination: "up" | "down" | "top" | "bottom") => {
     if (saveOrder.isPending) return;
-    const from = projects.findIndex((p) => p.name === name);
-    const to =
+    const visibleFrom = visibleProjects.findIndex((p) => p.name === name);
+    const visibleTo =
       destination === "top"
         ? 0
         : destination === "bottom"
-          ? projects.length - 1
+          ? visibleProjects.length - 1
           : destination === "up"
-            ? from - 1
-            : from + 1;
-    if (from < 0 || to < 0 || to >= projects.length || from === to) return;
+            ? visibleFrom - 1
+            : visibleFrom + 1;
+    if (
+      visibleFrom < 0 ||
+      visibleTo < 0 ||
+      visibleTo >= visibleProjects.length ||
+      visibleFrom === visibleTo
+    )
+      return;
+    const from = projects.findIndex((p) => p.name === name);
+    const to = projects.findIndex((p) => p.name === visibleProjects[visibleTo].name);
     saveOrder.mutate(arrayMove(projects, from, to));
   };
 
@@ -1960,22 +1981,26 @@ function ConversationList({
       id: string | null;
       name: string;
       icon?: string | null;
+      archived?: boolean;
       conversations: Conversation[];
-    }[] = (grouped ? [] : projects).map(({ id, name, icon }) => {
-      // Dual-read membership: a session belongs to this folder if it has
-      // the first-class id OR the legacy omni_project label of this name,
-      // and (filing being owner-only) the viewer owns it.
-      const inProject = notArchived.filter(
-        (c) => sessionBelongsToProject(c, { id, name }, viewerId) && !pinnedIdSet.has(c.id),
-      );
-      inProject.forEach((c) => filedIds.add(c.id));
-      return {
-        id,
-        name,
-        icon,
-        conversations: sortConversations(inProject, activeOverride, frozenKeys, sortBy),
-      };
-    });
+    }[] = (grouped ? [] : projects)
+      .map(({ id, name, icon, archived }) => {
+        // Dual-read membership: a session belongs to this folder if it has
+        // the first-class id OR the legacy omni_project label of this name,
+        // and (filing being owner-only) the viewer owns it.
+        const inProject = notArchived.filter(
+          (c) => sessionBelongsToProject(c, { id, name }, viewerId) && !pinnedIdSet.has(c.id),
+        );
+        inProject.forEach((c) => filedIds.add(c.id));
+        return {
+          id,
+          name,
+          icon,
+          archived,
+          conversations: sortConversations(inProject, activeOverride, frozenKeys, sortBy),
+        };
+      })
+      .filter((project) => showArchivedProjects || !project.archived);
     // NOTE: empty projects are intentionally NOT filtered out. A project comes
     // from the server project list (useProjects), so it can have zero *loaded*
     // conversations — either genuinely empty or because its chats live on an
@@ -2031,7 +2056,13 @@ function ConversationList({
     const sessions = groupConversations(ordered, (c) => groupTitles.get(c.id), groupOrder).flatMap(
       (g) => g.conversations,
     );
-    return { pinned, shared, sessions, projectGroups, groupTitles };
+    return {
+      pinned,
+      shared,
+      sessions,
+      projectGroups,
+      groupTitles,
+    };
     // `unseenTick` / `draftIds` aren't read here: they version the stores status buckets read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -2042,6 +2073,7 @@ function ConversationList({
     frozenKeys,
     frozenStatus,
     projects,
+    showArchivedProjects,
     activeTab,
     viewerId,
     groupingUi,
@@ -2764,15 +2796,21 @@ function ConversationList({
                       </PinOrderContext.Provider>
                     </PinDropZone>
                   )}
-                  {/* Projects: one collapsible folder per project, unaffected by the filter so
-              "New project" stays reachable. With sidebar_grouping_ui on it holds the one
-              filter menu; grouped views hide it and the first group takes its place. */}
+                  {/* Projects have their own archive filter, independent of the session filter. */}
                   {!grouped && (
                     <SectionGroup
                       title="Projects"
                       collapsed={effectiveCollapsedSections.includes("Projects")}
                       onToggleCollapsed={() => effectiveToggleSectionCollapsed("Projects")}
-                      persistentHeaderAction={groupingUi ? sessionsFilterMenu : undefined}
+                      persistentHeaderAction={
+                        <ProjectFilterMenu
+                          value={showArchivedProjects}
+                          onChange={(value) => {
+                            setShowArchivedProjects(value);
+                            writeShowArchivedProjects(value);
+                          }}
+                        />
+                      }
                       afterHeader={
                         projectsSelecting ? (
                           <BulkActionBar
@@ -2842,7 +2880,7 @@ function ConversationList({
                                 selectionMode ||
                                 editingIds.size > 0,
                               first: index === 0,
-                              last: index === projects.length - 1,
+                              last: index === visibleProjects.length - 1,
                               move: (destination) => moveProject(group.name, destination),
                               insertion:
                                 overProject === group.name &&
@@ -2856,6 +2894,7 @@ function ConversationList({
                             name={group.name}
                             projectId={group.id}
                             icon={group.icon}
+                            archived={group.archived}
                             windowConversations={group.conversations}
                             activeConversationId={displayedActiveId}
                             expanded={expandedProjects.includes(group.name)}
@@ -2895,6 +2934,7 @@ function ConversationList({
                       onToggleCollapsed={() => effectiveToggleSectionCollapsed("Shared")}
                       afterHeader={sharedListOnly ? sessionsBulkBar : undefined}
                       headerAction={sharedListOnly ? sessionsHeaderActions : undefined}
+                      persistentHeaderAction={sharedListOnly ? sessionsFilterMenu : undefined}
                       headerStatus={sharedListOnly ? importStatus : undefined}
                       {...sessionRowProps}
                     />
@@ -2952,9 +2992,7 @@ function ConversationList({
                           afterHeader={sessionsBulkBar}
                           headerAction={sessionsHeaderActions}
                           headerStatus={importStatus}
-                          persistentHeaderAction={
-                            groupingUi && !grouped ? undefined : sessionsFilterMenu
-                          }
+                          persistentHeaderAction={sessionsFilterMenu}
                           {...sessionRowProps}
                         />
                       )}
@@ -3352,6 +3390,66 @@ function FilterMenuSub({
   );
 }
 
+function SidebarFilterMenu({
+  label,
+  testId,
+  active = false,
+  children,
+}: {
+  label: string;
+  testId?: string;
+  active?: boolean;
+  children: ReactNode;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const tooltip = useMenuGuardedTooltip(menuOpen);
+  return (
+    <DropdownMenu onOpenChange={setMenuOpen}>
+      <Tooltip disableHoverableContent open={tooltip.open} onOpenChange={tooltip.onOpenChange}>
+        <TooltipTrigger asChild>
+          <span className="inline-flex shrink-0" {...tooltip.triggerProps}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={label}
+                data-testid={testId}
+                className={cn("text-muted-foreground", active && "text-foreground")}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ListFilterIcon className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" data-noninteractive-tooltip>
+          {label}
+        </TooltipContent>
+      </Tooltip>
+      {children}
+    </DropdownMenu>
+  );
+}
+
+function ProjectFilterMenu({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <SidebarFilterMenu label="Filter projects" active={value}>
+      <DropdownMenuContent align="end">
+        <DropdownMenuCheckboxItem checked={value} onCheckedChange={onChange}>
+          Show archived projects
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </SidebarFilterMenu>
+  );
+}
+
 function SessionFilterMenu({
   value,
   onChange,
@@ -3367,8 +3465,6 @@ function SessionFilterMenu({
   onViewChange: (patch: Partial<SidebarViewPreferences>) => void;
 }) {
   const triggerLabel = view === null ? "Filter sessions" : "Group, sort, and filter sessions";
-  const [menuOpen, setMenuOpen] = useState(false);
-  const tooltip = useMenuGuardedTooltip(menuOpen);
   const filters = multiUser
     ? SIDEBAR_FILTERS
     : SIDEBAR_FILTERS.filter((filter) => filter.value !== "shared");
@@ -3386,30 +3482,7 @@ function SessionFilterMenu({
     </DropdownMenuRadioGroup>
   );
   return (
-    <DropdownMenu onOpenChange={setMenuOpen}>
-      <Tooltip disableHoverableContent open={tooltip.open} onOpenChange={tooltip.onOpenChange}>
-        <TooltipTrigger asChild>
-          {/* Separate nodes keep the Radix tooltip and menu trigger states independent. */}
-          <span className="inline-flex shrink-0" {...tooltip.triggerProps}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={triggerLabel}
-                data-testid="session-filter"
-                className="text-muted-foreground"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <ListFilterIcon className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" data-noninteractive-tooltip>
-          {triggerLabel}
-        </TooltipContent>
-      </Tooltip>
+    <SidebarFilterMenu label={triggerLabel} testId="session-filter">
       {view === null ? (
         // Remove with the sidebar_grouping_ui flag (review by 0.19.0).
         <DropdownMenuContent align="end" className="min-w-44 [&_[role=menuitemradio]]:text-ui">
@@ -3488,7 +3561,7 @@ function SessionFilterMenu({
           </FilterMenuSub>
         </DropdownMenuContent>
       )}
-    </DropdownMenu>
+    </SidebarFilterMenu>
   );
 }
 
@@ -5785,29 +5858,31 @@ function ProjectFolderActions({
 }) {
   return (
     <div className="flex items-center gap-0.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            asChild
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`New session in ${projectName}`}
-            data-testid="project-new-session"
-            className="hidden text-muted-foreground [@media((hover:hover)_and_(pointer:fine))]:flex"
-          >
-            <Link
-              to={`/?project=${encodeURIComponent(projectName)}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onNavigate(e);
-              }}
+      {!actions.archived && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`New session in ${projectName}`}
+              data-testid="project-new-session"
+              className="hidden text-muted-foreground [@media((hover:hover)_and_(pointer:fine))]:flex"
             >
-              <MessageCirclePlusIcon className="size-3.5" data-icon-size="14" />
-            </Link>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">New session in project</TooltipContent>
-      </Tooltip>
+              <Link
+                to={`/?project=${encodeURIComponent(projectName)}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNavigate(e);
+                }}
+              >
+                <MessageCirclePlusIcon className="size-3.5" data-icon-size="14" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">New session in project</TooltipContent>
+        </Tooltip>
+      )}
       <ProjectFolderMenu projectName={projectName} onNavigate={onNavigate} actions={actions} />
     </div>
   );
@@ -5837,24 +5912,28 @@ function ProjectFolderMenuItems({
 
   return (
     <>
-      <C.Item
-        asChild
-        data-testid="project-new-session-menu"
-        className={
-          hideNewSessionOnDesktop ? "[@media((hover:hover)_and_(pointer:fine))]:hidden" : undefined
-        }
-      >
-        <Link
-          to={`/?project=${encodeURIComponent(projectName)}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onNavigate(e);
-          }}
+      {!actions.archived && (
+        <C.Item
+          asChild
+          data-testid="project-new-session-menu"
+          className={
+            hideNewSessionOnDesktop
+              ? "[@media((hover:hover)_and_(pointer:fine))]:hidden"
+              : undefined
+          }
         >
-          <MessageCirclePlusIcon className="size-3.5" />
-          New session
-        </Link>
-      </C.Item>
+          <Link
+            to={`/?project=${encodeURIComponent(projectName)}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNavigate(e);
+            }}
+          >
+            <MessageCirclePlusIcon className="size-3.5" />
+            New session
+          </Link>
+        </C.Item>
+      )}
       <C.Item data-testid="rename-project" onSelect={actions.openRename}>
         <PencilIcon className="size-3.5" />
         Rename project
@@ -5890,6 +5969,18 @@ function ProjectFolderMenuItems({
         </C.Sub>
       )}
       <C.Separator />
+      <C.Item
+        data-testid="archive-project"
+        disabled={actions.archivePending}
+        onSelect={actions.toggleArchived}
+      >
+        {actions.archived ? (
+          <ArchiveRestoreIcon className="size-3.5" />
+        ) : (
+          <ArchiveIcon className="size-3.5" />
+        )}
+        {actions.archived ? "Restore project" : "Archive project"}
+      </C.Item>
       <C.Item data-testid="delete-project" variant="destructive" onSelect={actions.openDelete}>
         <Trash2Icon className="size-3.5" />
         Delete project
@@ -5899,6 +5990,9 @@ function ProjectFolderMenuItems({
 }
 
 interface ProjectFolderMenuActions {
+  archived: boolean;
+  archivePending: boolean;
+  toggleArchived: () => void;
   ordering?: {
     disabled: boolean;
     first: boolean;
@@ -5918,6 +6012,7 @@ function useProjectFolderMenu(
   projectName: string,
   projectId: string | null,
   icon?: string | null,
+  archived = false,
 ): { actions: ProjectFolderMenuActions; dialogs: ReactNode } {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -5932,6 +6027,7 @@ function useProjectFolderMenu(
   //   null = staged removal. Reset to `undefined` each time the modal opens.
   const [pendingIcon, setPendingIcon] = useState<string | null | undefined>(undefined);
   const deleteProject = useDeleteProject();
+  const { mutate: setProjectArchived, isPending: archivePending } = useArchiveProject();
   const renameProject = useRenameProject();
   const updateConfig = useUpdateProjectConfig();
   // Fetch the full config only while the menu or rename modal is open, so we can
@@ -5955,6 +6051,16 @@ function useProjectFolderMenu(
 
   const actions = useMemo<ProjectFolderMenuActions>(
     () => ({
+      archived,
+      archivePending,
+      toggleArchived: () =>
+        setProjectArchived(
+          { id: projectId, name: projectName, archived: !archived },
+          {
+            onError: (error) =>
+              showToast(`Couldn't ${archived ? "restore" : "archive"} project: ${error.message}`),
+          },
+        ),
       openRename: () => {
         menuOpenedDialogRef.current = true;
         setRenameValue(projectName);
@@ -5979,7 +6085,7 @@ function useProjectFolderMenu(
         if (menuOpenedDialogRef.current) event.preventDefault();
       },
     }),
-    [projectName],
+    [projectName, projectId, archived, archivePending, setProjectArchived],
   );
 
   const dialogs = (

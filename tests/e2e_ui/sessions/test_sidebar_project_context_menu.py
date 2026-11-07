@@ -9,6 +9,60 @@ import pytest
 from playwright.sync_api import Browser, Locator, Page, expect
 
 
+@pytest.mark.parametrize("mobile", [False, True], ids=["desktop", "phone"])
+def test_project_archive_filter_restore_preserves_members(
+    page: Page, seeded_session: tuple[str, str], mobile: bool
+) -> None:
+    base_url, session_id = seeded_session
+    if mobile:
+        page.set_viewport_size({"width": 390, "height": 844})
+    name = f"Archive {uuid.uuid4().hex[:6]}"
+    page.goto(f"{base_url}/c/{session_id}?sidebar=open")
+    _create_project(page, name)
+    projects = page.request.get(f"{base_url}/v1/projects").json()["data"]
+    project_id = next(project["id"] for project in projects if project["name"] == name)
+    endpoint = f"{base_url}/v1/projects/{project_id}"
+    config = {"workspace": "/tmp/archive-project-fixture"}
+    assert page.request.patch(endpoint, data={"config": config}).ok
+    assert page.request.patch(
+        f"{base_url}/v1/sessions/{session_id}", data={"project_id": project_id}
+    ).ok
+    page.goto(f"{base_url}/c/{session_id}?sidebar=open")
+    header = _folder_header(page, name)
+    expect(header).to_be_visible(timeout=30_000)
+    header.hover()
+    page.get_by_role("button", name=f"Project actions for {name}").click()
+    with page.expect_response(
+        lambda response: response.url == endpoint and response.request.method == "PATCH"
+    ) as archived:
+        page.get_by_role("menuitem", name="Archive project", exact=True).click()
+    assert archived.value.ok
+    expect(header).not_to_be_visible(timeout=15_000)
+    page.get_by_role("button", name="Filter projects", exact=True).click()
+    page.get_by_role("menuitemcheckbox", name="Show archived projects").click()
+    expect(header).to_be_visible(timeout=15_000)
+    project = page.request.get(endpoint).json()
+    assert project["archived"] is True
+    assert project["config"] == config
+    session = page.request.get(f"{base_url}/v1/sessions/{session_id}").json()
+    assert session["project_id"] == project_id
+    assert session.get("archived", False) is False
+    page.goto(f"{base_url}/c/{session_id}?sidebar=open")
+    expect(header).to_be_visible(timeout=30_000)
+    header.click(button="right")
+    with page.expect_response(
+        lambda response: response.url == endpoint and response.request.method == "PATCH"
+    ) as restored:
+        page.get_by_role("menuitem", name="Restore project", exact=True).click()
+    assert restored.value.ok
+    page.get_by_role("button", name="Filter projects", exact=True).click()
+    page.get_by_role("menuitemcheckbox", name="Show archived projects").click()
+    expect(header).to_be_visible()
+    project = page.request.get(endpoint).json()
+    assert project["archived"] is False
+    assert project["config"] == config
+
+
 def _create_project(page: Page, name: str) -> None:
     """Create an empty project from the Projects header action."""
     # Fine-pointer layouts reveal this control only while its header is hovered.

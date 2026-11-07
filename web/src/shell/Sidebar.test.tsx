@@ -3870,7 +3870,7 @@ describe("sidebar_grouping_ui release flag", () => {
     },
   );
 
-  it("puts the filter and Select on the Projects header, leaving New session on Sessions", () => {
+  it("keeps project and session filters on their own headers while Select stays unified", () => {
     mockConversations(THREE_TYPE_CONVERSATIONS);
     renderGroupingSidebar();
 
@@ -3879,18 +3879,18 @@ describe("sidebar_grouping_ui release flag", () => {
     ).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Select sessions" })).toHaveLength(1);
     const sessions = screen.getByRole("button", { name: "Sessions" }).closest("section")!;
-    expect(within(sessions).queryByTestId("session-filter")).toBeNull();
+    expect(within(sessions).getByTestId("session-filter")).toBeInTheDocument();
     expect(within(sessions).queryByTestId("toggle-selection-mode")).toBeNull();
     expect(within(sessions).getByTestId("sessions-new-session")).toBeInTheDocument();
     const projects = screen.getByRole("button", { name: "Projects" }).closest("section")!;
-    const filter = within(projects).getByTestId("session-filter");
+    const filter = within(projects).getByRole("button", { name: "Filter projects" });
     // Outside the hover-faded wrapper, so it never fades.
     expect(filter.closest("[data-header-controls]")).toHaveClass("absolute", "right-1");
     expect(filter.closest(".md\\:opacity-0")).toBeNull();
 
     fireEvent.click(within(projects).getByTestId("toggle-selection-mode"));
     expect(screen.getByRole("button", { name: "Exit selection mode" })).toBeInTheDocument();
-    expect(within(projects).getByTestId("session-filter")).toBe(filter);
+    expect(within(projects).getByRole("button", { name: "Filter projects" })).toBe(filter);
   });
 
   it("centers empty project rows with a dashed border without changing row sizing", () => {

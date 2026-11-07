@@ -5222,6 +5222,7 @@ class ProjectObject(BaseModel):
     :param name: Human-readable project name, unique per owner.
     :param created_at: Unix epoch seconds at creation.
     :param updated_at: Unix epoch seconds of the last write, or ``None``.
+    :param archived: Whether the project is hidden from default project lists.
     :param config: Default session settings as an opaque JSON object (host,
         workspace, harness, model, reasoning effort, git base-branch, …). Empty
         when the project stores no defaults. The key vocabulary is owned by the
@@ -5235,6 +5236,7 @@ class ProjectObject(BaseModel):
     created_at: int
     updated_at: int | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+    archived: bool = False
 
 
 class ProjectList(BaseModel):
@@ -5257,6 +5259,7 @@ class SessionProjectSummary(BaseModel):
     :param id: First-class project id when one exists, or ``None`` for a
         label-only project not yet promoted to the ``projects`` table.
     :param name: Project name (the folder's display name and union key).
+    :param archived: First-class archive state; false for label-only projects.
     :param icon: The project's chosen emoji icon (a unicode grapheme), read
         from its ``config``; ``None`` when unset or for a label-only folder,
         so the sidebar falls back to the default folder glyph.
@@ -5265,6 +5268,7 @@ class SessionProjectSummary(BaseModel):
     id: str | None = None
     name: str
     icon: str | None = None
+    archived: bool = False
 
 
 class CreateProjectRequest(BaseModel):
@@ -5309,12 +5313,14 @@ class UpdateProjectRequest(BaseModel):
         trimmed, non-empty, at most 100 characters.
     :param config: New config object to replace the stored one. ``None`` leaves
         it unchanged; an empty object ``{}`` clears the stored defaults.
+    :param archived: New archive state, or ``None`` to leave unchanged.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
     config: dict[str, Any] | None = None
+    archived: bool | None = None
 
     @field_validator("name")
     @classmethod

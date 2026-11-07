@@ -166,6 +166,45 @@ def test_file_into_nonexistent_project_404(db_uri: str) -> None:
     assert resp.status_code == 404
 
 
+def test_project_archive_preserves_sessions_and_membership(db_uri: str) -> None:
+    """Archiving a folder leaves active and archived sessions, labels, and items intact."""
+    _ensure_agent(db_uri)
+    store = SqlAlchemyConversationStore(db_uri)
+    client = TestClient(_single_user_app(db_uri))
+    project = client.post("/v1/projects", json={"name": "Work"}).json()
+    session_ids = []
+    for archived in (False, True):
+        session = store.create_conversation(title="Member", agent_id=AGENT_ID)
+        store.append(
+            session.id,
+            [
+                NewConversationItem(
+                    type="message",
+                    response_id="resp_archive",
+                    data=MessageData(
+                        role="user", content=[{"type": "input_text", "text": "Keep me"}]
+                    ),
+                )
+            ],
+        )
+        store.set_labels(session.id, {"omni_project": "Work"})
+        response = client.patch(
+            f"/v1/sessions/{session.id}", json={"project_id": project["id"], "archived": archived}
+        )
+        assert response.status_code == 200
+        session_ids.append(session.id)
+    snapshots = [client.get(f"/v1/sessions/{id}").json() for id in session_ids]
+    assert [snapshot["archived"] for snapshot in snapshots] == [False, True]
+    assert all(snapshot["project_id"] == project["id"] for snapshot in snapshots)
+    assert all(len(snapshot["items"]) == 1 for snapshot in snapshots)
+    for archived in (True, False):
+        response = client.patch(f"/v1/projects/{project['id']}", json={"archived": archived})
+        assert response.status_code == 200
+        assert [client.get(f"/v1/sessions/{id}").json() for id in session_ids] == snapshots
+        response = client.get("/v1/sessions?project=Work")
+        assert [session["id"] for session in response.json()["data"]] == [session_ids[0]]
+
+
 def test_explicit_null_project_id_is_rejected(db_uri: str) -> None:
     """A present-but-null project_id is invalid: only "" unfiles, and omitting
     the field leaves membership unchanged — so null must not silently unfile."""
@@ -315,6 +354,20 @@ def test_owner_can_file_own_session_into_own_project(db_uri: str) -> None:
     assert resp.json()["project_id"] == project["id"]
     listed = client.get("/v1/sessions?project=Alice", headers=_hdr(ALICE))
     assert [s["id"] for s in listed.json()["data"]] == [conv_id]
+    permissions = SqlAlchemyPermissionStore(db_uri)
+    permissions.ensure_user(BOB)
+    permissions.grant(BOB, conv_id, LEVEL_EDIT)
+    grants = permissions.list_for_session(conv_id)
+    for archived in (True, False):
+        response = client.patch(
+            f"/v1/projects/{project['id']}", json={"archived": archived}, headers=_hdr(ALICE)
+        )
+        assert response.status_code == 200
+        assert permissions.list_for_session(conv_id) == grants
+        snapshot = client.get(f"/v1/sessions/{conv_id}", headers=_hdr(BOB))
+        assert snapshot.status_code == 200
+        assert snapshot.json()["project_id"] == project["id"]
+        assert snapshot.json()["archived"] is False
 
 
 def test_cannot_file_into_another_owners_project(db_uri: str) -> None:

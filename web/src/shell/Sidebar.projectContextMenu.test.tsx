@@ -9,6 +9,8 @@ const PROJECT_NAME = "Sprint 42";
 const PROJECT_ID = "p_sprint42";
 
 const mocks = vi.hoisted(() => ({
+  archived: false,
+  archiveProject: { mutate: vi.fn(), isPending: false },
   renameProject: {
     mutateAsync: vi.fn(() => Promise.resolve(PROJECT_ID)),
     isPending: false,
@@ -31,7 +33,9 @@ vi.mock("@/hooks/useConversations", async () => {
   const { conversationHooksMock } = await import("@/test/sidebarMockHelpers");
   return {
     ...conversationHooksMock(),
-    useProjects: () => ({ data: [{ id: PROJECT_ID, name: PROJECT_NAME }] }),
+    useProjects: () => ({
+      data: [{ id: PROJECT_ID, name: PROJECT_NAME, archived: mocks.archived }],
+    }),
     useProjectSessions: () => ({
       data: undefined,
       isLoading: false,
@@ -42,6 +46,7 @@ vi.mock("@/hooks/useConversations", async () => {
       isFetchingNextPage: false,
     }),
     useDeleteProject: () => mocks.deleteProject,
+    useArchiveProject: () => mocks.archiveProject,
     useRenameProject: () => mocks.renameProject,
     useProjectConfig: () => ({ data: {}, isLoading: false, isError: false }),
     useUpdateProjectConfig: () => ({
@@ -125,12 +130,45 @@ beforeEach(() => {
   vi.clearAllMocks();
   useConversationsMock.mockReset();
   localStorage.clear();
+  mocks.archived = false;
   mockConversations([FILED_CONVERSATION]);
 });
 
 afterEach(cleanup);
 
 describe("project folder header context menu", () => {
+  it("archives a project through the same menu as delete without deleting its sessions", () => {
+    renderSidebar();
+    fireEvent.contextMenu(folderHeader());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive project" }));
+    expect(mocks.archiveProject.mutate).toHaveBeenCalledWith(
+      { id: PROJECT_ID, name: PROJECT_NAME, archived: true },
+      expect.any(Object),
+    );
+    expect(mocks.deleteProject.mutate).not.toHaveBeenCalled();
+  });
+
+  it("filters archived projects independently and restores them from the project menu", async () => {
+    mocks.archived = true;
+    const view = renderSidebar();
+    expect(screen.queryByTestId("project-actions")).toBeNull();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Filter projects" }), { button: 0 });
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Show archived projects" }),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.contextMenu(folderHeader());
+    expect(screen.queryByTestId("project-new-session-menu")).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restore project" }));
+    expect(mocks.archiveProject.mutate).toHaveBeenCalledWith(
+      { id: PROJECT_ID, name: PROJECT_NAME, archived: false },
+      expect.any(Object),
+    );
+    view.unmount();
+    renderSidebar();
+    expect(screen.getByTestId("project-actions")).toBeInTheDocument();
+  });
+
   it("opens the kebab's exact action set on right-click", () => {
     renderSidebar();
     const header = folderHeader();

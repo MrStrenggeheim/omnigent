@@ -31,7 +31,10 @@ export function cachedProjectSummaries(queryClient: QueryClient): ExtensionProje
   if (!cached) return null;
   try {
     return cached
-      .filter((project): project is ProjectSummary & { id: string } => Boolean(project.id))
+      .filter(
+        (project): project is ProjectSummary & { id: string } =>
+          Boolean(project.id) && !project.archived,
+      )
       .map((project) =>
         projectSummary({
           id: project.id,

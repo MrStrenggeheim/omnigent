@@ -7545,6 +7545,12 @@
       "SessionProjectSummary": {
         "description": "One entry of `GET /v1/sessions/projects` \u2014 a sidebar project folder.\n\nDual-read union of first-class projects and legacy `omni_project`\nlabel-projects, keyed by name.",
         "properties": {
+          "archived": {
+            "default": false,
+            "description": "First-class archive state; false for label-only projects.",
+            "title": "Archived",
+            "type": "boolean"
+          },
           "icon": {
             "anyOf": [
               {
@@ -9741,6 +9747,18 @@
         "additionalProperties": false,
         "description": "Request body for `PATCH /v1/projects/{project_id}`.\n\nAll fields optional; `None` leaves a field unchanged.",
         "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New archive state, or `None` to leave unchanged.",
+            "title": "Archived"
+          },
           "config": {
             "anyOf": [
               {
@@ -12614,6 +12632,19 @@
       "get": {
         "description": "List the caller's projects.\n\n**Returns:** `{\"object\": \"list\", \"data\": [...]}`.\n\n**Raises**\n\n- `OmnigentError` \u2014 401 if unauthenticated in multi-user mode.",
         "operationId": "list_projects_v1_projects_get",
+        "parameters": [
+          {
+            "description": "Include archived projects; defaults to false.",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -12626,6 +12657,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Projects",
@@ -13353,6 +13394,19 @@
       "get": {
         "description": "Return the caller's project summaries in their preferred display order.\n\nDual-reads both project representations and unions them by name:\n- **First-class projects** (`project_store`) \u2014 carry an `id` and\n  appear even when empty (the whole point of the first-class entity).\n- **Legacy label-projects** (implicit `omni_project` label) \u2014 exist\n  while at least one owned session carries the label; `id` is\n  `None` until such a project is promoted to first-class.\n\nA name present in both sources collapses to one entry that keeps the\nfirst-class `id`. Filing is owner-only, so both halves are scoped to\nthe caller (label-projects to their owned sessions, first-class to\ntheir owned rows) \u2014 a project shared to them but owned by another user\ndoes not surface as one of their own folders.\n\n**Returns:** Project summaries in custom order, or alphabetical order by default.",
         "operationId": "list_session_projects_v1_sessions_projects_get",
+        "parameters": [
+          {
+            "description": "Include archived projects; defaults to false.",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13367,6 +13421,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Session Projects",
@@ -15665,9 +15729,59 @@
         ]
       }
     },
+    "/v1/sessions/{session_id}/resources/environments/{environment_id}/content-replace": {
+      "post": {
+        "description": "Require write access before previewing, applying or undoing replacements.",
+        "operationId": "replace_environment_content_v1_sessions__session_id__resources_environments__environment_id__content_replace_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "environment_id",
+            "required": true,
+            "schema": {
+              "title": "Environment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace Environment Content",
+        "tags": [
+          "session_resources"
+        ]
+      }
+    },
     "/v1/sessions/{session_id}/resources/environments/{environment_id}/content-search": {
       "get": {
-        "description": "Search the session workspace with the same access gate as file reads.",
+        "description": "Search workspace or browsed-folder text through the runner or idle host.",
         "operationId": "search_environment_content_v1_sessions__session_id__resources_environments__environment_id__content_search_get",
         "parameters": [
           {
@@ -15718,6 +15832,37 @@
               "default": false,
               "title": "Regex",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "whole_word",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Whole Word",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "use_ignore",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Use Ignore",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 4096,
+              "title": "Path",
+              "type": "string"
             }
           },
           {
@@ -15892,6 +16037,55 @@
         ]
       }
     },
+    "/v1/sessions/{session_id}/resources/environments/{environment_id}/filesystem-operations": {
+      "post": {
+        "operationId": "operate_environment_filesystem_v1_sessions__session_id__resources_environments__environment_id__filesystem_operations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "environment_id",
+            "required": true,
+            "schema": {
+              "title": "Environment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operate Environment Filesystem",
+        "tags": [
+          "session_resources"
+        ]
+      }
+    },
     "/v1/sessions/{session_id}/resources/environments/{environment_id}/filesystem/{relative_path}": {
       "delete": {
         "description": "Delete a file or directory in an environment.\n\n**Returns:** Delete result.",
@@ -15925,6 +16119,16 @@
             "schema": {
               "title": "Relative Path",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recursive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Recursive",
+              "type": "boolean"
             }
           }
         ],

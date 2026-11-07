@@ -43,6 +43,7 @@ export function conversationHooksMock() {
     }),
     useMoveToProject: () => ({ mutate: vi.fn() }),
     useDeleteProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+    useArchiveProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
     useRenameProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
     useCreateProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
     useProjectConfig: () => ({ data: undefined, isLoading: false }),

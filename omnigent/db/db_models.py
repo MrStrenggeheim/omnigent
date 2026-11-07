@@ -739,6 +739,10 @@ class SqlProject(OmnigentBase):
     # (CompressedText).
     config: Mapped[str | None] = mapped_column(CompressedText, nullable=True)
 
+    archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+
     __table_args__ = (
         # "list my projects" — prefix scan on (workspace_id, user_id) with
         # created_at in the key so the ORDER BY created_at, id is served by the

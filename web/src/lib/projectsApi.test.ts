@@ -5,12 +5,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createProject,
+  archiveProject,
   deleteProject,
   getProject,
   listProjects,
   renameProject,
   updateProjectConfig,
 } from "./projectsApi";
+
+describe("archiveProject", () => {
+  it.each([true, false])(
+    "sets archive state to %s without altering project configuration",
+    async (archived) => {
+      const project = {
+        id: "project-1",
+        name: "Research",
+        archived,
+        config: { workspace: "/repo" },
+      };
+      fetchMock.mockResolvedValueOnce(mockResponse(project));
+      expect(await archiveProject("project-1", archived)).toEqual(project);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/v1/projects/project-1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ archived }),
+        }),
+      );
+    },
+  );
+});
 
 function mockResponse(body: unknown, init?: { ok?: boolean; status?: number }): Response {
   return {
@@ -33,6 +57,12 @@ afterEach(() => {
 });
 
 describe("listProjects", () => {
+  it("can include archived projects for history and restoration", async () => {
+    const project = { id: "old", name: "Old", archived: true };
+    fetchMock.mockResolvedValueOnce(mockResponse({ object: "list", data: [project] }));
+    expect(await listProjects(true)).toEqual([project]);
+    expect(fetchMock.mock.calls[0][0]).toBe("/v1/projects?include_archived=true");
+  });
   it("GETs /v1/projects and returns the data array", async () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({ object: "list", data: [{ id: "p_1", name: "A" }] }),

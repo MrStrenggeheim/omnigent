@@ -92,6 +92,7 @@ def _to_entity(row: SqlProject) -> Project:
         created_at=row.created_at,
         updated_at=row.updated_at,
         config=_decode_config(row.config),
+        archived=row.archived,
     )
 
 
@@ -247,7 +248,7 @@ class SqlAlchemyProjectStore(ProjectStore):
                 return None
             return _to_entity(row)
 
-    def list(self, *, user_id: str | None) -> list[Project]:
+    def list(self, *, user_id: str | None, include_archived: bool = False) -> list[Project]:
         """List the owner's projects ordered by ``created_at ASC, id ASC``."""
         with self._session("list_projects") as session:
             stmt = (
@@ -256,6 +257,8 @@ class SqlAlchemyProjectStore(ProjectStore):
                 .where(SqlProject.user_id == user_id)
                 .order_by(asc(SqlProject.created_at), asc(SqlProject.id))
             )
+            if not include_archived:
+                stmt = stmt.where(SqlProject.archived.is_(False))
             rows = session.execute(stmt).scalars().all()
             return [_to_entity(r) for r in rows]
 
@@ -266,6 +269,7 @@ class SqlAlchemyProjectStore(ProjectStore):
         user_id: str | None,
         name: str | None = None,
         config: dict[str, Any] | None = None,
+        archived: bool | None = None,
     ) -> Project | None:
         """Update mutable fields of an owned project.
 
@@ -298,6 +302,9 @@ class SqlAlchemyProjectStore(ProjectStore):
                 if row.config != encoded_config:
                     row.config = encoded_config
                     changed = True
+            if archived is not None and row.archived != archived:
+                row.archived = archived
+                changed = True
             if changed:
                 row.updated_at = updated_at
             session.flush()

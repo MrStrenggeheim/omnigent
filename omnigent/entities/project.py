@@ -32,6 +32,7 @@ class Project:
         empty dict when none are stored. The key vocabulary is owned by the
         client; the store persists and returns it whole. These are hints the
         new-chat dialog pre-fills, not enforced requirements.
+    :param archived: Whether the project is hidden from default project lists.
     """
 
     id: str
@@ -40,3 +41,4 @@ class Project:
     created_at: int
     updated_at: int | None = None
     config: dict[str, Any] = field(default_factory=dict)
+    archived: bool = False
