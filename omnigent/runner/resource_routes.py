@@ -1296,6 +1296,16 @@ def register_resource_routes(
         else:
             try:
                 content = await filesystem.read(path, limit=None)
+                if content.truncated:
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "file_too_large",
+                                "message": "Current file exceeds the diff read limit.",
+                            }
+                        },
+                        status_code=400,
+                    )
                 after = content.data.decode(content.encoding or "utf-8", errors="replace")
             except FilesystemPathNotFound:
                 after = None

@@ -563,6 +563,11 @@ async def test_agent_diff_keeps_last_turn_snapshot_and_reads_current_session_con
             session = await client.get(url, params={**params, "baseline": "session"})
             assert session.status_code == 200, session.text
             assert session.json() == {**captured, "after": "later external edit\n"}
+            file.write_bytes(b"x" * (10 * 1024 * 1024 + 1))
+            oversized = await client.get(url, params={**params, "baseline": "session"})
+            assert oversized.status_code == 400, oversized.text
+            assert oversized.json()["error"]["code"] == "file_too_large"
+            assert (await client.get(url, params=params)).json() == captured
             unknown = await client.get(
                 url, params={"path": "src/main.py", "baseline": "last_turn"}
             )

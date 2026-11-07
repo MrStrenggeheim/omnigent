@@ -810,7 +810,7 @@ function FileViewerBody({
   // Historical comparisons remain available even when the working tree is clean.
   const isDiffAvailable = !isImage && !isPdf && !isVideo && !isModel && !isBinary;
   const isDeletedFile =
-    changedFiles.data?.data.some((f) => f.path === path && f.status === "deleted") ?? false;
+    gitChanges.data?.data.some((f) => f.path === path && f.status === "deleted") ?? false;
   const revealTarget = useRevealTarget(path);
 
   // Diff is a global toggle — turning it on/off on any file carries over as you

@@ -485,6 +485,22 @@ describe("FileViewer comparison sources", () => {
       },
     );
   });
+
+  it("returns to the current file after an agent comparison contains an old deletion", async () => {
+    await vi.mocked(useWorkspaceChangedFiles).withImplementation(
+      () =>
+        ({
+          data: { available: true, data: [{ ...changedFilesFixture[0], status: "deleted" }] },
+        }) as ReturnType<typeof useWorkspaceChangedFiles>,
+      async () => {
+        renderViewer({ open: true, initialSearch: "diff=1" });
+        await chooseComparison("Last agent turn");
+        fireEvent.click(screen.getByRole("button", { name: "Exit diff view" }));
+        expect(screen.getByTestId("code-viewer")).toBeInTheDocument();
+        expect(screen.queryByText("This file has been deleted.")).not.toBeInTheDocument();
+      },
+    );
+  });
 });
 
 afterEach(() => {
