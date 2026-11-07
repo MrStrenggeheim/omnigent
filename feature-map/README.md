@@ -115,7 +115,9 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 - [Notifications](./notifications.md) covers shared popups, retained history, required prompts, archive recovery and transfer activity from conversation, file-viewer and Files drawer bells.
 
-- [Workspace Explorer](./workspace-explorer.md) covers file operations, transfers, selection, recovery and navigation on desktop and mobile.
+- [Workspace Explorer](./workspace-explorer.md) covers file operations, transfers, selection, recovery, Git status and the optional agent-change overlay on desktop and mobile within the selected session.
+
+- [Workspace diffs](./workspace-diffs.md) covers Git working-tree, commit/range and captured agent-turn/session comparisons, historical comment restrictions and verification limits across desktop and phone viewers.
 
 - [Session orchestration](./session-orchestration.md) covers private-owner
   messaging, top-level worker creation, polling results and sharing restrictions.
@@ -186,7 +188,7 @@ map an area, remove it here in the same change.
   native edit-tool approvals are mapped)
 - Sub-agents and the agent info popover: `tests/e2e_ui/agents/` (only Claude-native
   discovery and idle-runner performance are mapped in Native harnesses)
-- Files and the workspace browser: `tests/e2e_ui/files/`, `tests/browser_ui/files/` (Explorer operations and content search are mapped; other file previews remain partly mapped)
+- Files and the workspace browser: `tests/e2e_ui/files/`, `tests/browser_ui/files/` (Explorer operations, Git status, workspace diffs and content search are mapped; other file previews remain partly mapped)
 - Comments: `tests/e2e_ui/comments/`
 - Sharing and session permissions: `tests/e2e_ui/collaboration/`
 - GitHub integration: `tests/e2e_ui/github/`

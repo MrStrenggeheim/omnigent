@@ -47,6 +47,7 @@ vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
   useTerminals: vi.fn(() => ({ terminals: [], isLoading: false, error: null })),
 }));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceGitChanges: vi.fn(() => ({ data: { data: [] }, isLoading: false })),
   useWorkspaceEnvironment: vi.fn(() => ({
     data: { available: true, root: null },
     isLoading: false,
@@ -83,7 +84,10 @@ vi.mock("@/hooks/useAgents", () => ({
   useUpdateMcpServer: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useDeleteMcpServer: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 }));
-vi.mock("./Sidebar", () => ({ Sidebar: () => <div data-testid="sidebar" /> }));
+vi.mock("./Sidebar", () => ({
+  isMobileViewport: () => !window.matchMedia("(min-width: 768px)").matches,
+  Sidebar: () => <div data-testid="sidebar" />,
+}));
 vi.mock("./FilesPanel", () => ({
   readBrowseLocation: () => "",
   FilesPanel: () => <div data-testid="files-panel" />,

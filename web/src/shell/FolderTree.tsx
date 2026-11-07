@@ -9,6 +9,7 @@ import {
   type WorkspaceFile,
   useWorkspaceDirectories,
   joinBrowseLocation,
+  relativizeToWorkspace,
 } from "@/hooks/useWorkspaceChangedFiles";
 import { cn } from "@/lib/utils";
 import { isExplorerInternalPath } from "@/lib/explorerOperations";
@@ -424,6 +425,7 @@ function FolderTreeInner({
   showHidden,
   onShowHidden,
   changedFiles,
+  includeMissingChanges = true,
   sort,
   runnerWentOffline = false,
   searchQuery = "",
@@ -433,6 +435,8 @@ function FolderTreeInner({
   searchError = null,
   searchTruncated = false,
   browseLocation = "",
+  workspaceRoot = null,
+  onDirectoriesChange,
   onNavigateDir,
   onExitSearch,
   scrollParentRef,
@@ -449,6 +453,8 @@ function FolderTreeInner({
   /** Called when the user clicks "Show hidden files" in the search results. */
   onShowHidden?: () => void;
   changedFiles: WorkspaceChangedFile[] | undefined;
+  /** Include historical paths absent from the current filesystem listing. */
+  includeMissingChanges?: boolean;
   /** Active sort order, shared with the Changed list so both views agree. */
   sort: ChangedSort;
   /**
@@ -472,11 +478,11 @@ function FolderTreeInner({
    * a miss is not proof of absence and the results must say so.
    */
   searchTruncated?: boolean;
-  /**
-   * Absolute path currently browsed, or "" for the workspace root. Lazy
-   * directory expansion resolves node paths against it.
-   */
+  /** Browse location: workspace-relative, absolute outside it, or "" at its root. */
   browseLocation?: string;
+  workspaceRoot?: string | null;
+  /** Sorted paths relative to the browse location, including its root (""). */
+  onDirectoriesChange?: (directories: string[]) => void;
   /** Re-root the panel onto a directory when its underlined name is clicked. */
   onNavigateDir?: (relativePath: string) => void;
   /**
@@ -501,22 +507,34 @@ function FolderTreeInner({
   // Initialise from the module-level cache so expanded state survives
   // unmount/remount (e.g. opening the FileViewer and navigating back).
   const cacheKey = conversationId ? expandedCacheKey(conversationId, browseLocation) : null;
-  // The changes endpoint always speaks workspace-root-relative paths, while a
-  // re-rooted tree speaks paths relative to its current browse location.
+  // Changes are workspace-relative inside the root and absolute outside it.
   const scopedChangedFiles = useMemo(() => {
     if (!changedFiles) return [];
-    if (!browseLocation) return changedFiles;
-    if (browseLocation.startsWith("/")) return [];
-    const prefix = `${browseLocation.replace(/\/$/, "")}/`;
+    const location = relativizeToWorkspace(browseLocation, workspaceRoot);
+    const prefix = location ? `${location.replace(/\/$/, "")}/` : "";
     return changedFiles
-      .filter((file) => file.path.startsWith(prefix))
+      .map((file) => ({
+        ...file,
+        path:
+          location.startsWith("/") && !file.path.startsWith("/") && workspaceRoot
+            ? joinBrowseLocation(workspaceRoot, file.path)
+            : location.startsWith("/")
+              ? file.path
+              : relativizeToWorkspace(file.path, workspaceRoot),
+      }))
+      .filter((file) =>
+        location.startsWith("/")
+          ? file.path.startsWith(prefix)
+          : !file.path.startsWith("/") && file.path.startsWith(prefix),
+      )
       .map((file) => ({ ...file, path: file.path.slice(prefix.length) }));
-  }, [changedFiles, browseLocation]);
-  // Overlay API-reported changes onto the on-disk listing. This is essential
-  // for deleted files (which no longer exist in `/filesystem`) and also closes
-  // the brief race where a newly-created file reaches `/changes` first.
+  }, [changedFiles, browseLocation, workspaceRoot]);
+  // Optionally restore historical paths omitted by the filesystem listing.
   const treeFiles = useMemo<WorkspaceFile[] | undefined>(() => {
     if (!files) return undefined;
+    if (!includeMissingChanges) {
+      return files.filter((file) => !isExplorerInternalPath(file.path));
+    }
     const knownPaths = new Set(files.map((file) => file.path));
     const changedOnly = scopedChangedFiles
       .filter((file) => !knownPaths.has(file.path))
@@ -528,7 +546,7 @@ function FolderTreeInner({
         modified_at: file.modified_at,
       }));
     return [...files, ...changedOnly].filter((file) => !isExplorerInternalPath(file.path));
-  }, [files, scopedChangedFiles]);
+  }, [files, scopedChangedFiles, includeMissingChanges]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
     if (!cacheKey) return new Set();
     const cached = expandedPathsCache.get(cacheKey);
@@ -579,6 +597,11 @@ function FolderTreeInner({
     expandedPathsCache.set(cacheKey, initial);
     setExpandedPaths(new Set(initial));
   }, [cacheKey, treeFiles]);
+
+  const directoriesSnapshot = JSON.stringify(["", ...Array.from(expandedPaths).sort()]);
+  useEffect(() => {
+    onDirectoriesChange?.(JSON.parse(directoriesSnapshot) as string[]);
+  }, [directoriesSnapshot, onDirectoriesChange]);
 
   // Map from file path → change status, for file-level badges in the tree.
   const changedFileMap = useMemo<Map<string, WorkspaceChangedFile["status"]>>(() => {

@@ -1214,6 +1214,102 @@ def register_resource_routes(
             },
         )
 
+    @app.get("/v1/sessions/{session_id}/resources/environments/{environment_id}/git")
+    async def inspect_environment_git(
+        session_id: str,
+        environment_id: str,
+        operation: str = Query(default="changes", pattern="^(changes|diff)$"),
+        path: str = Query(default="", max_length=8192),
+        directories: str = Query(default="[]", max_length=32768),
+        base: str = Query(default="HEAD", max_length=256),
+        target: str = Query(default="WORKTREE", max_length=256),
+    ) -> JSONResponse:
+        """Read nearest-repository status or compare explicit Git versions."""
+        from omnigent.runner.workspace_git import inspect_git, parse_git_directories
+
+        try:
+            discovered = parse_git_directories(directories)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        spec = await _require_os_env(session_id)
+        await _ensure_session_registered(session_id)
+        environment = resource_registry.resolve_environment(session_id, environment_id, spec)
+        result = await inspect_git(
+            environment,
+            {
+                "operation": operation,
+                "path": path,
+                "directories": discovered,
+                "base": base,
+                "target": target,
+            },
+        )
+        return JSONResponse(result, status_code=int(result.pop("status", 200)))
+
+    @app.get("/v1/sessions/{session_id}/resources/environments/{environment_id}/agent-diff")
+    async def read_agent_file_diff(
+        session_id: str,
+        environment_id: str,
+        path: str = Query(max_length=8192),
+        baseline: str = Query(default="last_turn", pattern="^(last_turn|session)$"),
+    ) -> JSONResponse:
+        """Return observed tool baselines without substituting Git HEAD."""
+        from omnigent.entities.environment_filesystem import FilesystemPathNotFound
+        from omnigent.runner.environment_filesystem import CallerProcessFilesystem
+
+        spec = await _require_os_env(session_id)
+        await _ensure_session_registered(session_id)
+        environment = resource_registry.resolve_environment(session_id, environment_id, spec)
+        filesystem = CallerProcessFilesystem(environment)
+        resolved = filesystem._resolve(path)
+        registry = await _resolve_session_fs_registry(session_id)
+        record = (
+            registry.turn_history.lookup(session_id, str(resolved), baseline == "last_turn")
+            if registry
+            else None
+        )
+        if record is None or not record["known"]:
+            return JSONResponse(
+                {
+                    "error": {
+                        "code": "baseline_unavailable",
+                        "message": (
+                            "No captured agent baseline is available for this file and turn. "
+                            "Older edits and unobserved shell changes cannot be reconstructed."
+                        ),
+                    }
+                },
+                status_code=404,
+            )
+        if baseline == "last_turn":
+            if not record.get("after_known"):
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "baseline_unavailable",
+                            "message": "The turn's final file content was not captured.",
+                        }
+                    },
+                    status_code=404,
+                )
+            after = record.get("after")
+        else:
+            try:
+                content = await filesystem.read(path, limit=None)
+                after = content.data.decode(content.encoding or "utf-8", errors="replace")
+            except FilesystemPathNotFound:
+                after = None
+        return JSONResponse(
+            {
+                "object": "session.environment.filesystem.file_diff",
+                "path": path,
+                "before": record["before"],
+                "after": after,
+                "coverage": record["coverage"],
+                "turn_id": record["turn_id"],
+            }
+        )
+
     @app.get("/v1/sessions/{session_id}/resources/environments/{environment_id}/changes")
     async def list_filesystem_changes(
         session_id: str,

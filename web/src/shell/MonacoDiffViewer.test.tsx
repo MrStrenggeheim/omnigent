@@ -68,6 +68,7 @@ function diffTree(props: {
   wrapLines?: boolean;
   searchOpen?: boolean;
   onSearchHandled?: () => void;
+  allowComments?: boolean;
 }) {
   return (
     <MonacoDiffViewer
@@ -80,6 +81,7 @@ function diffTree(props: {
       wrapLines={props.wrapLines ?? false}
       conversationId="conv_1"
       comments={[]}
+      allowComments={props.allowComments}
       activeSelection={null}
       onSetActiveSelection={() => {}}
       searchOpen={props.searchOpen}
@@ -153,6 +155,16 @@ afterEach(() => {
 });
 
 describe("MonacoDiffViewer", () => {
+  it("keeps historical snapshots from creating current-file anchors", async () => {
+    renderDiff({ before: "old", after: "historical", layout: "unified", allowComments: false });
+    await waitFor(() => expect(h.commentOptions).not.toBeNull());
+    expect(h.commentOptions).toMatchObject({
+      canComment: false,
+      comments: [],
+      activeSelection: null,
+      path: undefined,
+    });
+  });
   it("feeds before→original and after→modified into the diff editor", async () => {
     renderDiff({ before: "old line\n", after: "new line\n", layout: "split" });
     await waitFor(() => expect(h.diffProps).not.toBeNull());

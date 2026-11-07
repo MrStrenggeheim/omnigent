@@ -36,6 +36,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from omnigent.runtime.turn_file_baselines import TurnFileBaselines
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - Windows has no flock.
@@ -544,6 +546,7 @@ class FilesystemRegistry(ABC):
         :param watch_path: The workspace directory to use as root.
         """
         self._cwd = watch_path.resolve()
+        self.turn_history = TurnFileBaselines(self._cwd)
 
     # ── Concrete: workspace root ───────────────────────────────────
 
@@ -557,7 +560,7 @@ class FilesystemRegistry(ABC):
         """Root of the repository this registry reads, or ``None`` without one."""
         return None
 
-    # ── Concrete: record_change (no-op default) ────────────────────
+    # ── Concrete: prospective turn tracking ───────────────────────
 
     def record_change(
         self,
@@ -568,8 +571,8 @@ class FilesystemRegistry(ABC):
         """Record a file change made by the agent via a tool call.
 
         Called by PUT/PATCH file handlers after a successful write or edit.
-        The default implementation is a no-op; subclasses override to persist
-        the event.
+        Records prospective turn metadata even for Git registries.
+        Subclasses also retain their existing session change events.
 
         :param path: Path relative to the workspace root,
             e.g. ``"src/foo.py"``.
@@ -578,36 +581,33 @@ class FilesystemRegistry(ABC):
         :param session_id: The session that made the change,
             e.g. ``"conv_abc123"``.
         """
-        return
+        self.turn_history.record(session_id, path, operation)
 
-    # ── Concrete: snapshot (no-op default) ────────────────────────
+    # ── Concrete: prospective preimage capture ────────────────────
 
     def seed_snapshot(self, path: str, content: str, *, session_id: str | None = None) -> None:
         """Seed a pre-write snapshot for *path*.
 
-        Part of the base interface so callers can call it unconditionally on any
-        registry.  No-op by default (e.g. :class:`GitFilesystemRegistry` uses
-        ``git show HEAD`` instead of in-memory snapshots).
-        :class:`AgentEditFilesystemRegistry` overrides this to store the content
-        in memory for use by the diff endpoint.
+        Captures the supplied content for an explicitly started turn in every registry.
+        AgentEdit also retains its legacy first-write snapshot; Git's legacy baseline remains HEAD.
 
         :param path: Path relative to the workspace root.
         :param content: File content before the write/edit.
         :param session_id: Optional session scope for the snapshot.
         """
-        return
+        if session_id is not None:
+            self.turn_history.capture(session_id, path, content, known=True)
 
     def unregister_conversation(self, conversation_id: str) -> None:
         """Drop per-session state when a session is deleted.
 
         Called on session teardown so implementations can evict in-memory
-        events and snapshots.  No-op by default (e.g.
-        :class:`GitFilesystemRegistry` holds no per-session state).
+        events and snapshots, including prospective turn history.
 
         :param conversation_id: The conversation to remove,
             e.g. ``"conv_abc123"``.
         """
-        return
+        self.turn_history.forget(conversation_id)
 
     def start(self) -> None:
         """Start any background observers.  Idempotent."""
@@ -738,6 +738,7 @@ class AgentEditFilesystemRegistry(FilesystemRegistry):
             return
         if _is_ephemeral(norm):
             return
+        super().record_change(path, operation, session_id)
         bytes_: int | None = None
         modified_at: int | None = None
         if operation != "deleted":
@@ -765,6 +766,7 @@ class AgentEditFilesystemRegistry(FilesystemRegistry):
         :param conversation_id: The conversation to remove,
             e.g. ``"conv_abc123"``.
         """
+        super().unregister_conversation(conversation_id)
         with self._lock:
             self._session_events.pop(conversation_id, None)
         with self._snapshots_lock:
@@ -895,6 +897,7 @@ class AgentEditFilesystemRegistry(FilesystemRegistry):
         norm = _normalize_path(path, self._cwd)
         if norm is None:
             return
+        super().seed_snapshot(norm, content, session_id=session_id)
         with self._snapshots_lock:
             if norm not in self._snapshots:
                 self._snapshots[norm] = content

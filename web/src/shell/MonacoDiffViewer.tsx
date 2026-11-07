@@ -63,6 +63,8 @@ interface MonacoDiffViewerProps {
   conversationId: string;
   /** Saved comments — highlighted on the modified side. */
   comments: Comment[];
+  /** Historical snapshots cannot create anchors into the current file. */
+  allowComments?: boolean;
   activeSelection: ActiveSelection | null;
   onSetActiveSelection: (sel: ActiveSelection | null) => void;
   /** In-progress comment body; clicking away won't clear an active draft. */
@@ -110,6 +112,7 @@ export function MonacoDiffViewer({
   wrapLines,
   conversationId,
   comments,
+  allowComments = true,
   activeSelection,
   onSetActiveSelection,
   pendingBodyRef,
@@ -276,17 +279,16 @@ export function MonacoDiffViewer({
     });
   }, []);
 
-  // Comments anchor into the current ("after") content == the saved file, so
-  // they're always offset-valid here; gate only on edit permission.
+  // Only comparisons whose modified side is current can anchor file comments.
   const commentButton = useMonacoCommentLayer({
     editorRef: modifiedEditorRef,
     mounted,
-    comments,
-    activeSelection,
+    comments: allowComments ? comments : [],
+    activeSelection: allowComments ? activeSelection : null,
     onSetActiveSelection,
-    canComment: canEdit,
+    canComment: canEdit && allowComments,
     pendingBodyRef,
-    path,
+    path: allowComments ? path : undefined,
   });
 
   const options = useMemo<DiffEditorProps["options"]>(() => {

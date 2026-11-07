@@ -101,3 +101,72 @@ export function useFileDiff(
     staleTime: 5_000,
   });
 }
+
+export function useGitFileDiff(
+  conversationId: string | undefined,
+  path: string | null,
+  options: { enabled: boolean; base: string; target: string },
+) {
+  const serveable = useWorkspaceServeable(conversationId);
+  return useQuery<FileDiffResponse & { repository?: string; base?: string; target?: string }>({
+    queryKey: ["git-file-diff", conversationId, path, options.base, options.target],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({
+        operation: "diff",
+        path: path!,
+        base: options.base,
+        target: options.target,
+      });
+      const response = await authenticatedFetch(
+        `/v1/sessions/${encodeURIComponent(conversationId!)}/resources/environments/default/git?${params}`,
+        { signal },
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          payload.error?.message ?? payload.detail ?? "Git comparison is unavailable",
+        );
+      }
+      return payload;
+    },
+    enabled:
+      options.enabled &&
+      !!conversationId &&
+      !isTempConvId(conversationId) &&
+      !!path &&
+      serveable !== false,
+    staleTime: 5_000,
+    refetchInterval: options.target === "WORKTREE" ? 5_000 : false,
+    retry: false,
+  });
+}
+
+export function useAgentFileDiff(
+  conversationId: string | undefined,
+  path: string | null,
+  options: { enabled: boolean; lastTurn: boolean },
+) {
+  return useQuery<FileDiffResponse & { patch?: string; coverage?: string; turn_id?: string }>({
+    queryKey: ["agent-file-diff", conversationId, path, options.lastTurn],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({
+        path: path!,
+        baseline: options.lastTurn ? "last_turn" : "session",
+      });
+      const response = await authenticatedFetch(
+        `/v1/sessions/${encodeURIComponent(conversationId!)}/resources/environments/default/agent-diff?${params}`,
+        { signal },
+      );
+      const payload = await response.json();
+      if (!response.ok)
+        throw new Error(
+          payload.error?.message ?? payload.detail ?? "Agent baseline is unavailable",
+        );
+      return payload;
+    },
+    enabled: options.enabled && !!conversationId && !isTempConvId(conversationId) && !!path,
+    refetchInterval: 5_000,
+    retry: false,
+    staleTime: 5_000,
+  });
+}

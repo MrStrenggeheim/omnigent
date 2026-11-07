@@ -81,7 +81,13 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { downloadWorkspaceFile, useFileContent } from "@/hooks/useFileContent";
 import { isVideoFile } from "@/lib/video";
-import { useFileDiff } from "@/hooks/useFileDiff";
+import { useAgentFileDiff, useGitFileDiff } from "@/hooks/useFileDiff";
+import { CodeBlock } from "@/components/ai-elements/code-block";
+import {
+  DiffComparisonControls,
+  DEFAULT_DIFF_COMPARISON,
+  type DiffComparison,
+} from "./DiffComparisonControls";
 import {
   type Comment,
   useAddComment,
@@ -94,7 +100,7 @@ import { markCommentsSeen } from "@/hooks/useSeenComments";
 import { useChatStore } from "@/store/chatStore";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useIOSNativeKeyboardInset } from "@/hooks/useIOSNativeKeyboardInset";
-import { useWorkspaceChangedFiles } from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceChangedFiles, useWorkspaceGitChanges } from "@/hooks/useWorkspaceChangedFiles";
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
 import { absoluteWorkspacePath } from "@/lib/composerContext";
@@ -437,7 +443,19 @@ function FileViewerBody({
   const keyboardInset = useIOSNativeKeyboardInset((!frameless || mobileOverlay) && open);
   // Video playback reads the complete binary on demand, never the capped JSON preview.
   const fileQuery = useFileContent(conversationId, isVideoFile(path) ? null : path);
-  const changedFiles = useWorkspaceChangedFiles(conversationId);
+  const [diffComparison, setDiffComparison] = useState<DiffComparison>(DEFAULT_DIFF_COMPARISON);
+  const agentComparison =
+    diffComparison.source === "agent" || diffComparison.source === "last-turn";
+  const sessionChanges = useWorkspaceChangedFiles(conversationId, { enabled: agentComparison });
+  const gitChanges = useWorkspaceGitChanges(conversationId, {
+    path:
+      path?.startsWith("/") &&
+      (!workspaceRoot || !path.startsWith(`${workspaceRoot.replace(/\/$/, "")}/`))
+        ? path.slice(0, path.lastIndexOf("/")) || "/"
+        : "",
+    directories: path?.includes("/") ? [path.slice(0, path.lastIndexOf("/")) || "/"] : [],
+  });
+  const changedFiles = agentComparison ? sessionChanges : gitChanges;
 
   // Build the navigable file list from all changed files (including deleted),
   // sorted the same way FilesPanel sorts its flat view so the "X/N" index
@@ -786,13 +804,8 @@ function FileViewerBody({
   // Binary/base64 files render CodeViewer's "Preview not available" notice, not
   // Monaco — mirrors CodeViewer's own base64/binary-path check.
   const isBinary = fileQuery.data?.encoding === "base64" || isBinaryPath(path);
-  // Show Δ button only when the file appears in the session's changed-files list.
-  const isDiffAvailable =
-    !isImage &&
-    !isPdf &&
-    !isVideo &&
-    !isModel &&
-    (changedFiles.data?.data.some((f) => f.path === path) ?? false);
+  // Historical comparisons remain available even when the working tree is clean.
+  const isDiffAvailable = !isImage && !isPdf && !isVideo && !isModel && !isBinary;
   const isDeletedFile =
     changedFiles.data?.data.some((f) => f.path === path && f.status === "deleted") ?? false;
   const revealTarget = useRevealTarget(path);
@@ -813,13 +826,29 @@ function FileViewerBody({
     () => initialDiffRef.current || persistedPrefsRef.current.diffActive,
   );
   const requestedDiff =
-    open && isActiveViewport && diffActive && !isImage && !isPdf && !isVideo && !isModel;
+    open &&
+    isActiveViewport &&
+    diffActive &&
+    !isImage &&
+    !isPdf &&
+    !isVideo &&
+    !isModel &&
+    !isBinary;
   // A saved preference also applies to unchanged files; only explicit links skip discovery.
   const linkedDiff =
     requestedDiff &&
     linkedFileRef.current?.conversationId === conversationId &&
     linkedFileRef.current?.path === path;
-  const diffQuery = useFileDiff(conversationId, isVideo ? null : path, { requested: linkedDiff });
+  const sessionDiffQuery = useAgentFileDiff(conversationId, isVideo ? null : path, {
+    enabled: requestedDiff && agentComparison,
+    lastTurn: diffComparison.source === "last-turn",
+  });
+  const gitDiffQuery = useGitFileDiff(conversationId, isVideo ? null : path, {
+    enabled: requestedDiff && !agentComparison,
+    base: diffComparison.base,
+    target: diffComparison.target,
+  });
+  const diffQuery = agentComparison ? sessionDiffQuery : gitDiffQuery;
   const prepareDiff =
     requestedDiff &&
     (isDiffAvailable || (linkedDiff && changedFiles.data === undefined && !changedFiles.isError));
@@ -911,6 +940,12 @@ function FileViewerBody({
   const viewMode: "editor" | "preview" | "source" | "diff" =
     diffActive && isDiffAvailable ? "diff" : filePosition ? "source" : fileViewMode;
   const diffViewActive = viewMode === "diff";
+  const currentFileComparison =
+    diffComparison.source === "git" || diffComparison.source === "agent";
+  const commentsSupported = !diffViewActive || currentFileComparison;
+  useEffect(() => {
+    if (!commentsSupported) setCommentsOpen(false);
+  }, [commentsSupported]);
 
   const registerNavigationGuard = useContext(FileViewerContext)?.registerNavigationGuard;
   useLayoutEffect(() => {
@@ -1242,16 +1277,17 @@ function FileViewerBody({
     });
   }
   // PDFs render through PdfViewer with text-layer comment anchors.
-  toolbarActions.push({
-    key: "comments",
-    label: commentsOpen ? "Hide comments" : "Show comments",
-    icon: <MessageSquareTextIcon className="size-4" />,
-    active: commentsOpen,
-    onSelect: () => {
-      commentsInitializedRef.current = true;
-      setCommentsOpen((prev) => !prev);
-    },
-  });
+  if (commentsSupported)
+    toolbarActions.push({
+      key: "comments",
+      label: commentsOpen ? "Hide comments" : "Show comments",
+      icon: <MessageSquareTextIcon className="size-4" />,
+      active: commentsOpen,
+      onSelect: () => {
+        commentsInitializedRef.current = true;
+        setCommentsOpen((prev) => !prev);
+      },
+    });
   if (!isPdf && isDiffAvailable) {
     toolbarActions.push({
       key: "diff",
@@ -1728,6 +1764,9 @@ function FileViewerBody({
         </div>
       </div>
 
+      {diffViewActive && (
+        <DiffComparisonControls value={diffComparison} onChange={setDiffComparison} />
+      )}
       <div className="min-h-0 flex-1 flex flex-col md:flex-row overflow-hidden">
         <div
           ref={contentAreaRef}
@@ -1766,6 +1805,12 @@ function FileViewerBody({
               <div className="flex items-center justify-center p-8 text-muted-foreground text-ui">
                 Loading diff…
               </div>
+            ) : "patch" in diffQuery.data && typeof diffQuery.data.patch === "string" ? (
+              <CodeBlock
+                code={diffQuery.data.patch}
+                language="diff"
+                className="rounded-none border-0"
+              />
             ) : (
               // Keep viewer state on resize without computing the CSS-hidden copy's diff.
               isActiveViewport && (
@@ -1789,6 +1834,7 @@ function FileViewerBody({
                     wrapLines={wrapLines}
                     conversationId={conversationId}
                     comments={openComments}
+                    allowComments={currentFileComparison}
                     activeSelection={activeSelection}
                     onSetActiveSelection={handleSetActiveSelection}
                     pendingBodyRef={pendingBodyRef}
@@ -1826,7 +1872,7 @@ function FileViewerBody({
             />
           )}
         </div>
-        {commentsOpen && (
+        {commentsSupported && commentsOpen && (
           <CommentsPanel
             comments={openComments}
             addressedComments={addressedComments}

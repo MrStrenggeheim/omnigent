@@ -3717,6 +3717,8 @@ class HostProcess:
         from typing import cast
 
         r = cast("WorkspaceReader", reader)
+        if op == "git_inspect":
+            return r.git_inspect(params)
         if op == "content_search":
             from omnigent.runner.content_search import search_content_local
 

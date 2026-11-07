@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
   findAgentTerminal,
   inventoryTerminals,
@@ -8,8 +8,18 @@ import {
 import {
   useWorkspaceChangedFiles,
   useWorkspaceEnvironment,
+  useWorkspaceGitChanges,
 } from "@/hooks/useWorkspaceChangedFiles";
 import { isEditorLevel } from "@/lib/permissionsApi";
+import { getExplorerGitScope, subscribeExplorerGitScopes } from "@/lib/explorerGitScope";
+import {
+  readFilesPanelPreferences,
+  subscribeFilesPanelPreferences,
+} from "@/lib/filesPanelPreferences";
+
+function readShowAgentChanges() {
+  return readFilesPanelPreferences().showAgentChanges;
+}
 
 /** Shared discovery for the full-session shell and grid workspaces. */
 export function useWorkspaceResources({
@@ -28,10 +38,32 @@ export function useWorkspaceResources({
   // View grants don't include files. Unknown levels stay permissive; the server enforces access.
   const canBrowseWorkspace = isEditorLevel(permissionLevel) || shareWorkspaceFiles === true;
   const environmentQuery = useWorkspaceEnvironment(sessionId, { enabled: canBrowseWorkspace });
-  const changedFiles = useWorkspaceChangedFiles(sessionId, { enabled: canBrowseWorkspace });
+  const scope = useSyncExternalStore(
+    subscribeExplorerGitScopes,
+    () => getExplorerGitScope(sessionId),
+    () => getExplorerGitScope(undefined),
+  );
+  const showAgentChanges = useSyncExternalStore(
+    subscribeFilesPanelPreferences,
+    readShowAgentChanges,
+    () => false,
+  );
+  const gitChanges = useWorkspaceGitChanges(sessionId, {
+    ...scope,
+    enabled: canBrowseWorkspace,
+  });
+  const agentChanges = useWorkspaceChangedFiles(sessionId, {
+    enabled: canBrowseWorkspace && showAgentChanges,
+  });
   const changedPaths = useMemo(
-    () => new Set(changedFiles.data?.data.map((file) => file.path)),
-    [changedFiles.data],
+    () =>
+      new Map(
+        [
+          ...(showAgentChanges ? (agentChanges.data?.data ?? []) : []),
+          ...(gitChanges.data?.data ?? []),
+        ].map((file) => [file.path, file]),
+      ),
+    [gitChanges.data, agentChanges.data, showAgentChanges],
   );
   const isChangedPath = useCallback((path: string) => changedPaths.has(path), [changedPaths]);
   const { terminals } = useTerminals(sessionId ?? null, { reconcileWhilePending: terminalPending });
@@ -45,7 +77,7 @@ export function useWorkspaceResources({
     canBrowseWorkspace,
     environmentQuery,
     showFilesPanel: canBrowseWorkspace && environmentQuery.data?.available !== false,
-    changedCount: changedFiles.data?.data.length ?? 0,
+    changedCount: changedPaths.size,
     isChangedPath,
     terminals,
     agentTerminal,

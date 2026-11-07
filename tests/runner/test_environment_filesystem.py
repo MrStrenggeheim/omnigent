@@ -33,8 +33,8 @@ from omnigent.inner.sandbox import SandboxPolicy
 from omnigent.runner import create_runner_app
 from omnigent.runner.environment_filesystem import CallerProcessFilesystem, search_indexed_paths
 from omnigent.runner.resource_registry import SessionResourceRegistry
-from omnigent.runtime.filesystem_registry import GitFilesystemRegistry
-from omnigent.workspace_fs import WorkspaceReader
+from omnigent.runtime.filesystem_registry import AgentEditFilesystemRegistry, GitFilesystemRegistry
+from omnigent.workspace_fs import WorkspaceReader, WorkspaceReaderError
 from tests.runner.helpers import NullServerClient
 
 
@@ -207,6 +207,362 @@ async def test_git_ignore_failure_keeps_browsing_available(
     assert response.status_code == 200, response.text
     entry = next(e for e in response.json()["data"] if e["name"] == "hello.txt")
     assert "git_ignored" not in entry
+
+
+def _inspection_git(repository: Path, *arguments: str) -> str:
+    return subprocess.check_output(
+        ["git", "-c", f"core.hooksPath={os.devnull}", *arguments],
+        cwd=repository,
+        env=_git_env(),
+        stderr=subprocess.PIPE,
+        text=True,
+    ).strip()
+
+
+@pytest.fixture
+def git_inspection_repos(
+    workspace: Path, registry: SessionResourceRegistry
+) -> Iterator[dict[str, Path]]:
+    """Parent, nested gitfile and external repositories beneath a non-Git root."""
+    parent = workspace / "projects/repo"
+    nested = parent / "nested"
+    external = workspace.parent / "external"
+    nested.mkdir(parents=True)
+    (nested / "tracked.txt").write_text("parent nested baseline\n")
+    (nested / "foreign.txt").write_text("parent-only file\n")
+    (parent / "deleted.txt").write_text("tracked deletion\n")
+    repos = {"parent": parent, "nested": nested, "external": external}
+    for name, repository in repos.items():
+        repository.mkdir(exist_ok=True)
+        arguments = ["init", "-q", "-b", "main"]
+        if name == "nested":
+            (nested / "foreign.txt").unlink()
+            arguments += ["--separate-git-dir", str(workspace.parent / "nested-gitdir")]
+        _inspection_git(repository, *arguments)
+        (repository / "tracked.txt").write_text(f"{name} original\n")
+        _inspection_git(repository, "add", ".")
+        _inspection_git(repository, "commit", "-qm", "initial")
+        (repository / "tracked.txt").write_text(f"{name} committed\n")
+        _inspection_git(repository, "add", ".")
+        _inspection_git(repository, "commit", "-qm", "second")
+    assert (nested / ".git").is_file()
+    try:
+        yield repos
+    finally:
+        registry._primary_envs["conv_test"].close()
+
+
+@pytest.mark.asyncio
+async def test_git_inspection_status_discovery_scope_and_read_only_host_parity(
+    client: httpx.AsyncClient,
+    workspace: Path,
+    git_inspection_repos: dict[str, Path],
+) -> None:
+    """The active route and idle reader report current Git state without setup writes."""
+    repos = git_inspection_repos
+    parent, nested, external = repos["parent"], repos["nested"], repos["external"]
+    for name, repository in repos.items():
+        (repository / "tracked.txt").write_text(f"{name} worktree\n")
+    (parent / "tracked.txt").write_text("parent committed\nstaged\n")
+    _inspection_git(parent, "add", "tracked.txt")
+    (parent / "tracked.txt").write_text("parent committed\nstaged\nworktree\n")
+    (parent / "deleted.txt").unlink()
+    transient = parent / "transient/new.txt"
+    transient.parent.mkdir()
+    transient.write_text("untracked\n")
+    metadata = [
+        Path(_inspection_git(repository, "rev-parse", "--absolute-git-dir")) / filename
+        for repository in repos.values()
+        for filename in ("config", "index")
+    ]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata}
+    host = WorkspaceReader(workspace)
+    # Constructing a reader inside Git must not start optional repository optimizations.
+    for repository in (parent, nested):
+        WorkspaceReader(repository).git_inspect({"operation": "changes"})
+    url = "/v1/sessions/conv_test/resources/environments/default/git"
+
+    async def inspect_changes(path: str = "", directories: list[str] | None = None) -> dict:
+        params: dict[str, Any] = {
+            "operation": "changes",
+            "path": path,
+            "directories": directories or [],
+            "base": "HEAD",
+            "target": "WORKTREE",
+        }
+        response = await client.get(
+            url, params={**params, "directories": json.dumps(params["directories"])}
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body == host.git_inspect(params)
+        return body
+
+    empty = await inspect_changes()
+    assert empty == {"object": "list", "data": [], "has_more": False, "repositories": []}
+    listing = await client.get(url.removesuffix("/git") + "/filesystem")
+    assert listing.status_code == 200, listing.text
+    assert "hello.txt" in {entry["name"] for entry in listing.json()["data"]}
+    host_entries = host.list_or_read("")["data"]
+    assert isinstance(host_entries, list)
+    assert "hello.txt" in {entry["name"] for entry in host_entries}
+
+    discovered = ["projects/repo", str(parent), "projects/repo/nested"]
+    changes = await inspect_changes(directories=discovered)
+    assert changes["repositories"] == [str(parent), str(nested)]
+    records = {entry["path"]: entry for entry in changes["data"]}
+    assert len(records) == len(changes["data"]) == 4
+    assert {path: record["status"] for path, record in records.items()} == {
+        "projects/repo/deleted.txt": "deleted",
+        "projects/repo/nested/tracked.txt": "modified",
+        "projects/repo/tracked.txt": "modified",
+        "projects/repo/transient/new.txt": "created",
+    }
+    assert records["projects/repo/nested/tracked.txt"]["repository"] == str(nested)
+    assert (
+        records["projects/repo/tracked.txt"]["lines_added"],
+        records["projects/repo/tracked.txt"]["lines_removed"],
+    ) == (2, 0)
+    assert (
+        records["projects/repo/deleted.txt"]["lines_added"],
+        records["projects/repo/deleted.txt"]["lines_removed"],
+    ) == (0, 1)
+    untracked = records["projects/repo/transient/new.txt"]
+    assert untracked["lines_added"] is untracked["lines_removed"] is None
+    transient.unlink()
+    transient.parent.rmdir()
+    refreshed = await inspect_changes(directories=discovered)
+    assert {entry["path"] for entry in refreshed["data"]} == set(records) - {
+        "projects/repo/transient/new.txt",
+    }
+    deleted = next(entry for entry in refreshed["data"] if entry["status"] == "deleted")
+    assert deleted["bytes"] is deleted["modified_at"] is None
+    scoped = await inspect_changes("projects/repo/nested", discovered)
+    assert [entry["path"] for entry in scoped["data"]] == ["projects/repo/nested/tracked.txt"]
+    outside = await inspect_changes(str(external), [str(external)])
+    assert [entry["path"] for entry in outside["data"]] == [str(external / "tracked.txt")]
+    assert outside["repositories"] == [str(external)]
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata} == before
+    assert all(not path.with_name(path.name + ".lock").exists() for path in metadata)
+
+
+@pytest.mark.asyncio
+async def test_git_inspection_diff_uses_nearest_commits_and_gitfile_host_parity(
+    client: httpx.AsyncClient,
+    workspace: Path,
+    git_inspection_repos: dict[str, Path],
+) -> None:
+    """Both routes read the chosen repository's commits instead of another index or HEAD."""
+    host = WorkspaceReader(workspace)
+    url = "/v1/sessions/conv_test/resources/environments/default/git"
+    for name, repository in git_inspection_repos.items():
+        (repository / "tracked.txt").write_text(f"{name} staged\n")
+        _inspection_git(repository, "add", "tracked.txt")
+        (repository / "tracked.txt").write_text(f"{name} worktree\n")
+        path = (
+            str(repository / "tracked.txt")
+            if name == "external"
+            else ((repository / "tracked.txt").relative_to(workspace).as_posix())
+        )
+        params: dict[str, Any] = {
+            "operation": "diff",
+            "path": path,
+            "directories": [],
+            "base": "HEAD~1",
+            "target": "main",
+        }
+        response = await client.get(url, params={**params, "directories": "[]"})
+        assert response.status_code == 200, response.text
+        assert (
+            response.json()
+            == host.git_inspect(params)
+            == {
+                "object": "session.environment.filesystem.file_diff",
+                "path": path,
+                "before": f"{name} original\n",
+                "after": f"{name} committed\n",
+                "repository": str(repository),
+                "base": "HEAD~1",
+                "target": "main",
+            }
+        )
+        params.update(base="HEAD", target="WORKTREE")
+        response = await client.get(url, params={**params, "directories": "[]"})
+        assert response.status_code == 200, response.text
+        assert response.json() == host.git_inspect(params)
+        assert (response.json()["before"], response.json()["after"]) == (
+            f"{name} committed\n",
+            f"{name} worktree\n",
+        )
+    deleted = git_inspection_repos["parent"] / "deleted.txt"
+    deleted.unlink()
+    params: dict[str, Any] = {
+        "operation": "diff",
+        "path": deleted.relative_to(workspace).as_posix(),
+    }
+    response = await client.get(url, params=params)
+    assert response.status_code == 200, response.text
+    assert response.json() == host.git_inspect(params)
+    assert (response.json()["before"], response.json()["after"]) == ("tracked deletion\n", None)
+
+    repository = git_inspection_repos["parent"]
+    link = repository / "tracked-link"
+    link.symlink_to("tracked.txt")
+    _inspection_git(repository, "add", "tracked-link")
+    _inspection_git(repository, "commit", "-qm", "Track symlink")
+    link.unlink()
+    link.symlink_to("deleted.txt")
+    params = {"operation": "diff", "path": link.relative_to(workspace).as_posix()}
+    response = await client.get(url, params=params)
+    assert response.status_code == 200, response.text
+    assert response.json() == host.git_inspect(params)
+    assert (response.json()["before"], response.json()["after"]) == ("tracked.txt", "deleted.txt")
+
+
+@pytest.mark.asyncio
+async def test_git_inspection_errors_are_distinct_from_empty_status(
+    client: httpx.AsyncClient,
+    workspace: Path,
+    git_inspection_repos: dict[str, Path],
+) -> None:
+    host = WorkspaceReader(workspace)
+    url = "/v1/sessions/conv_test/resources/environments/default/git"
+    cases: list[tuple[dict[str, Any], int, str]] = [
+        ({"operation": "diff", "path": "hello.txt"}, 404, "not_a_repository"),
+        (
+            {"operation": "diff", "path": "projects/repo/tracked.txt", "base": "--help"},
+            400,
+            "invalid_revision",
+        ),
+        ({"operation": "changes", "directories": ["hello.txt"]}, 400, "invalid_path"),
+    ]
+    for params, status, code in cases:
+        response = await client.get(
+            url, params={**params, "directories": json.dumps(params.get("directories", []))}
+        )
+        assert response.status_code == status, response.text
+        assert response.json()["error"]["code"] == code
+        with pytest.raises(WorkspaceReaderError) as error:
+            host.git_inspect(params)
+        assert (error.value.status, error.value.code) == (status, code)
+    for directories in ("{", '{"path":"projects/repo"}', "[7]"):
+        response = await client.get(url, params={"directories": directories})
+        assert response.status_code == 400, response.text
+    (git_inspection_repos["parent"] / ".git/index").write_bytes(b"corrupt index")
+    params: dict[str, Any] = {"operation": "changes", "path": "projects/repo"}
+    response = await client.get(url, params=params)
+    assert response.status_code == 500, response.text
+    assert response.json()["error"]["code"] == "git_failed"
+    assert "data" not in response.json()
+    with pytest.raises(WorkspaceReaderError) as error:
+        host.git_inspect(params)
+    assert (error.value.status, error.value.code) == (500, "git_failed")
+
+
+@pytest.mark.asyncio
+async def test_git_inspection_authorizes_scope_and_every_discovered_directory(
+    client: httpx.AsyncClient,
+    registry: SessionResourceRegistry,
+    workspace: Path,
+    git_inspection_repos: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "/v1/sessions/conv_test/resources/environments/default/git"
+    external = git_inspection_repos["external"]
+    (external / "tracked.txt").write_text("external changed\n")
+    (workspace / "escape").symlink_to(external, target_is_directory=True)
+    escaped = await client.get(url, params={"path": "escape"})
+    assert escaped.status_code == 400, escaped.text
+    assert escaped.json()["error"]["code"] == "invalid_path"
+    # Exercise caller authorization against an active policy; the fixture's real
+    # shell helper stays unconfined, so this test does not require a second sandbox.
+    environment = registry._primary_envs["conv_test"]
+    policy = SandboxPolicy(
+        backend_type="linux_bwrap",
+        active=True,
+        read_roots=[],
+        write_roots=[],
+        write_files=[],
+        allow_network=False,
+    )
+    monkeypatch.setattr(environment, "sandbox", policy)
+    for params in ({"path": str(external)}, {"directories": json.dumps([str(external)])}):
+        response = await client.get(url, params=params)
+        assert response.status_code == 403, response.text
+        assert response.json()["error"]["code"] == "path_unreachable"
+    policy.read_roots = [external]
+    params: dict[str, Any] = {
+        "operation": "changes",
+        "path": str(external),
+        "directories": [str(external)],
+    }
+    response = await client.get(
+        url, params={**params, "directories": json.dumps(params["directories"])}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == WorkspaceReader(workspace).git_inspect(params)
+    assert response.json()["data"][0]["path"] == str(external / "tracked.txt")
+
+
+@pytest.mark.asyncio
+async def test_agent_diff_keeps_last_turn_snapshot_and_reads_current_session_content(
+    registry: SessionResourceRegistry,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The API keeps a completed turn's after-image while session diffs read current disk."""
+    tracking = AgentEditFilesystemRegistry(workspace)
+    with monkeypatch.context() as setup:
+        setup.setattr(
+            "omnigent.runtime.filesystem_registry.create_filesystem_registry",
+            lambda **_kwargs: tracking,
+        )
+        app = create_runner_app(
+            resource_registry=registry,
+            runner_workspace=workspace,
+            server_client=NullServerClient(),  # type: ignore[arg-type]
+        )
+    assert app.state.filesystem_registry is tracking
+    file = workspace / "hello.txt"
+    before = file.read_text()
+    tracking.turn_history.begin("conv_test", "t")
+    tracking.seed_snapshot("hello.txt", before, session_id="conv_test")
+    file.write_text("agent after\n")
+    tracking.record_change("hello.txt", "modified", "conv_test")
+    tracking.turn_history.finish("conv_test")
+    url = "/v1/sessions/conv_test/resources/environments/default/agent-diff"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://runner",
+        ) as client:
+            params = {"path": "hello.txt", "baseline": "last_turn"}
+            response = await client.get(url, params=params)
+            assert response.status_code == 200, response.text
+            captured = response.json()
+            assert captured == {
+                "object": "session.environment.filesystem.file_diff",
+                "path": "hello.txt",
+                "before": before,
+                "after": "agent after\n",
+                "coverage": "observed_tools",
+                "turn_id": "t",
+            }
+            file.write_text("later external edit\n")
+            frozen = await client.get(url, params=params)
+            assert frozen.status_code == 200, frozen.text
+            assert frozen.json() == captured
+            session = await client.get(url, params={**params, "baseline": "session"})
+            assert session.status_code == 200, session.text
+            assert session.json() == {**captured, "after": "later external edit\n"}
+            unknown = await client.get(
+                url, params={"path": "src/main.py", "baseline": "last_turn"}
+            )
+            assert unknown.status_code == 404, unknown.text
+            assert unknown.json()["error"]["code"] == "baseline_unavailable"
+            assert unknown.json()["error"]["message"]
+    finally:
+        registry._primary_envs["conv_test"].close()
 
 
 @pytest.mark.asyncio

@@ -7,9 +7,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { readFilesPanelPreferences, writeFilesPanelPreferences } from "@/lib/filesPanelPreferences";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type WorkspaceChangedFile,
@@ -18,6 +20,7 @@ import {
   useWorkspaceAllFiles,
   useWorkspaceAsleep,
   useWorkspaceChangedFiles,
+  useWorkspaceGitChanges,
   useWorkspaceDirectories,
   useWorkspaceDirectory,
   useWorkspaceEnvironment,
@@ -43,6 +46,7 @@ vi.mock("@/hooks/useWorkspaceChangedFiles", async (importOriginal) => ({
   useWorkspaceAllFiles: vi.fn(),
   useWorkspaceAsleep: vi.fn(),
   useWorkspaceChangedFiles: vi.fn(),
+  useWorkspaceGitChanges: vi.fn(),
   useWorkspaceDirectory: vi.fn(),
   // The tree fetches expanded lazy dirs centrally via the plural hook; default
   // it to no expanded dirs (empty map). Tests that drive lazy content override.
@@ -82,13 +86,14 @@ vi.mock("@/hooks/useSession", () => ({
 
 const useAllFilesMock = vi.mocked(useWorkspaceAllFiles);
 const useAsleepMock = vi.mocked(useWorkspaceAsleep);
-const useChangedFilesMock = vi.mocked(useWorkspaceChangedFiles);
+const useGitChangesMock = vi.mocked(useWorkspaceGitChanges);
+const useAgentChangesMock = vi.mocked(useWorkspaceChangedFiles);
 const useDirectoryMock = vi.mocked(useWorkspaceDirectory);
 const useDirectoriesMock = vi.mocked(useWorkspaceDirectories);
 const useEnvironmentMock = vi.mocked(useWorkspaceEnvironment);
 const useSearchMock = vi.mocked(useWorkspaceFileSearch);
 const allFilesRefetchMock = vi.fn(() => Promise.resolve());
-const changedFilesRefetchMock = vi.fn(() => Promise.resolve());
+const gitChangesRefetchMock = vi.fn(() => Promise.resolve());
 const searchRefetchMock = vi.fn(() => Promise.resolve());
 
 function render(ui: ReactNode) {
@@ -149,12 +154,12 @@ function allFilesResult(files: WorkspaceFile[]) {
 
 function changedFilesResult(files: WorkspaceChangedFile[] = []) {
   return {
-    data: { available: true, data: files },
+    data: { available: true, data: files, repositories: [] },
     error: null,
     isError: false,
     isLoading: false,
-    refetch: changedFilesRefetchMock,
-  } as unknown as ReturnType<typeof useWorkspaceChangedFiles>;
+    refetch: gitChangesRefetchMock,
+  } as unknown as ReturnType<typeof useWorkspaceGitChanges>;
 }
 
 function unloadedResult() {
@@ -242,10 +247,10 @@ function renderPanel({
       ? allFilesResult(files)
       : (unloadedResult() as ReturnType<typeof useWorkspaceAllFiles>),
   );
-  useChangedFilesMock.mockReturnValue(
+  useGitChangesMock.mockReturnValue(
     listsLoaded
       ? changedFilesResult(changedFiles)
-      : (unloadedResult() as ReturnType<typeof useWorkspaceChangedFiles>),
+      : (unloadedResult() as ReturnType<typeof useWorkspaceGitChanges>),
   );
   useDirectoryMock.mockReturnValue(directoryResult());
   useEnvironmentMock.mockReturnValue(environmentResult(workingDir, reachable));
@@ -278,13 +283,17 @@ function renderPanel({
 beforeEach(() => {
   useAllFilesMock.mockReset();
   useAsleepMock.mockReturnValue(false);
-  useChangedFilesMock.mockReset();
+  localStorage.clear();
+  useGitChangesMock.mockReset();
+  useGitChangesMock.mockReturnValue(changedFilesResult());
+  useAgentChangesMock.mockReset();
+  useAgentChangesMock.mockReturnValue(changedFilesResult());
   useDirectoryMock.mockReset();
   useDirectoriesMock.mockClear();
   useEnvironmentMock.mockReset();
   useSearchMock.mockReset();
   allFilesRefetchMock.mockClear();
-  changedFilesRefetchMock.mockClear();
+  gitChangesRefetchMock.mockClear();
   searchRefetchMock.mockClear();
 });
 
@@ -436,7 +445,7 @@ describe("FilesPanel header role", () => {
 
   it("uses the breadcrumb as the frameless inline-rail header", () => {
     useAllFilesMock.mockReturnValue(allFilesResult([]));
-    useChangedFilesMock.mockReturnValue(changedFilesResult([]));
+    useGitChangesMock.mockReturnValue(changedFilesResult([]));
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult("/home/user/workspace"));
     useSearchMock.mockReturnValue(searchResult());
@@ -522,9 +531,12 @@ describe("FilesPanel scope (fixed by the caller's Files/Changes tab)", () => {
       changedFiles: [changedFile("src/App.tsx")],
     });
 
-    expect(useChangedFilesMock).toHaveBeenCalledWith("conv_changed_only", {
+    expect(useGitChangesMock).toHaveBeenCalledWith("conv_changed_only", {
+      path: "",
+      directories: [""],
       enabled: true,
     });
+    expect(useAgentChangesMock).toHaveBeenCalledWith("conv_changed_only", { enabled: false });
     expect(useAllFilesMock).toHaveBeenCalledWith("conv_changed_only", { enabled: false }, "");
     expect(useSearchMock).toHaveBeenCalledWith(
       "conv_changed_only",
@@ -567,6 +579,164 @@ describe("FilesPanel scope (fixed by the caller's Files/Changes tab)", () => {
     expect(screen.queryByRole("radiogroup", { name: "File scope" })).toBeNull();
     expect(screen.queryByRole("radio", { name: /^changed$/i })).toBeNull();
     expect(screen.queryByRole("radio", { name: /^all$/i })).toBeNull();
+  });
+});
+
+describe("Explorer Git and agent overlays", () => {
+  const agentRefetch = vi.fn(() => Promise.resolve());
+
+  function setAgentChanges(files: WorkspaceChangedFile[]) {
+    useAgentChangesMock.mockReturnValue({
+      ...changedFilesResult(files),
+      refetch: agentRefetch,
+    } as unknown as ReturnType<typeof useWorkspaceChangedFiles>);
+  }
+
+  it("defaults to Git only, keeps deleted Git files in Changes, and skips agent refreshes", async () => {
+    setAgentChanges([changedFile("old-session.ts", "created")]);
+    renderPanel({
+      conversationId: "git_default_changes",
+      flatView: true,
+      files: [],
+      changedFiles: [changedFile("removed.ts", "deleted")],
+    });
+    expect(screen.getByText("removed.ts")).toBeInTheDocument();
+    expect(screen.queryByText("old-session.ts")).not.toBeInTheDocument();
+    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_default_changes", { enabled: false });
+    agentRefetch.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh files" }));
+    await waitFor(() => expect(gitChangesRefetchMock).toHaveBeenCalledTimes(1));
+    expect(agentRefetch).not.toHaveBeenCalled();
+  });
+
+  it("shares the More setting between Files and Changes and lets Git win duplicate paths", async () => {
+    setAgentChanges([
+      changedFile("session-only.ts", "created"),
+      changedFile("/work/live.ts", "created"),
+    ]);
+    const tree = renderPanel({
+      conversationId: "git_shared_tree",
+      files: [file("live.ts")],
+      workingDir: "/work",
+      changedFiles: [changedFile("live.ts", "modified")],
+    });
+    const changes = renderPanel({
+      conversationId: "git_shared_changes",
+      flatView: true,
+      files: [],
+      workingDir: "/work",
+      changedFiles: [changedFile("live.ts", "modified")],
+    });
+    expect(screen.queryByText("session-only.ts")).not.toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "More file actions" })[0]);
+    const toggle = await screen.findByRole("menuitemcheckbox", { name: "Show agent changes" });
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    expect(readFilesPanelPreferences().showAgentChanges).toBe(true);
+    expect(screen.getAllByText("session-only.ts")).toHaveLength(2);
+    expect(screen.getAllByText("live.ts")).toHaveLength(2);
+    expect(screen.getAllByTitle("Modified")).toHaveLength(2);
+    expect(useAgentChangesMock).toHaveBeenCalledWith("git_shared_changes", { enabled: true });
+
+    await userEvent.click(screen.getAllByRole("button", { name: "More file actions" })[1]);
+    await userEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Show agent changes" }),
+    );
+    expect(screen.queryByText("session-only.ts")).not.toBeInTheDocument();
+    expect(readFilesPanelPreferences().showAgentChanges).toBe(false);
+    act(() => writeFilesPanelPreferences({ showAgentChanges: true }));
+    tree.unmount();
+    changes.unmount();
+    renderPanel({ conversationId: "git_toggle_remount", files: [] });
+    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_toggle_remount", { enabled: true });
+  });
+
+  it("decorates actual nested files without reconstructing absent change paths", async () => {
+    renderPanel({
+      conversationId: "git_actual_tree",
+      files: [dir("repo")],
+      changedFiles: [
+        changedFile("repo/live.ts"),
+        changedFile("repo/gone.ts", "deleted"),
+        changedFile("absent/gone.ts", "deleted"),
+      ],
+    });
+    useDirectoriesMock.mockImplementation(
+      (_id, paths) => new Map(paths.map((path) => [path, directoryResult([file("repo/live.ts")])])),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "repo/" }));
+    expect(await screen.findByText("live.ts")).toHaveClass("text-amber-500");
+    expect(screen.queryByText("gone.ts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "absent/" })).not.toBeInTheDocument();
+    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_actual_tree", {
+      path: "",
+      directories: ["", "repo"],
+      enabled: true,
+    });
+  });
+
+  it("retains visited directories for Changes, scopes them after navigation, and caps discovery", () => {
+    const files = Array.from({ length: 150 }, (_, i) =>
+      file(`repo-${String(i).padStart(3, "0")}/a.ts`),
+    );
+    const tree = renderPanel({ conversationId: "git_visited", workingDir: "/work", files });
+    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_visited", {
+      path: "",
+      directories: ["", ...files.slice(0, 127).map((f) => f.path.split("/")[0])],
+      enabled: true,
+    });
+    tree.unmount();
+    const changes = renderPanel({
+      conversationId: "git_visited",
+      workingDir: "/work",
+      files: [],
+      flatView: true,
+    });
+    expect(useGitChangesMock.mock.lastCall?.[1]?.directories).toHaveLength(128);
+    changes.unmount();
+
+    const scoped = renderPanel({
+      conversationId: "git_scoped_dirs",
+      workingDir: "/work",
+      files: [file("src/nested/a.ts")],
+    });
+    useAllFilesMock.mockImplementation((_id, _options, location) =>
+      allFilesResult(location === "src" ? [file("nested/a.ts")] : [file("src/nested/a.ts")]),
+    );
+    fireEvent.doubleClick(screen.getByRole("button", { name: "src/" }));
+    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
+      path: "src",
+      directories: ["src", "src/nested"],
+      enabled: true,
+    });
+    scoped.unmount();
+    renderPanel({
+      conversationId: "git_scoped_dirs",
+      workingDir: "/work",
+      files: [],
+      flatView: true,
+    });
+    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
+      path: "src",
+      directories: ["src", "src/nested"],
+      enabled: true,
+    });
+  });
+
+  it("requests absolute directory scopes when browsing outside the workspace", () => {
+    renderPanel({
+      conversationId: "git_absolute_scope",
+      files: [file("nested/a.ts")],
+      workingDir: "/work",
+      reachable: { unconfined: true, roots: [] },
+    });
+    fireEvent.click(screen.getByTestId("browse-location-path"));
+    fireEvent.click(screen.getByTestId("stub-picker-confirm"));
+    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_absolute_scope", {
+      path: "/etc",
+      directories: ["/etc", "/etc/nested"],
+      enabled: true,
+    });
   });
 });
 
@@ -723,7 +893,7 @@ describe("FilesPanel changed files search", () => {
     vi.useFakeTimers();
     const files = [file("docs/Guide.md"), file("src/App.tsx")];
     useAllFilesMock.mockReturnValue(allFilesResult(files));
-    useChangedFilesMock.mockReturnValue(changedFilesResult());
+    useGitChangesMock.mockReturnValue(changedFilesResult());
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult());
     useSearchMock.mockReturnValue(searchResult());
@@ -797,7 +967,7 @@ describe("FilesPanel changed files search", () => {
 
   it("preserves eye-icon (show-hidden) state when opening the drawer", () => {
     useAllFilesMock.mockReturnValue(allFilesResult([file("src/App.tsx")]));
-    useChangedFilesMock.mockReturnValue(changedFilesResult());
+    useGitChangesMock.mockReturnValue(changedFilesResult());
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult());
     useSearchMock.mockReturnValue(searchResult());
@@ -860,7 +1030,7 @@ describe("FilesPanel changed files search", () => {
 
   it("keeps hidden search results hidden until the hidden-file toggle is enabled", () => {
     useAllFilesMock.mockReturnValue(allFilesResult([file(".env"), file("src/App.tsx")]));
-    useChangedFilesMock.mockReturnValue(
+    useGitChangesMock.mockReturnValue(
       changedFilesResult([changedFile(".env"), changedFile("src/App.tsx")]),
     );
     useDirectoryMock.mockReturnValue(directoryResult());
@@ -1598,8 +1768,8 @@ describe("FilesPanel scroll position persistence", () => {
       isLoading: false,
     };
     useAllFilesMock.mockReturnValue(pending as unknown as ReturnType<typeof useWorkspaceAllFiles>);
-    useChangedFilesMock.mockReturnValue(
-      pending as unknown as ReturnType<typeof useWorkspaceChangedFiles>,
+    useGitChangesMock.mockReturnValue(
+      pending as unknown as ReturnType<typeof useWorkspaceGitChanges>,
     );
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult(null));
@@ -1633,7 +1803,7 @@ describe("FilesPanel scroll position persistence", () => {
 
     // Files arrive: the saved position survives the clamp and is restored.
     useAllFilesMock.mockReturnValue(allFilesResult(files));
-    useChangedFilesMock.mockReturnValue(changedFilesResult([]));
+    useGitChangesMock.mockReturnValue(changedFilesResult([]));
     view.rerender(panel());
     expect(section.scrollTop).toBe(120);
 
@@ -1892,7 +2062,7 @@ describe("FilesPanel browse location", () => {
       isError: true,
       isLoading: false,
     } as unknown as ReturnType<typeof useWorkspaceAllFiles>);
-    useChangedFilesMock.mockReturnValue(changedFilesResult([]));
+    useGitChangesMock.mockReturnValue(changedFilesResult([]));
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult("/home/user/proj", CONFINED));
     useSearchMock.mockReturnValue(searchResult(undefined, false));
@@ -2027,7 +2197,7 @@ describe("FilesPanel header copy path", () => {
     fireEvent.click(refresh);
 
     await waitFor(() => expect(allFilesRefetchMock).toHaveBeenCalledTimes(1));
-    expect(changedFilesRefetchMock).toHaveBeenCalledTimes(1);
+    expect(gitChangesRefetchMock).toHaveBeenCalledTimes(1);
     expect(useDirectoriesMock).toHaveBeenLastCalledWith(
       "conv_refresh_files",
       expect.any(Array),

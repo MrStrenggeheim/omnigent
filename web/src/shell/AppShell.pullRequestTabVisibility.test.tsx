@@ -30,6 +30,7 @@ vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
   useTerminals: vi.fn(() => ({ terminals: [], isLoading: false, error: null })),
 }));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceGitChanges: vi.fn(() => ({ data: { data: [] }, isLoading: false })),
   useWorkspaceEnvironment: vi.fn(() => ({
     data: { available: true, root: null },
     isLoading: false,

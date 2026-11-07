@@ -332,6 +332,52 @@ export function useWorkspaceChangedFiles(
 
 // ── All files (directory listing, on-disk state) ──────────────────────────────
 
+export interface WorkspaceGitOptions {
+  path?: string;
+  directories?: string[];
+  enabled?: boolean;
+}
+
+export function useWorkspaceGitChanges(
+  conversationId: string | undefined,
+  options: WorkspaceGitOptions = {},
+) {
+  const serveable = useWorkspaceServeable(conversationId);
+  const environment = useWorkspaceEnvironment(conversationId, { enabled: options.enabled });
+  const path = options.path ?? "";
+  const directories = [...new Set(options.directories ?? [])].sort().slice(0, 128);
+  return useQuery<WorkspaceChangedFilesResult & { repositories: string[] }>({
+    queryKey: ["workspace-git-changes", conversationId, path, directories],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({
+        operation: "changes",
+        path,
+        directories: JSON.stringify(directories),
+      });
+      const response = await authenticatedFetch(
+        `/v1/sessions/${encodeURIComponent(conversationId!)}/resources/environments/default/git?${params}`,
+        { signal },
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error?.message ?? payload.detail ?? "Git status is unavailable");
+      }
+      return { available: true, data: payload.data, repositories: payload.repositories ?? [] };
+    },
+    enabled:
+      options.enabled !== false &&
+      !!conversationId &&
+      !isTempConvId(conversationId) &&
+      serveable !== false &&
+      environment.data?.available === true,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+    retry: false,
+    placeholderData: (previous, query) =>
+      query?.queryKey[1] === conversationId && query?.queryKey[2] === path ? previous : undefined,
+  });
+}
+
 export interface WorkspaceFile {
   path: string;
   name: string;

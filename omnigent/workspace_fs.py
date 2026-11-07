@@ -98,7 +98,6 @@ class WorkspaceReader:
         # way the runner chooses it, so git workspaces get git-status
         # semantics and everything else degrades to an empty list.
         self._registry = create_filesystem_registry(self._root)
-        self._registry.start()
 
     # ── Path confinement ──────────────────────────────────────────
 
@@ -489,6 +488,16 @@ class WorkspaceReader:
         }
 
     # ── Changed files / diff ───────────────────────────────────────
+
+    def git_inspect(self, params: dict[str, object]) -> _WorkspacePayload:
+        """Inspect Git using paths already authorized by the server."""
+        from omnigent.runtime.workspace_git import inspect_workspace_git
+
+        result = inspect_workspace_git(str(self._root), params)
+        if result.get("error"):
+            error = result["error"]
+            raise WorkspaceReaderError(result.get("status", 500), error["code"], error["message"])
+        return result
 
     def changes(self, session_id: str) -> _WorkspacePayload:
         """List changed files, mirroring ``list_filesystem_changes``.

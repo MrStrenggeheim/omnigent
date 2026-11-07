@@ -56,9 +56,7 @@ def test_git_status_failure_surfaces_in_files_panel(
     # the very first fetch fails; a plain 500 is not retried (it is not the
     # runner-offline 503), so the query settles to its error state immediately.
     page.route(
-        re.compile(
-            rf"/v1/sessions/{re.escape(session_id)}/resources/environments/[^/]+/changes(\?|$)"
-        ),
+        re.compile(rf"/v1/sessions/{re.escape(session_id)}/resources/environments/[^/]+/git\?"),
         _fail_changes,
     )
 

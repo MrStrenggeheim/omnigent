@@ -652,6 +652,9 @@ _CONTENT_READ_PATHS = (
     "/v1/sessions/{cid}/resources/environments/default/diff/src/app.py",
     "/v1/sessions/{cid}/resources/environments/default/search?q=todo",
     "/v1/sessions/{cid}/resources/environments/default/content-search?q=todo",
+    "/v1/sessions/{cid}/resources/environments/default/git?operation=changes",
+    "/v1/sessions/{cid}/resources/environments/default/git?operation=diff&path=src/app.py",
+    "/v1/sessions/{cid}/resources/environments/default/agent-diff?path=src/app.py&baseline=session",
     "/v1/sessions/{cid}/resources/github/changes",
     "/v1/sessions/{cid}/resources/github/diff",
     "/v1/sessions/{cid}/resources/github/diff/src/app.py",
@@ -663,6 +666,9 @@ _CONTENT_READ_IDS = (
     "file-diff",
     "search",
     "content-search",
+    "git-status",
+    "git-comparison",
+    "agent-comparison",
     "github-changes",
     "github-pr-diff",
     "github-file-diff",
@@ -915,6 +921,87 @@ async def test_content_search_forwards_options(
     assert response.status_code == 200, response.text
     assert runner_client.gets == [path]
     assert runner_client.get_params == [params]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "caller,expected", [("real-owner@example.com", 200), ("owner@example.com", 403)]
+)
+async def test_git_discovery_absolute_directory_is_owner_only(
+    client: httpx.AsyncClient, runner_client: _RecordingRunnerClient, caller: str, expected: int
+) -> None:
+    path = "/v1/sessions/conv_share/resources/environments/default/git"
+    response = await client.get(
+        path, params={"directories": '["/outside/repo"]'}, headers={"X-Forwarded-Email": caller}
+    )
+    assert response.status_code == expected, response.text
+    assert bool(runner_client.gets) is (expected == 200)
+    if expected == 200:
+        assert runner_client.get_params[-1]["directories"] == '["/outside/repo"]'
+
+
+@pytest.mark.asyncio
+async def test_git_comparison_forwards_revisions_and_rejects_bad_discovery(
+    client: httpx.AsyncClient, runner_client: _RecordingRunnerClient
+) -> None:
+    path = "/v1/sessions/conv_share/resources/environments/default/git"
+    response = await client.get(
+        path,
+        params={
+            "operation": "diff",
+            "path": "src/app.py",
+            "base": "release~2",
+            "target": "release",
+        },
+        headers={"X-Forwarded-Email": "owner@example.com"},
+    )
+    assert response.status_code == 200, response.text
+    assert runner_client.get_params[-1]["base"] == "release~2"
+    assert runner_client.get_params[-1]["target"] == "release"
+    count = len(runner_client.gets)
+    response = await client.get(
+        path,
+        params={"directories": '{"bad":true}'},
+        headers={"X-Forwarded-Email": "owner@example.com"},
+    )
+    assert response.status_code == 400
+    assert len(runner_client.gets) == count
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "endpoint,status,code",
+    [
+        ("git", 400, "invalid_revision"),
+        ("git", 404, "not_a_repository"),
+        ("git", 500, "git_failed"),
+        ("agent-diff", 404, "baseline_unavailable"),
+    ],
+)
+async def test_comparison_failures_preserve_status_and_error_code(
+    client: httpx.AsyncClient,
+    runner_client: _RecordingRunnerClient,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+    status: int,
+    code: str,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    body = {"error": {"code": code, "message": "Explicit comparison failure"}}
+    monkeypatch.setattr(
+        runner_client, "get", AsyncMock(return_value=httpx.Response(status, json=body))
+    )
+    response = await client.get(
+        f"/v1/sessions/conv_share/resources/environments/default/{endpoint}",
+        params={
+            "path": "src/app.py",
+            **({"baseline": "session"} if endpoint == "agent-diff" else {}),
+        },
+        headers={"X-Forwarded-Email": "owner@example.com"},
+    )
+    assert response.status_code == status, response.text
+    assert response.json() == body
 
 
 @pytest.mark.asyncio

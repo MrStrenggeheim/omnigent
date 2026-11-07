@@ -509,6 +509,7 @@ def register_resources_routes(
         params: dict[str, str] | None = None,
         timeout: float = 10.0,
         unsupported_endpoint_message: str | None = None,
+        preserve_errors: bool = False,
     ) -> dict[str, Any]:
         """Proxy a GET request to the runner and return parsed JSON.
 
@@ -547,6 +548,13 @@ def register_resources_routes(
             raise HTTPException(
                 status_code=502, detail="runner resource endpoint returned invalid JSON"
             ) from exc
+        if (
+            preserve_errors
+            and resp.status_code != 200
+            and isinstance(response_payload, dict)
+            and response_payload != {"detail": "Not Found"}
+        ):
+            raise HTTPException(status_code=resp.status_code, detail=response_payload)
         if resp.status_code == 404:
             if unsupported_endpoint_message and response_payload == {"detail": "Not Found"}:
                 raise OmnigentError(
@@ -578,6 +586,15 @@ def register_resources_routes(
             )
         return cast(dict[str, Any], response_payload)
 
+    async def _resource_read_response(operation: Awaitable[dict[str, Any]]) -> Any:
+        """Keep structured resource failures intact for comparison clients."""
+        try:
+            return await operation
+        except HTTPException as exc:
+            if isinstance(exc.detail, dict):
+                return JSONResponse(exc.detail, status_code=exc.status_code)
+            raise
+
     async def _fs_get_with_host_fallback(
         session_id: str,
         conversation: Conversation,
@@ -589,6 +606,7 @@ def register_resources_routes(
         host_workspace_resolver: Callable[[], Awaitable[str]] | None = None,
         runner_timeout: float = 10.0,
         unsupported_endpoint_message: str | None = None,
+        preserve_errors: bool = False,
     ) -> dict[str, Any]:
         """Serve a filesystem read, falling back to the host when offline.
 
@@ -633,6 +651,7 @@ def register_resources_routes(
                 params=runner_params,
                 timeout=runner_timeout,
                 unsupported_endpoint_message=unsupported_endpoint_message,
+                preserve_errors=preserve_errors,
             )
         except OmnigentError as exc:
             # Only the runner-offline case is a candidate for the host
@@ -657,6 +676,7 @@ def register_resources_routes(
             op,
             host_params,
             workspace_override=host_workspace,
+            preserve_errors=preserve_errors,
         )
         if payload is None:
             # No reachable host either — surface the original offline
@@ -968,6 +988,7 @@ def register_resources_routes(
         host_params: dict[str, Any],
         *,
         workspace_override: str | None = None,
+        preserve_errors: bool = False,
     ) -> dict[str, Any] | None:
         """Read the session's workspace over its host tunnel.
 
@@ -1005,6 +1026,11 @@ def register_resources_routes(
         except HostFsUnavailableError:
             return None
         except HostFsError as exc:
+            if preserve_errors:
+                raise HTTPException(
+                    status_code=exc.status,
+                    detail={"error": {"code": exc.code, "message": exc.message}},
+                ) from exc
             if exc.status == 404:
                 raise OmnigentError(exc.message, code=ErrorCode.NOT_FOUND) from exc
             if exc.status == 400:
@@ -2862,6 +2888,115 @@ def register_resources_routes(
             },
             runner_path=runner_path,
             host_workspace_resolver=resolver,
+        )
+
+    @file_read_router.get(
+        "/sessions/{session_id}/resources/environments/{environment_id}/git",
+        include_in_schema=False,
+        response_model=None,
+    )
+    async def inspect_environment_git(
+        request: Request,
+        session_id: str,
+        environment_id: str,
+        operation: str = Query(default="changes", pattern="^(changes|diff)$"),
+        path: str = Query(default="", max_length=8192),
+        directories: str = Query(default="[]", max_length=32768),
+        base: str = Query(default="HEAD", max_length=256),
+        target: str = Query(default="WORKTREE", max_length=256),
+    ) -> Any:
+        """Read Git status and diffs independently from session edit history."""
+        from omnigent.runner.workspace_git import parse_git_directories
+
+        try:
+            discovered = parse_git_directories(directories)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        paths = [path, *discovered]
+        authorization_path = next((item for item in paths if ntpath.isabs(item)), path)
+        conv = await _authorize_browse_read(session_id, request, authorization_path)
+
+        async def authorized_host_workspace() -> str:
+            from omnigent.runner.environment_filesystem import resolve_browse_target
+
+            reach = await _environment_reach_for_session(conv)
+            if reach is None:
+                raise HTTPException(status_code=403, detail="Workspace is unavailable")
+            roots, unconfined, workspace = reach
+            for item in paths:
+                if ".." in item.split("/"):
+                    raise HTTPException(
+                        status_code=400, detail="Parent segments are not permitted"
+                    )
+                resolve_browse_target(
+                    item if ntpath.isabs(item) else str(Path(workspace) / item),
+                    roots,
+                    unconfined=unconfined,
+                )
+            return workspace
+
+        return await _resource_read_response(
+            _fs_get_with_host_fallback(
+                session_id,
+                conv,
+                op="git_inspect",
+                host_params={
+                    "operation": operation,
+                    "path": path,
+                    "directories": discovered,
+                    "base": base,
+                    "target": target,
+                },
+                runner_path=f"/v1/sessions/{session_id}/resources/environments/{_runner_environment_segment(environment_id)}/git",
+                runner_params={
+                    "operation": operation,
+                    "path": path,
+                    "directories": directories,
+                    "base": base,
+                    "target": target,
+                },
+                host_workspace_resolver=authorized_host_workspace,
+                runner_timeout=30.0,
+                unsupported_endpoint_message="Update the host to use repository-aware file status and diffs.",
+                preserve_errors=True,
+            )
+        )
+
+    @file_read_router.get(
+        "/sessions/{session_id}/resources/environments/{environment_id}/agent-diff",
+        include_in_schema=False,
+        response_model=None,
+    )
+    async def read_agent_file_diff(
+        request: Request,
+        session_id: str,
+        environment_id: str,
+        path: str = Query(max_length=8192),
+        baseline: str = Query(default="last_turn", pattern="^(last_turn|session)$"),
+    ) -> Any:
+        """Prefer a persisted per-turn patch, then captured tool preimages."""
+        conv = await _authorize_browse_read(session_id, request, path)
+        if ".." in path.split("/"):
+            raise HTTPException(status_code=400, detail="Parent segments are not permitted")
+        if baseline == "last_turn":
+            from omnigent.server.agent_file_diff import recorded_turn_file_diff
+
+            items = await asyncio.to_thread(
+                conversation_store.list_items, session_id, limit=512, order="desc"
+            )
+            captured = recorded_turn_file_diff(items.data, path, conv.workspace)
+            if captured is not None:
+                return captured
+        return await _resource_read_response(
+            _proxy_get_to_runner(
+                session_id,
+                f"/v1/sessions/{session_id}/resources/environments/{_runner_environment_segment(environment_id)}/agent-diff",
+                conv,
+                params={"path": path, "baseline": baseline},
+                timeout=15.0,
+                unsupported_endpoint_message="Update the host to capture agent-turn baselines.",
+                preserve_errors=True,
+            )
         )
 
     @router.get(

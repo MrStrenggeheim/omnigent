@@ -21,10 +21,19 @@ import { MemoryRouter, useSearchParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "@/lib/notifications";
 import { copyText } from "@/lib/clipboard";
+import { readFilesPanelPreferences, writeFilesPanelPreferences } from "@/lib/filesPanelPreferences";
 import type { Comment } from "@/hooks/useComments";
 import { isFilePositionPending } from "./filePositionState";
 
 const codeViewerRenders = vi.hoisted(() => vi.fn());
+const { changedFilesFixture, agentFileDiffMock } = vi.hoisted(() => ({
+  changedFilesFixture: [
+    { path: "file1.py", bytes: 10, modified_at: null, name: "file1.py", status: "modified" },
+  ],
+  agentFileDiffMock: vi.fn(() => ({
+    data: { before: "turn-before", after: "turn-after", coverage: "unknown" },
+  })),
+}));
 
 vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn(() => Promise.resolve()) }));
 vi.mock("@/lib/notifications", async (original) => ({
@@ -110,11 +119,15 @@ vi.mock("./MonacoDiffViewer", () => ({
   // Surface the toggle-driven props as data attributes so tests can assert the
   // "⋯" menu wires wrap-lines / hide-whitespace through to the diff editor.
   MonacoDiffViewer: ({
+    before,
+    after,
     position,
     wrapLines,
     hideWhitespace,
     searchOpen,
   }: {
+    before: string | null;
+    after: string | null;
     position?: { line: number };
     wrapLines?: boolean;
     hideWhitespace?: boolean;
@@ -122,6 +135,8 @@ vi.mock("./MonacoDiffViewer", () => ({
   }) => (
     <div
       data-testid="diff-viewer"
+      data-before={JSON.stringify(before)}
+      data-after={JSON.stringify(after)}
       data-line={position?.line}
       data-wrap-lines={String(!!wrapLines)}
       data-hide-whitespace={String(!!hideWhitespace)}
@@ -149,17 +164,17 @@ vi.mock("@/hooks/useFileContent", () => ({
 
 vi.mock("@/hooks/useFileDiff", () => ({
   // Diff payload present (the diff view only renders once data has loaded).
-  useFileDiff: vi.fn(() => ({ data: { before: "old", after: "new" } })),
+  useGitFileDiff: vi.fn(() => ({ data: { before: "old", after: "new" } })),
+  useFileDiff: vi.fn(() => ({ data: { before: "session-before", after: "session-after" } })),
+  useAgentFileDiff: agentFileDiffMock,
 }));
 
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceGitChanges: vi.fn(() => ({
+    data: { available: true, data: changedFilesFixture, repositories: ["/work"] },
+  })),
   useWorkspaceChangedFiles: vi.fn(() => ({
-    data: {
-      available: true,
-      data: [
-        { path: "file1.py", bytes: 10, modified_at: null, name: "file1.py", status: "modified" },
-      ],
-    },
+    data: { available: true, data: changedFilesFixture },
   })),
 }));
 
@@ -194,12 +209,12 @@ vi.mock("@/store/chatStore", () => ({
 import { useComments } from "@/hooks/useComments";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useOptionalCommentSender } from "@/hooks/CommentSenderContext";
-import { useFileDiff } from "@/hooks/useFileDiff";
+import { useGitFileDiff } from "@/hooks/useFileDiff";
 import { prepareDiffEditor } from "./MonacoDiffViewer";
 import { MAX_RICH_MARKDOWN_BYTES } from "./codeViewerHelpers";
 import { useFileContent } from "@/hooks/useFileContent";
 import { getSeenCommentIds } from "@/hooks/useSeenComments";
-import { useWorkspaceChangedFiles } from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceChangedFiles, useWorkspaceGitChanges } from "@/hooks/useWorkspaceChangedFiles";
 import { classifyAndRemapComments, FileViewer } from "./FileViewer";
 import { FileViewerContext, type FileNavigationGuard } from "./FileViewerContext";
 import { encodePdfAnchor } from "./pdfCommentHelpers";
@@ -327,11 +342,149 @@ function localDesktopContext() {
 beforeEach(() => {
   useCommentsMock.mockReset();
   useOptionalCommentSenderMock.mockReturnValue(null);
+  vi.mocked(useFileContent).mockReturnValue({
+    data: { content: "", path: "file1.py" },
+  } as ReturnType<typeof useFileContent>);
+  vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    data: { available: true, data: changedFilesFixture },
+  } as ReturnType<typeof useWorkspaceChangedFiles>);
+  vi.mocked(useGitFileDiff).mockReturnValue({ data: { before: "old", after: "new" } } as ReturnType<
+    typeof useGitFileDiff
+  >);
+  vi.mocked(useWorkspaceGitChanges).mockReturnValue({
+    data: { available: true, data: changedFilesFixture, repositories: ["/work"] },
+  } as ReturnType<typeof useWorkspaceGitChanges>);
+  agentFileDiffMock.mockReset().mockReturnValue({
+    data: { before: "turn-before", after: "turn-after", coverage: "unknown" },
+  });
   // FileViewer persists global view preferences (diff/layout/preview) to
   // localStorage. Clear it between tests so a preference written by one test
   // can't leak into another that asserts the hardcoded defaults.
   localStorage.clear();
   vi.mocked(useIsMobileViewport).mockReturnValue(false);
+});
+
+async function chooseComparison(label: string) {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Diff comparison" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("option", { name: label }));
+}
+
+describe("FileViewer comparison sources", () => {
+  beforeEach(() => useCommentsMock.mockReturnValue(makeCommentsQuery([])));
+
+  it("opens comparison for an unchanged text file and forwards commit and range revisions", async () => {
+    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
+      data: { available: true, data: [], repositories: ["/work"] },
+    } as unknown as ReturnType<typeof useWorkspaceGitChanges>);
+    renderViewer({ open: true, path: "unchanged.py" });
+    fireEvent.click(screen.getByRole("button", { name: "Show diff" }));
+    expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
+      "data-before",
+      JSON.stringify("old"),
+    );
+    expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "unchanged.py", {
+      enabled: true,
+      base: "HEAD",
+      target: "WORKTREE",
+    });
+    await chooseComparison("Commit");
+    fireEvent.change(screen.getByRole("textbox", { name: "Commit revision" }), {
+      target: { value: "abc123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "unchanged.py", {
+      enabled: true,
+      base: "abc123^",
+      target: "abc123",
+    });
+    await chooseComparison("Commit range");
+    fireEvent.change(screen.getByRole("textbox", { name: "Base revision" }), {
+      target: { value: "v1.0" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Target revision" }), {
+      target: { value: "v2.0" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "unchanged.py", {
+      enabled: true,
+      base: "v1.0",
+      target: "v2.0",
+    });
+  });
+
+  it.each(["Agent changes · session", "Last agent turn"])(
+    "selects %s with the Explorer agent overlay disabled and switches back to Git",
+    async (label) => {
+      writeFilesPanelPreferences({ showAgentChanges: false });
+      renderViewer({ open: true, initialSearch: "diff=1" });
+      const git = await screen.findByTestId("diff-viewer");
+      expect(git).toHaveAttribute("data-before", JSON.stringify("old"));
+      expect(git).toHaveAttribute("data-after", JSON.stringify("new"));
+      await chooseComparison(label);
+      const agent = await screen.findByTestId("diff-viewer");
+      expect(agent).toHaveAttribute("data-before", JSON.stringify("turn-before"));
+      expect(agent).toHaveAttribute("data-after", JSON.stringify("turn-after"));
+      expect(agentFileDiffMock).toHaveBeenCalled();
+      expect(readFilesPanelPreferences().showAgentChanges).toBe(false);
+      expect(useGitFileDiff).toHaveBeenLastCalledWith(
+        "conv_1",
+        "file1.py",
+        expect.objectContaining({ enabled: false }),
+      );
+      await chooseComparison("Git working tree");
+      expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
+        "data-before",
+        JSON.stringify("old"),
+      );
+      expect(readFilesPanelPreferences().showAgentChanges).toBe(false);
+    },
+  );
+
+  it("shows an unavailable agent baseline clearly and keeps the selector usable", async () => {
+    agentFileDiffMock.mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: new Error("No agent baseline is available for this file"),
+    } as unknown as ReturnType<typeof agentFileDiffMock>);
+    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+      data: { available: true, data: [] },
+    } as unknown as ReturnType<typeof useWorkspaceChangedFiles>);
+    renderViewer({ open: true, initialSearch: "diff=1" });
+    await chooseComparison("Agent changes · session");
+    expect(
+      screen.getByText(/Failed to load: No agent baseline is available for this file/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Loading diff…")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("diff-viewer")).not.toBeInTheDocument();
+    await chooseComparison("Git working tree");
+    expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
+      "data-after",
+      JSON.stringify("new"),
+    );
+  });
+
+  it("suppresses comparisons for content identified as binary even with a text extension", async () => {
+    await vi.mocked(useFileContent).withImplementation(
+      () =>
+        ({ data: { content: "AAEC", encoding: "base64", path: "payload.txt" } }) as ReturnType<
+          typeof useFileContent
+        >,
+      async () => {
+        renderViewer({ open: true, path: "payload.txt", initialSearch: "diff=1" });
+        await act(async () => {});
+        expect(screen.queryByRole("button", { name: "Show diff" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("combobox", { name: "Diff comparison" })).not.toBeInTheDocument();
+        expect(screen.queryByTestId("diff-viewer")).not.toBeInTheDocument();
+        expect(useGitFileDiff).toHaveBeenLastCalledWith(
+          "conv_1",
+          "payload.txt",
+          expect.objectContaining({ enabled: false }),
+        );
+      },
+    );
+  });
 });
 
 afterEach(() => {
@@ -607,9 +760,9 @@ describe("FileViewer prev/next navigation order", () => {
     { sort: "recent" as const, expected: "1/3" },
   ])("renders the index per the $sort sort prop", ({ sort, expected }) => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
       data: { available: true, data: changedFiles },
-    } as ReturnType<typeof useWorkspaceChangedFiles>);
+    } as ReturnType<typeof useWorkspaceGitChanges>);
     try {
       renderViewer({ open: true, path: "b.py", sort, onNavigateTo: vi.fn() });
 
@@ -621,7 +774,7 @@ describe("FileViewer prev/next navigation order", () => {
       expect(indexSpan?.textContent).toBe(expected);
     } finally {
       // Restore the default single-file mock for later tests.
-      vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+      vi.mocked(useWorkspaceGitChanges).mockReturnValue({
         data: {
           available: true,
           data: [
@@ -634,7 +787,7 @@ describe("FileViewer prev/next navigation order", () => {
             },
           ],
         },
-      } as ReturnType<typeof useWorkspaceChangedFiles>);
+      } as ReturnType<typeof useWorkspaceGitChanges>);
     }
   });
 });
@@ -647,11 +800,11 @@ describe("FileViewer URL sync — diff param", () => {
   )(
     "only the active viewer writes the $path URL through resizing (mobile=$isMobile)",
     async ({ isMobile, path }) => {
-      await vi.mocked(useWorkspaceChangedFiles).withImplementation(
+      await vi.mocked(useWorkspaceGitChanges).withImplementation(
         () =>
           ({
             data: { available: true, data: [{ path, name: path, status: "modified", bytes: 10 }] },
-          }) as ReturnType<typeof useWorkspaceChangedFiles>,
+          }) as ReturnType<typeof useWorkspaceGitChanges>,
         async () => {
           vi.mocked(useIsMobileViewport).mockReturnValue(isMobile);
           useCommentsMock.mockReturnValue(makeCommentsQuery([]));
@@ -737,7 +890,7 @@ describe("FileViewer URL sync — diff param", () => {
   });
 
   it("initializes diff view when URL contains ?diff=1 and the file is in the changed list", async () => {
-    // file1.py is returned by the useWorkspaceChangedFiles mock → isDiffAvailable=true.
+    // file1.py is returned by the useWorkspaceGitChanges mock → isDiffAvailable=true.
     // Starting with ?diff=1 means diffActive is initialized to true, so viewMode="diff".
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
     renderViewer({ open: true, path: "file1.py", initialSearch: "diff=1" });
@@ -748,43 +901,61 @@ describe("FileViewer URL sync — diff param", () => {
     expect(screen.queryByTestId("code-viewer")).toBeNull();
   });
 
-  it("prepares a linked diff during discovery and scopes the early request to that file", async () => {
+  it("prepares a linked Git diff during discovery and follows the active text file", async () => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    await vi.mocked(useWorkspaceChangedFiles).withImplementation(
-      () => ({ data: undefined }) as ReturnType<typeof useWorkspaceChangedFiles>,
+    await vi.mocked(useWorkspaceGitChanges).withImplementation(
+      () => ({ data: undefined }) as ReturnType<typeof useWorkspaceGitChanges>,
       async () => {
         const { rerender } = render(viewerTree({ open: true, initialSearch: "diff=1" }));
         await waitFor(() => expect(prepareDiffEditor).toHaveBeenCalledWith("python"));
-        expect(useFileDiff).toHaveBeenLastCalledWith("conv_1", "file1.py", { requested: true });
-        expect(screen.queryByTestId("diff-viewer")).toBeNull();
+        expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "file1.py", {
+          enabled: true,
+          base: "HEAD",
+          target: "WORKTREE",
+        });
+        expect(await screen.findByTestId("diff-viewer")).toBeInTheDocument();
 
         rerender(viewerTree({ open: true, path: "other.py", initialSearch: "diff=1" }));
-        expect(useFileDiff).toHaveBeenLastCalledWith("conv_1", "other.py", { requested: false });
+        expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "other.py", {
+          enabled: true,
+          base: "HEAD",
+          target: "WORKTREE",
+        });
       },
     );
   });
 
-  it("does not prepare a linked diff when changed-file discovery has already failed", async () => {
+  it("allows Git comparison when changed-file discovery has failed", async () => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    await vi.mocked(useWorkspaceChangedFiles).withImplementation(
-      () => ({ data: undefined, isError: true }) as ReturnType<typeof useWorkspaceChangedFiles>,
+    await vi.mocked(useWorkspaceGitChanges).withImplementation(
+      () => ({ data: undefined, isError: true }) as ReturnType<typeof useWorkspaceGitChanges>,
       async () => {
         renderViewer({ open: true, initialSearch: "diff=1" });
-        await act(async () => {});
-        expect(prepareDiffEditor).not.toHaveBeenCalled();
-        expect(screen.queryByTestId("diff-viewer")).toBeNull();
+        expect(await screen.findByTestId("diff-viewer")).toBeInTheDocument();
+        expect(prepareDiffEditor).toHaveBeenCalledWith("python");
+        expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "file1.py", {
+          enabled: true,
+          base: "HEAD",
+          target: "WORKTREE",
+        });
       },
     );
   });
 
-  it.each(["image.png", "document.pdf", "model.stl"])(
+  it.each(["image.png", "document.pdf", "model.stl", "archive.bin"])(
     "does not prepare a diff for %s even with an explicit link",
     async (path) => {
       useCommentsMock.mockReturnValue(makeCommentsQuery([]));
       renderViewer({ open: true, path, initialSearch: "diff=1" });
       await act(async () => {});
       expect(prepareDiffEditor).not.toHaveBeenCalled();
-      expect(useFileDiff).toHaveBeenLastCalledWith("conv_1", path, { requested: false });
+      expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", path, {
+        enabled: false,
+        base: "HEAD",
+        target: "WORKTREE",
+      });
+      expect(screen.queryByRole("button", { name: "Show diff" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Diff comparison" })).not.toBeInTheDocument();
     },
   );
 
@@ -822,10 +993,12 @@ describe("FileViewer URL sync — diff param", () => {
 
   it("shows a loading state until the diff payload loads (no collapsed-null mount)", () => {
     // While the diff query is in flight `data` is undefined. We must NOT mount
-    // Monaco yet: useFileDiff uses null for new/deleted files, so collapsing the
+    // Monaco yet: useGitFileDiff uses null for new/deleted files, so collapsing the
     // loading state into null would mount with the wrong content and mis-set EOL
     // (onMount runs once). Failure here = the diff mounts before data arrives.
-    vi.mocked(useFileDiff).mockReturnValue({ data: undefined } as ReturnType<typeof useFileDiff>);
+    vi.mocked(useGitFileDiff).mockReturnValue({ data: undefined } as ReturnType<
+      typeof useGitFileDiff
+    >);
     try {
       useCommentsMock.mockReturnValue(makeCommentsQuery([]));
       renderViewer({ open: true, path: "file1.py", initialSearch: "diff=1" });
@@ -833,21 +1006,21 @@ describe("FileViewer URL sync — diff param", () => {
       expect(screen.getByText("Loading diff…")).toBeInTheDocument();
     } finally {
       // Restore the default (payload present) so later tests render the diff.
-      vi.mocked(useFileDiff).mockReturnValue({
+      vi.mocked(useGitFileDiff).mockReturnValue({
         data: { before: "old", after: "new" },
-      } as ReturnType<typeof useFileDiff>);
+      } as ReturnType<typeof useGitFileDiff>);
     }
   });
 
   it("surfaces the server's reason instead of hanging on the loading state when the diff fetch fails", () => {
-    // On error, useFileDiff's `data` stays undefined — which would otherwise
+    // On error, useGitFileDiff's `data` stays undefined — which would otherwise
     // read as still-loading forever. The diff view must show the failure
     // reason (e.g. a git_status_failed 500) so the read error is visible.
-    vi.mocked(useFileDiff).mockReturnValue({
+    vi.mocked(useGitFileDiff).mockReturnValue({
       data: undefined,
       isError: true,
       error: new Error("git status timed out after 5.0s"),
-    } as ReturnType<typeof useFileDiff>);
+    } as ReturnType<typeof useGitFileDiff>);
     try {
       useCommentsMock.mockReturnValue(makeCommentsQuery([]));
       renderViewer({ open: true, path: "file1.py", initialSearch: "diff=1" });
@@ -858,9 +1031,9 @@ describe("FileViewer URL sync — diff param", () => {
       ).toBeInTheDocument();
     } finally {
       // Restore the default (payload present) so later tests render the diff.
-      vi.mocked(useFileDiff).mockReturnValue({
+      vi.mocked(useGitFileDiff).mockReturnValue({
         data: { before: "old", after: "new" },
-      } as ReturnType<typeof useFileDiff>);
+      } as ReturnType<typeof useGitFileDiff>);
     }
   });
 });
@@ -1863,20 +2036,20 @@ describe("FileViewer keyboard shortcut — Alt+← / Alt+→", () => {
 
   beforeEach(() => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
       data: { available: true, data: multipleFiles },
-    } as ReturnType<typeof useWorkspaceChangedFiles>);
+    } as ReturnType<typeof useWorkspaceGitChanges>);
   });
 
   afterEach(() => {
-    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
       data: {
         available: true,
         data: [
           { path: "file1.py", bytes: 10, modified_at: null, name: "file1.py", status: "modified" },
         ],
       },
-    } as ReturnType<typeof useWorkspaceChangedFiles>);
+    } as ReturnType<typeof useWorkspaceGitChanges>);
   });
 
   it("navigates to the previous file on Alt+← when focus is not in a text field", () => {
@@ -2164,7 +2337,7 @@ describe("FileViewer Escape closes the active tab", () => {
 describe("FileViewer video files", () => {
   it("skips capped content and diff reads and suppresses diff controls", () => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
       data: {
         available: true,
         data: [
@@ -2177,10 +2350,14 @@ describe("FileViewer video files", () => {
           },
         ],
       },
-    } as ReturnType<typeof useWorkspaceChangedFiles>);
+    } as ReturnType<typeof useWorkspaceGitChanges>);
     renderViewer({ open: true, path: "demo.webm" });
     expect(useFileContent).toHaveBeenCalledWith("conv_1", null);
-    expect(useFileDiff).toHaveBeenCalledWith("conv_1", null, { requested: false });
+    expect(useGitFileDiff).toHaveBeenCalledWith("conv_1", null, {
+      enabled: false,
+      base: "HEAD",
+      target: "WORKTREE",
+    });
     expect(screen.queryByRole("button", { name: "Show diff" })).toBeNull();
   });
 });
@@ -2204,7 +2381,7 @@ describe("FileViewer 3D model files", () => {
   it("suppresses the diff toggle for a model file even when it is a changed file", () => {
     // Report the model as a changed file — an ordinary changed file would get a
     // "Show diff" button; a model must not.
-    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
       data: {
         available: true,
         data: [
@@ -2217,7 +2394,7 @@ describe("FileViewer 3D model files", () => {
           },
         ],
       },
-    } as ReturnType<typeof useWorkspaceChangedFiles>);
+    } as ReturnType<typeof useWorkspaceGitChanges>);
     renderViewer({ open: true, path: "widget.stl" });
     expect(screen.queryByRole("button", { name: "Show diff" })).toBeNull();
   });
@@ -2299,12 +2476,12 @@ describe("file position navigation", () => {
   it.each(["file1.py", "file1.md"])(
     "keeps diff mode for repeated citations to %s",
     async (path) => {
-      vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+      vi.mocked(useWorkspaceGitChanges).mockReturnValue({
         data: {
           available: true,
           data: [{ path, name: path, bytes: 10, modified_at: null, status: "modified" }],
         },
-      } as ReturnType<typeof useWorkspaceChangedFiles>);
+      } as ReturnType<typeof useWorkspaceGitChanges>);
       const { rerender } = renderViewer({
         open: true,
         path,
@@ -2321,14 +2498,14 @@ describe("file position navigation", () => {
   );
 
   it("keeps normal view when a cited file has a diff available", () => {
-    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
       data: {
         available: true,
         data: [
           { path: "file1.py", name: "file1.py", bytes: 10, modified_at: null, status: "modified" },
         ],
       },
-    } as ReturnType<typeof useWorkspaceChangedFiles>);
+    } as ReturnType<typeof useWorkspaceGitChanges>);
     renderViewer({ open: true, path: "file1.py", position: { line: 12 } });
     expect(screen.getByTestId("code-viewer")).toHaveAttribute("data-view-mode", "source");
     expect(screen.queryByTestId("diff-viewer")).toBeNull();
@@ -2394,6 +2571,7 @@ describe("file position navigation", () => {
         wrapLines: false,
       });
       const { rerender, unmount } = renderViewer({ open: true, path: "file1.md" });
+      if (diffActive) fireEvent.click(screen.getByRole("button", { name: "Exit diff view" }));
       const request = { line: 12 };
       const draft = screen.getByRole("textbox", { name: "Draft text" });
       fireEvent.change(draft, { target: { value: "Unsaved Markdown draft" } });

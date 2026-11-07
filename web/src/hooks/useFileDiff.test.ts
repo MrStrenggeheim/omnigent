@@ -24,7 +24,7 @@ import {
   useWorkspaceEnvironment,
   useWorkspaceServeable,
 } from "@/hooks/useWorkspaceChangedFiles";
-import { useFileDiff } from "./useFileDiff";
+import { useFileDiff, useGitFileDiff, useAgentFileDiff } from "./useFileDiff";
 
 const serveableMock = vi.mocked(useWorkspaceServeable);
 const changedFilesMock = vi.mocked(useWorkspaceChangedFiles);
@@ -76,6 +76,54 @@ function renderDiff(
     createElement(QueryClientProvider, { client: queryClient }, children);
   return renderHook(() => useFileDiff(conversationId, path, options), { wrapper });
 }
+
+describe("explicit comparison sources", () => {
+  function createWrapper() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children);
+  }
+
+  it("fetches commit comparisons for clean files without consulting session changes", async () => {
+    setHooks({ serveable: true, changedPaths: [] });
+    fetchMock.mockResolvedValue(mockResponse({ before: "old", after: "new", repository: "/repo" }));
+    const { result, rerender } = renderHook(
+      ({ base }) =>
+        useGitFileDiff("conv_1", "/repo/a b.ts", {
+          enabled: true,
+          base,
+          target: "release",
+        }),
+      { wrapper: createWrapper(), initialProps: { base: "release~1" } },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const first = new URL(fetchMock.mock.calls[0][0], "http://local");
+    expect(first.searchParams.get("path")).toBe("/repo/a b.ts");
+    expect(first.searchParams.get("base")).toBe("release~1");
+    rerender({ base: "release~2" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(new URL(fetchMock.mock.calls[1][0], "http://local").searchParams.get("base")).toBe(
+      "release~2",
+    );
+    expect(changedFilesMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps missing agent baselines distinct from empty files", async () => {
+    fetchMock.mockResolvedValue(
+      mockResponse({ error: { message: "No captured baseline" } }, { ok: false, status: 404 }),
+    );
+    const { result } = renderHook(
+      () => useAgentFileDiff("conv_1", "a.ts", { enabled: true, lastTurn: true }),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("No captured baseline");
+    expect(result.current.data).toBeUndefined();
+    expect(new URL(fetchMock.mock.calls[0][0], "http://local").searchParams.get("baseline")).toBe(
+      "last_turn",
+    );
+  });
+});
 
 describe("useFileDiff — enable gate", () => {
   it("does not fetch when conversationId is missing", () => {

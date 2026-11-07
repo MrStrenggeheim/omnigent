@@ -59,6 +59,7 @@ vi.mock("@/hooks/useSessionLiveness", () => ({
 }));
 vi.mock("@/hooks/useChildSessions", () => ({ useChildSessions: () => ({ children: [] }) }));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceGitChanges: () => ({ data: { data: [] } }),
   useWorkspaceEnvironment: () => ({ data: { available: true, root: "/workspace" } }),
   useWorkspaceChangedFiles: () => ({ data: { data: [] } }),
 }));

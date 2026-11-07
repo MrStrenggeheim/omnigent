@@ -327,6 +327,46 @@ def test_seed_snapshot_is_no_op_if_already_exists(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("git", [False, True])
+def test_turn_capture_uses_fresh_supplied_content_in_both_registry_modes(
+    tmp_path: Path, git: bool
+) -> None:
+    reg = (
+        GitFilesystemRegistry(tmp_path, tmp_path) if git else AgentEditFilesystemRegistry(tmp_path)
+    )
+    for turn, before, after in [("one", "A", "B"), ("two", "B", "C")]:
+        reg.turn_history.begin("session", turn)
+        reg.seed_snapshot("file", before, session_id="session")
+        (tmp_path / "file").write_text(after)
+        reg.record_change("file", "modified", "session")
+        reg.turn_history.finish("session")
+        (tmp_path / "file").write_text("external edit")
+        result = reg.turn_history.lookup("session", "file", last_turn=True)
+        assert result is not None
+        assert (result["before"], result["turn_id"], result["known"]) == (before, turn, True)
+        assert (result["after"], result["after_known"]) == (after, True)
+    assert reg.turn_history.lookup("session", "file", False)["before"] == "A"
+    if not git:
+        assert reg.get_baseline("file") == "A"
+    reg.unregister_conversation("session")
+    assert reg.turn_history.lookup("session", "file", True) is None
+
+
+@pytest.mark.parametrize("git", [False, True])
+def test_turn_recording_distinguishes_created_from_missing_preimage(
+    tmp_path: Path, git: bool
+) -> None:
+    reg = (
+        GitFilesystemRegistry(tmp_path, tmp_path) if git else AgentEditFilesystemRegistry(tmp_path)
+    )
+    reg.turn_history.begin("session", "turn")
+    reg.record_change("new", "created", "session")
+    reg.record_change("edited", "modified", "session")
+    reg.seed_snapshot("edited", "later content", session_id="session")
+    assert reg.turn_history.lookup("session", "new", True)["known"] is True
+    assert reg.turn_history.lookup("session", "edited", True)["known"] is False
+
+
 def test_get_baseline_returns_none_when_no_snapshot(tmp_path: Path) -> None:
     """``get_baseline`` returns ``None`` when no snapshot exists and there is no git repo.
 

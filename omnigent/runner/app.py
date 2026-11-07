@@ -1968,6 +1968,7 @@ def create_runner_app(
     app.state.filesystem_registry = filesystem_registry
 
     _session_fs_registries: dict[str, FilesystemRegistry] = {}
+    _agent_file_turn_ids: dict[str, str] = {}
     # Roots whose search registry stays warm; bounded so distinct generated
     # workspaces cannot accumulate for the runner's lifetime.
     _search_fs_registries: OrderedDict[str, FilesystemRegistry] = OrderedDict()
@@ -2218,6 +2219,20 @@ def create_runner_app(
         registry.start()
         _session_fs_registries[session_id] = registry
         return registry
+
+    async def _begin_file_turn(session_id: str, *, fresh: bool = False) -> None:
+        registry = await _resolve_session_fs_registry(session_id)
+        if registry is None:
+            return
+        if fresh or session_id not in _agent_file_turn_ids:
+            _agent_file_turn_ids[session_id] = uuid.uuid4().hex
+        registry.turn_history.begin(session_id, _agent_file_turn_ids[session_id])
+
+    def _finish_file_turn(session_id: str) -> None:
+        registry = _session_fs_registries.get(session_id) or filesystem_registry
+        if registry is not None:
+            registry.turn_history.finish(session_id)
+        _agent_file_turn_ids.pop(session_id, None)
 
     from omnigent.entities.environment_filesystem import (
         ResourceError,
@@ -3475,6 +3490,7 @@ def create_runner_app(
         _session_reasoning_effort.pop(session_id, None)
         _session_spec_locks.pop(session_id, None)
         _session_fs_registries.pop(session_id, None)
+        _agent_file_turn_ids.pop(session_id, None)
         _session_agent_ids.pop(session_id, None)
         _session_tool_schemas.pop(session_id, None)
         _instruction_delivery_warned.pop(session_id, None)
@@ -3860,6 +3876,8 @@ def create_runner_app(
         if _active_turns.get(conv_id) is not occupant:
             return False
         _active_turns.pop(conv_id, None)
+        if not _is_native_harness(conv_id):
+            _finish_file_turn(conv_id)
         _release_live_turn_markers(conv_id)
         _interrupted_sessions.discard(conv_id)
         return True
@@ -3883,6 +3901,8 @@ def create_runner_app(
             return
 
         _active_turns.pop(conv_id, None)
+        if not _is_native_harness(conv_id):
+            _finish_file_turn(conv_id)
         _release_live_turn_markers(conv_id)
         # A claude-sdk `/compact` turn that ended without emitting
         # `response.compaction.completed` produced no compaction (nothing to
@@ -5438,6 +5458,7 @@ def create_runner_app(
             _ds_agent_id,
             None if dispatch else cast(str | None, body.get("agent_revision")),
         )
+        await _begin_file_turn(conv_id)
         startup_envelope = _fresh_session_init_envelope(conv_id)
         startup_labels = startup_envelope.snapshot.labels if startup_envelope is not None else None
         if not harness_name:
@@ -5787,6 +5808,7 @@ def create_runner_app(
                 _warn_unresolved_sub_agent(conv_id, _ds_sa)
             event_body = _wrap_as_message_event(_instr_body)
             _inject_mcp_schemas(event_body, _mcp_schemas)
+            _turn_files = await _resolve_session_fs_registry(conv_id)
             _response_id: str | None = None
             try:
                 async with client.stream(
@@ -6084,7 +6106,7 @@ def create_runner_app(
                                                         conv_id
                                                     ),
                                                     publish_event=_publish_event,
-                                                    filesystem_registry=filesystem_registry,
+                                                    filesystem_registry=_turn_files,
                                                     effective_harness=_session_harness_name(
                                                         conv_id
                                                     ),
@@ -6675,6 +6697,19 @@ def create_runner_app(
         if body_type == "external_session_status":
             data = body.get("data") if isinstance(body, dict) else None
             status = data.get("status") if isinstance(data, dict) else None
+            if status == "running":
+                await _begin_file_turn(conversation_id)
+            elif (
+                status in {"idle", "failed"}
+                and isinstance(data, dict)
+                and (
+                    status == "failed"
+                    or data.get("turn_completed") is True
+                    or data.get("turn_outcome") in {"completed", "cancelled", "failed"}
+                    or not _native_turn_outcome_is_forwarder_confirmed(conversation_id)
+                )
+            ):
+                _finish_file_turn(conversation_id)
             forwarded_output = data.get("output") if isinstance(data, dict) else None
             output = forwarded_output if isinstance(forwarded_output, str) else None
             delivery_ack: _SubagentDeliveryAck | None = None

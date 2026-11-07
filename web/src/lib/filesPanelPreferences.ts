@@ -1,27 +1,20 @@
-// Persisted, app-global preference for the Working folder file list.
-//
-// Holds the changed-files sort order. It's a *preference*, not per-conversation
-// state: the user's choice "carries over" as they switch in and out of sessions
-// and should survive a page refresh, mirroring the global-toggle semantics of
-// fileViewPreferences. It's stored under a single localStorage key with no
-// per-conversation keying.
-//
-// AppShell keeps the live React state as the source of truth for the UI; these
-// helpers only seed that state on mount and snapshot it when the user changes
-// the sort, so a refresh (or a brand-new conversation) starts from the last
-// choice instead of the hardcoded default.
+// App-global Explorer preferences, shared across Files and Changes surfaces.
 
 import { type ChangedSort, isValidSort } from "@/lib/changedSort";
 
 export interface FilesPanelPreferences {
   /** Sort order for the changed-files flat list. */
   sort: ChangedSort;
+  /** Whether legacy session edits overlay the live Git changes. */
+  showAgentChanges: boolean;
 }
 
 const STORAGE_KEY = "omnigent:files-panel-preferences";
+const CHANGE_EVENT = "omnigent:files-panel-preferences-changed";
 
 export const DEFAULT_FILES_PANEL_PREFERENCES: FilesPanelPreferences = {
   sort: "recent",
+  showAgentChanges: false,
 };
 
 /**
@@ -44,6 +37,10 @@ export function readFilesPanelPreferences(): FilesPanelPreferences {
         typeof p.sort === "string" && isValidSort(p.sort)
           ? p.sort
           : DEFAULT_FILES_PANEL_PREFERENCES.sort,
+      showAgentChanges:
+        typeof p.showAgentChanges === "boolean"
+          ? p.showAgentChanges
+          : DEFAULT_FILES_PANEL_PREFERENCES.showAgentChanges,
     };
   } catch {
     return DEFAULT_FILES_PANEL_PREFERENCES;
@@ -54,11 +51,28 @@ export function readFilesPanelPreferences(): FilesPanelPreferences {
  * Persist the Files-panel preference. Swallows quota/access errors so a failed
  * write can't break the panel.
  */
-export function writeFilesPanelPreferences(prefs: FilesPanelPreferences): void {
+export function writeFilesPanelPreferences(prefs: Partial<FilesPanelPreferences>): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...readFilesPanelPreferences(), ...prefs }),
+    );
   } catch {
     // localStorage quota or access errors shouldn't break the app.
   }
+  window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
+/** Subscribe to writes in this window and preference changes in other tabs. */
+export function subscribeFilesPanelPreferences(onChange: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY || event.key === null) onChange();
+  };
+  window.addEventListener(CHANGE_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(CHANGE_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
 }

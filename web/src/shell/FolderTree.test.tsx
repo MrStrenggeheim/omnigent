@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,7 +31,11 @@ vi.mock("@/hooks/useWorkspaceChangedFiles", async (importOriginal) => ({
     return map;
   },
 }));
-import { RunnerOfflineError, type WorkspaceFile } from "@/hooks/useWorkspaceChangedFiles";
+import {
+  RunnerOfflineError,
+  type WorkspaceChangedFile,
+  type WorkspaceFile,
+} from "@/hooks/useWorkspaceChangedFiles";
 import type * as WorkspaceChangedFilesModule from "@/hooks/useWorkspaceChangedFiles";
 import { ROW_STATUS_SLOT_CLASS } from "./fileStatusUtils";
 import { FolderTree } from "./FolderTree";
@@ -83,6 +87,13 @@ function dir(path: string, modifiedAt: number | null = null): WorkspaceFile {
     path,
     type: "directory",
   };
+}
+
+function change(
+  path: string,
+  status: WorkspaceChangedFile["status"] = "modified",
+): WorkspaceChangedFile {
+  return { ...file(path), status, lines_added: null, lines_removed: null };
 }
 
 describe("FolderTree runner-offline state", () => {
@@ -500,6 +511,45 @@ describe("FolderTree directory search results", () => {
 });
 
 describe("FolderTree change-status overlay", () => {
+  it.each([
+    { browseLocation: "/outside/repo", workspaceRoot: "/work", path: "/outside/repo/app.ts" },
+    { browseLocation: "/work/src", workspaceRoot: "/work", path: "src/app.ts" },
+    { browseLocation: "src", workspaceRoot: "/work", path: "/work/src/app.ts" },
+    { browseLocation: "", workspaceRoot: "/work", path: "/work/app.ts" },
+    { browseLocation: "/", workspaceRoot: null, path: "/app.ts" },
+  ])("scopes Git paths for $browseLocation ($path)", ({ browseLocation, workspaceRoot, path }) => {
+    renderTree({
+      conversationId: `scope-${path}-${browseLocation}`,
+      files: [file("app.ts")],
+      changedFiles: [change(path), change("/outside/repo-other/unrelated.ts")],
+      browseLocation,
+      workspaceRoot,
+      includeMissingChanges: false,
+    });
+    expect(screen.getByText("app.ts")).toHaveClass("text-amber-500");
+    expect(screen.getByTitle("Modified")).toHaveTextContent("M");
+    expect(screen.queryByText("unrelated.ts")).not.toBeInTheDocument();
+  });
+
+  it("keeps only filesystem entries when missing change synthesis is disabled", async () => {
+    lazyChildren.clear();
+    lazyChildren.set("repo", [file("repo/live.ts")]);
+    renderTree({
+      conversationId: "no-missing-changes",
+      files: [dir("repo")],
+      changedFiles: [
+        change("repo/live.ts"),
+        change("repo/gone.ts", "deleted"),
+        change("old/gone.ts", "deleted"),
+      ],
+      includeMissingChanges: false,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "repo/" }));
+    expect(await screen.findByText("live.ts")).toHaveClass("text-amber-500");
+    expect(screen.queryByText("gone.ts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "old/" })).not.toBeInTheDocument();
+  });
+
   it("adds API-only created and deleted files to the tree with status badges", async () => {
     lazyChildren.clear();
     lazyChildren.set("src", [file("src/live.ts")]);
@@ -559,6 +609,30 @@ describe("FolderTree change-status overlay", () => {
 
     expect(screen.getByText("app.ts")).toHaveClass("text-amber-500");
     expect(screen.getByTitle("Modified")).toHaveTextContent("M");
+  });
+});
+
+describe("FolderTree directory discovery", () => {
+  it("reports stable sorted snapshots of the root and expanded directories", async () => {
+    lazyChildren.clear();
+    lazyChildren.set("z", [dir("z/deep")]);
+    const onDirectoriesChange = vi.fn();
+    const view = renderTree({
+      conversationId: "directory-snapshots",
+      files: [dir("z"), file("a/live.ts")],
+      onDirectoriesChange,
+    });
+    expect(onDirectoriesChange).toHaveBeenLastCalledWith(["", "a"]);
+    fireEvent.click(screen.getByRole("button", { name: "z/" }));
+    expect(onDirectoriesChange).toHaveBeenLastCalledWith(["", "a", "z"]);
+    fireEvent.click(await screen.findByRole("button", { name: "deep/" }));
+    expect(onDirectoriesChange).toHaveBeenLastCalledWith(["", "a", "z", "z/deep"]);
+    const count = onDirectoriesChange.mock.calls.length;
+    fireEvent.focus(screen.getByRole("button", { name: "z/" }));
+    expect(onDirectoriesChange).toHaveBeenCalledTimes(count);
+    fireEvent.click(screen.getByRole("button", { name: "z/" }));
+    await waitFor(() => expect(onDirectoriesChange).toHaveBeenLastCalledWith(["", "a", "z/deep"]));
+    view.unmount();
   });
 });
 

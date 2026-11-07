@@ -105,12 +105,8 @@ function FileListItem({
       >
         <button
           type="button"
-          className={cn(
-            "flex min-w-0 flex-1 items-baseline gap-1.5 text-left",
-            isDeleted ? "cursor-default" : "cursor-pointer",
-          )}
-          onClick={() => !isDeleted && onFileSelect(file.path)}
-          disabled={isDeleted}
+          className={cn("flex min-w-0 flex-1 items-baseline gap-1.5 text-left", "cursor-pointer")}
+          onClick={() => onFileSelect(file.path)}
         >
           <WorkspaceFileIcon path={file.path} className="self-center" />
           <span className={cn("truncate text-ui", isDeleted && "line-through")} {...handlers}>
@@ -182,6 +178,7 @@ export function FlatFileList({
   sort,
   conversationId,
   runnerWentOffline = false,
+  emptyMessage = "No workspace changes yet",
 }: {
   files: WorkspaceChangedFile[] | undefined;
   isLoading: boolean;
@@ -201,6 +198,7 @@ export function FlatFileList({
    * false and we fall through to the normal empty state instead.
    */
   runnerWentOffline?: boolean;
+  emptyMessage?: string;
 }) {
   const explorerEntries = useMemo(
     () => ({
@@ -238,7 +236,7 @@ export function FlatFileList({
     );
   }
   if (!files || files.length === 0) {
-    return <p className="px-2 py-1 text-muted-foreground text-sm">No workspace changes yet</p>;
+    return <p className="px-2 py-1 text-muted-foreground text-sm">{emptyMessage}</p>;
   }
   const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
   const visibleFiles = files.filter(

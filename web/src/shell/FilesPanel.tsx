@@ -12,7 +12,7 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@/lib/routing";
 import { useSession } from "@/hooks/useSession";
@@ -21,15 +21,22 @@ import { useSessionHostOnline, useSessionRunnerOnline } from "@/hooks/RunnerHeal
 import { useChatStore } from "@/store/chatStore";
 import {
   PathUnreachableError,
+  type WorkspaceChangedFile,
   joinBrowseLocation,
   relativizeToWorkspace,
   useWorkspaceChangedFiles,
+  useWorkspaceGitChanges,
   useWorkspaceAllFiles,
   useWorkspaceAsleep,
   useWorkspaceEnvironment,
   useWorkspaceFileSearch,
 } from "@/hooks/useWorkspaceChangedFiles";
 import { cn } from "@/lib/utils";
+import {
+  readFilesPanelPreferences,
+  subscribeFilesPanelPreferences,
+  writeFilesPanelPreferences,
+} from "@/lib/filesPanelPreferences";
 import { BrowseLocationBar } from "./BrowseLocationBar";
 import { CopyPathButton } from "./CopyPathButton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -47,6 +54,7 @@ import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { useScrollRestore } from "./useScrollRestore";
 import { ExplorerActionsProvider, ExplorerToolbar } from "./ExplorerActions";
 import { NotificationBell } from "@/components/NotificationCenter";
+import { setExplorerGitScope } from "@/lib/explorerGitScope";
 
 interface FilesPanelProps {
   conversationId?: string;
@@ -231,6 +239,22 @@ function SearchFilterInput({
  * on that session's own last location (or its root), never another's.
  */
 const browseLocationCache = new Map<string, string>();
+const ROOT_DIRECTORIES = [""];
+const visitedDirectoriesCache = new Map<string, string[]>();
+const directoryListeners = new Set<() => void>();
+
+function subscribeDirectories(onChange: () => void) {
+  directoryListeners.add(onChange);
+  return () => directoryListeners.delete(onChange);
+}
+
+function readShowAgentChanges() {
+  return readFilesPanelPreferences().showAgentChanges;
+}
+
+function setShowAgentChanges(showAgentChanges: boolean) {
+  writeFilesPanelPreferences({ showAgentChanges });
+}
 
 export function readBrowseLocation(
   conversationId: string,
@@ -301,8 +325,13 @@ export function FilesPanel({
   // rounded card chrome; only the standalone card caps content at max-h.
   const isDrawer = onClose !== undefined;
   const fillHeight = isDrawer || frameless === true;
-  const changedQuery = useWorkspaceChangedFiles(conversationId, {
-    enabled: true,
+  const showAgentChanges = useSyncExternalStore(
+    subscribeFilesPanelPreferences,
+    readShowAgentChanges,
+    () => false,
+  );
+  const agentQuery = useWorkspaceChangedFiles(conversationId, {
+    enabled: showAgentChanges,
   });
   const envQuery = useWorkspaceEnvironment(conversationId, {
     enabled: true,
@@ -338,6 +367,58 @@ export function FilesPanel({
   // absolute path for a subfolder would 403 every collaborator browsing the
   // workspace they can already read.
   const locationParam = relativizeToWorkspace(browseLocation, workspaceRoot);
+  // Retain discovered directories across Files/Changes mounts.
+  // Refresh only these bounded scopes.
+  const directoryKey = JSON.stringify([conversationId, workspaceRoot, locationParam]);
+  const directories = useSyncExternalStore(
+    subscribeDirectories,
+    () => visitedDirectoriesCache.get(directoryKey) ?? ROOT_DIRECTORIES,
+    () => ROOT_DIRECTORIES,
+  );
+  const onDirectoriesChange = useCallback(
+    (expanded: string[]) => {
+      const previous = visitedDirectoriesCache.get(directoryKey) ?? ROOT_DIRECTORIES;
+      const next = Array.from(new Set([...previous, ...expanded]))
+        .sort()
+        .slice(0, 128);
+      if (next.length === previous.length && next.every((path, i) => path === previous[i])) return;
+      visitedDirectoriesCache.set(directoryKey, next);
+      for (const listener of directoryListeners) listener();
+    },
+    [directoryKey],
+  );
+  const gitDirectories = useMemo(
+    () => directories.map((dir) => joinBrowseLocation(locationParam, dir)),
+    [directories, locationParam],
+  );
+  useEffect(() => {
+    setExplorerGitScope(conversationId, { path: locationParam, directories: gitDirectories });
+  }, [conversationId, locationParam, gitDirectories]);
+  const gitQuery = useWorkspaceGitChanges(conversationId, {
+    path: locationParam,
+    directories: gitDirectories,
+    enabled: true,
+  });
+  const changedFiles = useMemo(() => {
+    const byPath = new Map<string, WorkspaceChangedFile>();
+    for (const file of [
+      ...(showAgentChanges ? (agentQuery.data?.data ?? []) : []),
+      ...(gitQuery.data?.data ?? []),
+    ]) {
+      const path = relativizeToWorkspace(file.path, workspaceRoot);
+      byPath.set(path, { ...file, path });
+    }
+    return Array.from(byPath.values());
+  }, [agentQuery.data, gitQuery.data, showAgentChanges, workspaceRoot]);
+  const changedQuery = {
+    data:
+      gitQuery.data !== undefined || (showAgentChanges && agentQuery.data !== undefined)
+        ? { data: changedFiles }
+        : undefined,
+    isLoading: gitQuery.isLoading || (showAgentChanges && agentQuery.isLoading),
+    isError: gitQuery.isError || (showAgentChanges && agentQuery.isError),
+    error: gitQuery.error ?? (showAgentChanges ? agentQuery.error : null),
+  };
 
   const navigateTo = useCallback(
     (absolutePath: string) => {
@@ -394,7 +475,6 @@ export function FilesPanel({
         ? `${unreachable.message}. Reachable: ${unreachable.reachableRoots.join(", ")}`
         : unreachable.message
       : null);
-  const changedFiles = changedQuery.data?.data ?? [];
   const hiddenFilesCount = changedFiles.filter((f) =>
     f.path.split("/").some((seg) => seg.startsWith(".")),
   ).length;
@@ -443,6 +523,19 @@ export function FilesPanel({
     },
     locationParam,
   );
+  useEffect(() => {
+    if (!debouncedTreeSearch || treeSearchQuery.isPlaceholderData) return;
+    onDirectoriesChange(
+      (treeSearchQuery.data?.files ?? []).map((file) =>
+        file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "",
+      ),
+    );
+  }, [
+    debouncedTreeSearch,
+    treeSearchQuery.data,
+    treeSearchQuery.isPlaceholderData,
+    onDirectoriesChange,
+  ]);
   // Highlight the filters toggle when include/exclude carry a value.
   const treeFiltersActive = treeInclude.trim().length > 0 || treeExclude.trim().length > 0;
 
@@ -452,11 +545,15 @@ export function FilesPanel({
       refreshInFlight.current = true;
       if (!background) setRefreshingFiles(true);
       try {
+        const changeRefreshes = [
+          gitQuery.refetch(),
+          ...(showAgentChanges ? [agentQuery.refetch()] : []),
+        ];
         const refreshes = flatView
-          ? [changedQuery.refetch()]
+          ? changeRefreshes
           : [
               allFilesQuery.refetch(),
-              changedQuery.refetch(),
+              ...changeRefreshes,
               queryClient.invalidateQueries({
                 predicate: ({ queryKey }) =>
                   queryKey[0] === "workspace-dir" &&
@@ -473,7 +570,9 @@ export function FilesPanel({
     },
     [
       allFilesQuery,
-      changedQuery,
+      gitQuery,
+      agentQuery,
+      showAgentChanges,
       debouncedTreeSearch,
       flatView,
       queryClient,
@@ -625,8 +724,17 @@ export function FilesPanel({
             Could not refresh files. Showing the last loaded listing.
           </p>
         )}
+        {!flatView && gitQuery.isError && (
+          <p className="px-2 py-1 text-sm text-destructive" role="status">
+            Git status unavailable:{" "}
+            {gitQuery.error instanceof Error ? gitQuery.error.message : String(gitQuery.error)}
+          </p>
+        )}
         {/* Content */}
-        <ExplorerToolbar />
+        <ExplorerToolbar
+          showAgentChanges={showAgentChanges}
+          onShowAgentChangesChange={setShowAgentChanges}
+        />
         <div className="shrink-0 border-t border-border" />
         {/* Search toolbar — the Changed | All scope switch leads, then the
               search field, then the per-view trailing control (Sort for the
@@ -756,6 +864,13 @@ export function FilesPanel({
               sort={changedSort}
               conversationId={conversationId}
               runnerWentOffline={runnerWentOffline}
+              emptyMessage={
+                showAgentChanges
+                  ? "No Git or observed agent changes"
+                  : gitQuery.data?.repositories?.length
+                    ? "No Git changes in the browsed folders"
+                    : "Expand a Git repository in Files to view its changes"
+              }
             />
           )}
           {!showAsleepHint && !flatView && (
@@ -768,7 +883,8 @@ export function FilesPanel({
               conversationId={conversationId}
               showHidden={showHidden}
               onShowHidden={() => onShowHiddenChange(true)}
-              changedFiles={changedQuery.data?.data}
+              changedFiles={changedFiles}
+              includeMissingChanges={showAgentChanges}
               sort={changedSort}
               runnerWentOffline={runnerWentOffline}
               searchQuery={debouncedTreeSearch}
@@ -786,6 +902,8 @@ export function FilesPanel({
               isSearchError={treeSearchQuery.isError}
               searchError={treeSearchQuery.error instanceof Error ? treeSearchQuery.error : null}
               browseLocation={locationParam}
+              workspaceRoot={workspaceRoot}
+              onDirectoriesChange={onDirectoriesChange}
               onNavigateDir={navigateToChild}
               onExitSearch={exitTreeSearch}
               scrollParentRef={scrollRef}

@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -1058,7 +1059,13 @@ export function ExplorerActionsProvider({
   );
 }
 
-export function ExplorerToolbar() {
+export function ExplorerToolbar({
+  showAgentChanges,
+  onShowAgentChangesChange,
+}: {
+  showAgentChanges?: boolean;
+  onShowAgentChangesChange?: (show: boolean) => void;
+} = {}) {
   const ctx = useContext(ExplorerContext);
   if (!ctx) return null;
   const first = ctx.selected.values().next().value as ExplorerEntry | undefined;
@@ -1134,7 +1141,20 @@ export function ExplorerToolbar() {
               <MoreHorizontalIcon />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">{ctx.menu(target)}</DropdownMenuContent>
+          <DropdownMenuContent align="end">
+            {onShowAgentChangesChange && (
+              <>
+                <DropdownMenuCheckboxItem
+                  checked={showAgentChanges ?? false}
+                  onCheckedChange={onShowAgentChangesChange}
+                >
+                  Show agent changes
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {ctx.menu(target)}
+          </DropdownMenuContent>
         </DropdownMenu>
       </div>
       {ctx.feedback}
