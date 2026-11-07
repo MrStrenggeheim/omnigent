@@ -40,7 +40,7 @@ vi.mock("@/components/PermissionsModal", () => ({ PermissionsModal: () => null }
 
 import { useConversations } from "@/hooks/useConversations";
 import { Toaster } from "@/components/ui/sonner";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 
 const ROW_HEIGHT = 30;
 

@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { ComposerMicButtonProps } from "@/components/ComposerMicButton";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeAlwaysSteer } from "@/lib/alwaysSteerPreferences";
 import * as filesApi from "@/lib/filesApi";

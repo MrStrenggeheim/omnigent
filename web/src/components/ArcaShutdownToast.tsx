@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { useHosts } from "@/hooks/useHosts";
 import { useNow } from "@/hooks/useNow";
 import { isArcaHost, readArcaHostId } from "@/lib/arcaHost";
@@ -91,13 +91,6 @@ export function ArcaShutdownToast() {
       ),
       duration: Infinity,
       closeButton: true,
-      // Sonner's unlayered display and gap rules need these overrides.
-      classNames: {
-        toast: "!grid !grid-cols-[max-content_minmax(0,1fr)] !gap-2",
-        content: "col-span-2",
-        cancelButton: "!m-0",
-        actionButton: "!m-0 justify-self-start",
-      },
       action: desktopExtend
         ? undefined
         : {

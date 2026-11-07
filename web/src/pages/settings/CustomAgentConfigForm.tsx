@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { TrashIcon } from "lucide-react";
 import { useNavigate } from "@/lib/routing";
 import { BackButton } from "./HarnessCatalog";

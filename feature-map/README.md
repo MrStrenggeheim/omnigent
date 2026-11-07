@@ -113,6 +113,8 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 ## Features
 
+- [Notifications](./notifications.md) covers shared popups, retained history, required prompts, archive recovery and transfer activity from conversation, file-viewer and Files drawer bells.
+
 - [Workspace Explorer](./workspace-explorer.md) covers file operations, transfers, selection, recovery and navigation on desktop and mobile.
 
 - [Session orchestration](./session-orchestration.md) covers private-owner

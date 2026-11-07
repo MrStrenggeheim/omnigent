@@ -23,8 +23,8 @@ const { copyTextMock } = vi.hoisted(() => ({
   copyTextMock: vi.fn<(text: string) => Promise<void>>(),
 }));
 vi.mock("@/lib/clipboard", () => ({ copyText: copyTextMock }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-import { toast } from "sonner";
+vi.mock("@/lib/notifications", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+import { toast } from "@/lib/notifications";
 
 const toastMock = vi.mocked(showToast);
 const fetchMock = vi.fn();

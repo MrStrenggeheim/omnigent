@@ -8,7 +8,7 @@ Users manage files on the session host or sandbox from the Files tree, filename 
 - `organize`: rename, move, duplicate, cut, copy and paste files or folders, with explicit overwrite selection.
 - `selection`: Ctrl/Cmd-click and Shift-click select entries for bulk operations; keyboard navigation and shortcuts operate on tree rows.
 - `row-controls`: show only size at rest; hover or keyboard focus reveals checkbox, download, copy and menu in one trailing column; selecting a checkbox keeps the other checkboxes visible.
-- `transfer`: upload files or directory structures with progress and cancellation; download folders or selected entries as ZIP.
+- `transfer`: upload files or directory structures and download folders or selected entries as ZIP, with shared [notification center](notifications.md) progress and cancellation.
 - `recovery`: move selected entries to recoverable trash and restore them without overwriting newer files.
 - `navigation`: collapse folders, reveal the most recently active file and search within a folder.
 - `freshness`: update active directory listings after operations and external changes, including idle-host refresh.
@@ -24,6 +24,7 @@ Users manage files on the session host or sandbox from the Files tree, filename 
 - Drag-and-drop: move selected entries onto a folder, hold the copy modifier to copy, or drop files/directories from the local computer to upload them.
 - Drop feedback uses the same dashed overlay as chat; the hovered destination folder is highlighted beneath it.
 - Mobile web and native shell: Conversation actions → Files or Changes opens the shared Explorer in a drawer.
+- Notifications in the conversation header, Files/Changes drawer or mobile full-screen file viewer opens shared transfer activity after its popup collapses.
 - Search in folder opens the shared [workspace content search](workspace-content-search.md) with the chosen scope.
 
 ## Driving it with the repro environment
@@ -32,7 +33,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 
 - Real SPA/server/runner file operations, binary upload, ZIP download and restore: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_manages_files_transfers_and_recovery`.
 - Delayed background refresh, shared drop overlay, idle/hover row controls and selection visibility: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_background_refresh_and_shared_hover_controls`.
-- Transfer progress and cancellation remain accessible across folder, file and session navigation; real browser navigation during upload is covered by `tests/e2e_ui/files/test_explorer_file_operations.py::test_upload_continues_while_viewing_another_file`.
+- Transfer progress and cancellation remain accessible through the [notification center](notifications.md) across folder, file and session navigation; real browser navigation during upload is covered by `tests/e2e_ui/files/test_explorer_file_operations.py::test_upload_continues_while_viewing_another_file`, including popup, retained-center and phone-center variants.
 - Desktop and mobile toolbar search, replacement preview, apply and undo: `tests/e2e_ui/files/test_explorer_file_operations.py::test_workspace_search_replace_preview_and_undo`.
 - Filename search and directory reveal: `tests/e2e_ui/files/test_file_search.py`.
 - Expanded-directory invalidation: `web/src/store/chatStore.test.ts`.
@@ -54,6 +55,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Cross-filesystem moves stage and verify a copy before removing the source; changes during the move or cleanup failures report the retained destination explicitly.
 - Uploads are bounded to 1 GiB per file; ZIP input is bounded to 1 GiB and 50,000 entries, and browser downloads assemble the received chunks in memory.
 - Background transfers survive in-app navigation; reloading or closing the browser ends its transfer controller, and later transfers clean stale staging data on the host.
+- Transfer popups collapse after their initial countdown without cancelling the operation; chunk updates stay in the notification center, and completion or failure reveals a fresh result.
 - Browser folder pickers cannot represent completely empty directories; external directory drops preserve them.
 - A lost response to a mutation can mean the operation completed; refresh before retrying.
 - Component and API checks do not prove a native mobile wrapper, filesystem sandbox or browser transport that was not exercised.

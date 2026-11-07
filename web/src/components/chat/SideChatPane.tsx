@@ -10,7 +10,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { MessagesSquareIcon, TriangleAlertIcon } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import { getCurrentAuthorId } from "@/lib/identity";
 import {

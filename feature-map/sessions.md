@@ -15,8 +15,8 @@ the header menu), and each place is a separate entry point.
   independent chats fit in two rows and two columns. Grids live at `/grid/<id>`
   and are saved only in this browser, scoped to server and user.
 - `pin`: pinned sessions move to their own section and back.
-- `pin-undo`: unpinning shows an Undo toast that re-pins the session into its
-  old Pinned slot. Dragging a pinned row into a folder unpins it without one.
+- `pin-undo`: unpinning shows an Undo notification that re-pins the session into its old Pinned slot and remains actionable in the [notification center](notifications.md) after the popup collapses.
+  Dragging a pinned row into a folder unpins it without one.
 - `pin-reorder`: drag a pinned row onto another pinned row to change the Pinned
   order, which persists across reloads; dropping an unpinned row onto a pinned
   row pins it into that slot.
@@ -31,6 +31,7 @@ the header menu), and each place is a separate entry point.
   cleanup, archiving a session that has a git worktree first asks whether to
   also delete the worktree (the branch is kept); Remember my choice saves the
   answer, which Settings → Git can change later.
+  Session archive shows a brief Undo notification, then Restore in notification history; project archive retains its own Undo action in the same center.
 - `stop`: Stop session on a hosted parent ends its runner, including side chats
   and sub-agents sharing that runner. Conversation histories are kept.
 - `side-chat-lifecycle`: generic side chats reuse their parent's live runner;
@@ -417,8 +418,7 @@ plain `uv run pytest`, which starts a private server for the test.
 - **`pin-undo`, sidebar row:**
   `tests/e2e_ui/sessions/test_sidebar_pin_unpin.py::test_undo_unpin_restores_pinned_slot`.
   The row menu (mobile) and header menu Unpin have web unit coverage only:
-  unpin a pinned session, click Undo on the toast, and expect it back in the
-  same Pinned position.
+  Unpin a pinned session, use Undo on its notification popup or open the notification center after collapse, and expect it back in the same Pinned position; the retained-history route needs its own browser drive.
 - **`pin-reorder`:**
   `tests/e2e_ui/sessions/test_sidebar_pin_unpin.py::test_drag_reorders_pinned_sessions`.
   Dropping an unpinned row onto a pinned row has web unit coverage only.
@@ -450,10 +450,10 @@ plain `uv run pytest`, which starts a private server for the test.
   The sidebar row and bulk unarchive have web unit coverage only: archive a
   session, open the archived view, choose Unarchive on the row, and expect the
   session back in the main list.
-- **`unarchive`, Undo toast:**
+- **`unarchive`, Undo notification and later Restore:**
   `tests/e2e_ui/sessions/test_sidebar_lifecycle.py::test_sidebar_session_organization_round_trip`
-  archives two sessions and restores both to Mine through Undo, including after
-  a reload.
+  archives two sessions and restores both to Mine through immediate Undo, then checks restored state after a reload; it does not prove notification history survives reload.
+  `web/src/shell/archiveUndoToast.test.tsx` checks the brief Undo deadline and Restore from retained history; see [Notifications](notifications.md) for the center entry points and recorded coverage.
 - **`delete`:**
   `tests/e2e_ui/sessions/test_sidebar_delete.py::test_delete_session_removes_row_and_from_store`,
   `tests/e2e_ui/sessions/test_sidebar_bulk_actions.py::test_bulk_delete_removes_sessions`
@@ -838,9 +838,9 @@ plain `uv run pytest`, which starts a private server for the test.
 
 - Browser storage sharing is limited to one desktop window and app run;
   restarting the app clears it. Closing an individual tab does not.
-- Archive and unarchive exist on the row, in bulk selection, and in the header
-  menu. A fix to one of these does not reach the others; check each, and check
-  that the undo toast restores the session.
+- Archive and unarchive exist on the row, in bulk selection, and in the header menu.
+  A fix to one of these does not reach the others; check each, and check both immediate Undo and later Restore from notification history.
+  The short Undo window protects a live runner; later Restore brings sessions back to the sidebar without promising the runner remains alive.
 - The header menu of an archived session must offer Unarchive, not Archive.
   Open an archived session directly to see it.
 - The worktree prompt appears only when the server advertises worktree cleanup

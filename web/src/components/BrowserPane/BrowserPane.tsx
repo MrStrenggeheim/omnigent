@@ -24,7 +24,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

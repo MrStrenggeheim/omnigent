@@ -6,7 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { Toaster } from "@/components/ui/sonner";
 import { PINNED_CONVERSATIONS_KEY, type Conversation } from "@/hooks/useConversations";
 import { PINNED_LABEL_KEY } from "@/lib/sessionListCache";

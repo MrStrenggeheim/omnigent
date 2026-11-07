@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 
 import { fetchHosts } from "@/hooks/useHosts";
 import type { Host } from "@/hooks/useHosts";
@@ -16,7 +16,7 @@ vi.mock("@/lib/nativeBridge", () => ({
   getHostIdentity: vi.fn(),
   isElectronShell: vi.fn(),
 }));
-vi.mock("sonner", () => ({
+vi.mock("@/lib/notifications", () => ({
   toast: { loading: vi.fn(() => "progress"), success: vi.fn(), dismiss: vi.fn() },
 }));
 

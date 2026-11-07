@@ -1,6 +1,6 @@
 import { ClipboardCopyIcon, XIcon } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
 
 export type TerminalClipboardDecision = "allow" | "once" | "block";
@@ -18,6 +18,7 @@ interface TerminalClipboardPromptProps {
 export function TerminalClipboardPrompt(props: TerminalClipboardPromptProps) {
   const toastId = useId();
   const { reason, canRemember, copyFailed } = props;
+  const [remember, setRemember] = useState(canRemember);
   const latestProps = useRef(props);
   const mounted = useRef(true);
 
@@ -28,7 +29,7 @@ export function TerminalClipboardPrompt(props: TerminalClipboardPromptProps) {
   useEffect(() => {
     mounted.current = true;
     return () => {
-      // Sonner retains the card during its exit animation.
+      // A retired terminal must not handle callbacks from its old prompt.
       mounted.current = false;
       toast.dismiss(toastId);
     };
@@ -41,8 +42,10 @@ export function TerminalClipboardPrompt(props: TerminalClipboardPromptProps) {
           reason={reason}
           canRemember={canRemember}
           copyFailed={copyFailed}
-          onDecision={(decision, remember) => {
-            if (mounted.current) latestProps.current.onDecision(decision, remember);
+          remember={remember}
+          onRememberChange={setRemember}
+          onDecision={(decision, rememberChoice) => {
+            if (mounted.current) latestProps.current.onDecision(decision, rememberChoice);
           }}
           onRetry={() => {
             if (mounted.current) latestProps.current.onRetry();
@@ -53,18 +56,12 @@ export function TerminalClipboardPrompt(props: TerminalClipboardPromptProps) {
         />
       ),
       {
-        // Inherit the toaster position so ordinary notices share the same stack measurements.
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
         dismissible: false,
-        style: {
-          width: "min(30rem, calc(100vw - 2rem))",
-          bottom: "max(0px, 100lvh - var(--omnigent-viewport-height, 100lvh))",
-          touchAction: "auto",
-        },
       },
     );
-  }, [toastId, reason, canRemember, copyFailed]);
+  }, [toastId, reason, canRemember, copyFailed, remember]);
 
   return null;
 }
@@ -73,11 +70,15 @@ function TerminalClipboardPromptContent({
   reason,
   canRemember,
   copyFailed,
+  remember,
+  onRememberChange,
   onDecision,
   onRetry,
   onDismiss,
-}: TerminalClipboardPromptProps) {
-  const [remember, setRemember] = useState(canRemember);
+}: TerminalClipboardPromptProps & {
+  remember: boolean;
+  onRememberChange: (remember: boolean) => void;
+}) {
   const rememberChoice = canRemember && remember;
   const needsClick = reason !== "consent";
   const titleId = useId();
@@ -144,7 +145,7 @@ function TerminalClipboardPromptContent({
                 checked={rememberChoice}
                 disabled={!canRemember}
                 aria-describedby={rememberDescriptionId}
-                onChange={(event) => setRemember(event.target.checked)}
+                onChange={(event) => onRememberChange(event.target.checked)}
                 className="mt-0.5 size-4 shrink-0 scroll-my-1 accent-primary"
               />
               <span>Remember my choice</span>

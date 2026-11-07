@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { ArcaShutdownBanner } from "./ArcaShutdownBanner";
 import { useArcaShutdownBanner } from "@/hooks/useArcaShutdownBanner";
 import {
@@ -30,7 +30,7 @@ vi.mock("@/hooks/useNow", () => ({
 vi.mock("@/lib/CapabilitiesContext", () => ({ useServerInfo: () => ({}) }));
 vi.mock("@/lib/capabilities", () => ({ isFeatureEnabled: () => state.enabled }));
 vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn() }));
-vi.mock("sonner", () => ({ toast: { dismiss: vi.fn() } }));
+vi.mock("@/lib/notifications", () => ({ toast: { dismiss: vi.fn() } }));
 
 function Banner({ hostId = "arca" }: { hostId?: string }) {
   const warning = useArcaShutdownBanner();

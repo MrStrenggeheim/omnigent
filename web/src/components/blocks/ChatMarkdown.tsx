@@ -13,7 +13,7 @@
 import type React from "react";
 import { useMemo } from "react";
 import { CopyIcon, GitPullRequestIcon } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { defaultRemarkPlugins } from "streamdown";
 import remarkBreaks from "remark-breaks";
 import { normalizeExplicitMathDelimiters } from "@/components/ai-elements/mathMarkdown";

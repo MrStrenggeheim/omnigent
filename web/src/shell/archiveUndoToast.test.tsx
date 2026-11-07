@@ -8,8 +8,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import type * as SonnerModule from "sonner";
+import { toast, setNotificationCenterOpen } from "@/lib/notifications";
+import { NotificationBell } from "@/components/NotificationCenter";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type * as SonnerModule from "@/lib/notifications";
 import type { Conversation } from "@/hooks/useConversations";
 
 const mocks = vi.hoisted(() => ({
@@ -29,7 +31,7 @@ vi.mock("@/hooks/useConversations", () => ({
 // Wrap sonner's real module (so the <Toaster> still renders for the DOM-based
 // tests) but record each `toast()` call's duration for the cap assertion. ESM
 // exports can't be spied in place, so a pass-through mock is the clean seam.
-vi.mock("sonner", async (importOriginal) => {
+vi.mock("@/lib/notifications", async (importOriginal) => {
   const actual = await importOriginal<typeof SonnerModule>();
   const wrapped = ((message: unknown, opts?: { duration?: number }) => {
     if (typeof opts?.duration === "number") mocks.toastDurations.push(opts.duration);
@@ -55,6 +57,9 @@ let navigate: ReturnType<typeof vi.fn>;
 function mountToaster() {
   render(
     <MemoryRouter>
+      <TooltipProvider>
+        <NotificationBell />
+      </TooltipProvider>
       <Toaster />
     </MemoryRouter>,
   );
@@ -80,18 +85,44 @@ beforeEach(() => {
   resetArchiveUndoBatchForTests();
   navigate = vi.fn();
   toast.dismiss();
+  setNotificationCenterOpen(false);
 });
 
 afterEach(async () => {
   resetArchiveUndoBatchForTests();
   act(() => toast.dismiss());
   // Sonner queues removal callbacks during its exit animation.
-  await waitFor(() => expect(document.querySelector("[data-sonner-toast]")).toBeNull());
+  await waitFor(() => expect(document.querySelector("[data-notification-card]")).toBeNull());
   cleanup();
   vi.useRealTimers();
 });
 
 describe("showArchiveUndoToast", () => {
+  it("does not extend the live undo deadline while its card is hovered", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mountToaster();
+    await show(["a"]);
+    fireEvent.pointerEnter(screen.getByTestId("archive-undo-toast-item"));
+    await act(() => vi.advanceTimersByTimeAsync(5100));
+    expect(screen.queryByTestId("archive-undo-toast-item")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument();
+  });
+
+  it("retains a safe restore action after the live undo window expires", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mountToaster();
+    await show(["old"]);
+    await act(() => vi.advanceTimersByTimeAsync(3100));
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    await show(["new"]);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    expect(mocks.undoArchiveConversations).toHaveBeenLastCalledWith(queryClient, convs("old"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(mocks.undoArchiveConversations).toHaveBeenLastCalledWith(queryClient, convs("new"));
+  });
+
   it("uses singular copy for a single session", async () => {
     mountToaster();
     await show(["a"]);

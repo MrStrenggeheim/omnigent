@@ -4,9 +4,59 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Browser, Locator, Page, expect
+
+
+@pytest.mark.parametrize("mobile", [False, True], ids=["desktop", "phone-dark"])
+def test_project_notification_collapses_to_history_and_keeps_undo(
+    page: Page, seeded_session: tuple[str, str], mobile: bool, request: pytest.FixtureRequest
+) -> None:
+    base_url, session_id = seeded_session
+    if mobile:
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.emulate_media(color_scheme="dark")
+    name = f"Notification {uuid.uuid4().hex[:6]}"
+    page.goto(f"{base_url}/c/{session_id}?sidebar=open")
+    _create_project(page, name)
+    project_id = next(
+        project["id"]
+        for project in page.request.get(f"{base_url}/v1/projects").json()["data"]
+        if project["name"] == name
+    )
+    header = _folder_header(page, name)
+    page.clock.install()
+    header.click(button="right")
+    page.get_by_role("menuitem", name="Archive project", exact=True).click()
+    popup = page.get_by_role("complementary", name="Notifications")
+    expect(popup.get_by_text("Archived project", exact=True)).to_be_visible()
+    output = Path(request.config.getoption("output"))
+    page.screenshot(
+        path=str(output / f"notifications-popup-{'phone-dark' if mobile else 'desktop'}.png")
+    )
+    bounds = popup.bounding_box()
+    assert bounds is not None
+    assert bounds["width"] <= page.viewport_size["width"] - 32
+    page.clock.fast_forward(10_100)
+    expect(popup).not_to_be_visible()
+    if mobile:
+        page.get_by_role("button", name="Close sidebar", exact=True).click(
+            position={"x": page.viewport_size["width"] - 8, "y": 100}
+        )
+    page.get_by_role("button", name="Notifications", exact=True).click()
+    center = page.get_by_role("dialog", name="Notifications")
+    expect(center.get_by_text(name, exact=True)).to_be_visible()
+    expect(center).to_have_css("width", f"{round(bounds['width'])}px")
+    assert center.bounding_box() is not None
+    page.screenshot(
+        path=str(output / f"notifications-history-{'phone-dark' if mobile else 'desktop'}.png"),
+        animations="disabled",
+    )
+    center.get_by_role("button", name="Undo", exact=True).click()
+    expect(center.get_by_text("Restored project", exact=True)).to_be_visible(timeout=15_000)
+    assert page.request.get(f"{base_url}/v1/projects/{project_id}").json()["archived"] is False
 
 
 @pytest.mark.parametrize("mobile", [False, True], ids=["desktop", "phone"])

@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AgentInfoButton } from "@/components/AgentInfo";
+import { NotificationBell } from "@/components/NotificationCenter";
 import { ConversationBreadcrumb } from "./ConversationBreadcrumb";
 import { HeaderConversationMenu } from "./HeaderConversationMenu";
 import { SessionActionMenuItem } from "@/components/SessionActionMenuItem";
@@ -606,6 +607,7 @@ export function ChatHeader({
       </div>
 
       <div className="flex items-center gap-2 max-md:gap-0 max-md:empty:hidden">
+        <NotificationBell />
         {/* Other users currently viewing this session (presence).
             Self-contained — reads the chat store directly, renders
             nothing when the user is alone. */}

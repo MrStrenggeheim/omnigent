@@ -11,7 +11,8 @@ import {
 import { downloadBlob, filesystemOperation } from "@/lib/explorerOperations";
 import type { ExplorerEntry, FilesystemOperationResult } from "@/lib/explorerOperations";
 import type * as ExplorerOperationsModule from "@/lib/explorerOperations";
-import { ExplorerTransfersStatus } from "./ExplorerTransfersStatus";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "@/lib/notifications";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   dismissExplorerTransfer,
@@ -68,7 +69,7 @@ function setup({ writable = true, base = "src", conversationId = "test" } = {}) 
           <Tree />
         </div>
       </ExplorerActionsProvider>
-      <ExplorerTransfersStatus />
+      <Toaster />
     </TooltipProvider>,
   );
 }
@@ -79,6 +80,7 @@ async function rowMenu(path: string) {
 const operation = vi.mocked(filesystemOperation);
 beforeEach(() => {
   vi.clearAllMocks();
+  toast.dismiss();
   operation.mockReset().mockResolvedValue({});
   for (const transfer of getExplorerTransfers()) dismissExplorerTransfer(transfer.conversationId);
 });
@@ -354,7 +356,7 @@ describe("Explorer actions", () => {
       expect(operation.mock.calls.some((call) => call[1].operation === "upload_chunk")).toBe(true),
     );
     view.unmount();
-    render(<ExplorerTransfersStatus />);
+    render(<Toaster />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel upload" }));
     await waitFor(() =>
       expect(operation).toHaveBeenCalledWith("test", {
@@ -425,9 +427,10 @@ describe("Explorer actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
     await waitFor(() => expect(finishStarting).toBeTypeOf("function"));
     view.unmount();
-    render(<ExplorerTransfersStatus />);
+    render(<Toaster />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel upload" }));
-    expect(screen.getByRole("button", { name: "Cancel upload" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Cancel upload" })).toBeNull();
+    expect(screen.getByText("Cancelling and cleaning up…")).toBeInTheDocument();
     await act(async () => finishStarting());
     await screen.findByText("Upload cancelled. Completed files are kept.");
     expect(operation).toHaveBeenCalledWith("test", {
@@ -461,7 +464,7 @@ describe("Explorer actions", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Download as ZIP" }));
     await waitFor(() => expect(release).toBeTypeOf("function"));
     view.unmount();
-    render(<ExplorerTransfersStatus />);
+    render(<Toaster />);
     expect(chunkSignal?.aborted).toBe(false);
     await act(async () => release());
     await screen.findByText("Download complete");
@@ -494,7 +497,7 @@ describe("Explorer actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
     await waitFor(() => expect(fail).toBeTypeOf("function"));
     view.unmount();
-    render(<ExplorerTransfersStatus />);
+    render(<Toaster />);
     await act(async () => fail());
     expect(await screen.findByRole("alert")).toHaveTextContent("Connection lost");
     expect(operation).toHaveBeenCalledWith("test", {
@@ -502,7 +505,7 @@ describe("Explorer actions", () => {
       path: "src/failed.txt",
       upload_id: "failed",
     });
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss upload status" }));
-    expect(screen.queryByRole("complementary", { name: "File transfers" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide notification" }));
+    expect(screen.queryByRole("complementary", { name: "Notifications" })).not.toBeInTheDocument();
   });
 });

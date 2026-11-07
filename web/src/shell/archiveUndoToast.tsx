@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast, updateNotification, hideNotification } from "@/lib/notifications";
 
 import type { useNavigate } from "@/lib/routing";
 import { undoArchiveConversations, type Conversation } from "@/hooks/useConversations";
@@ -24,16 +24,12 @@ const ARCHIVE_UNDO_DURATION_MS = 3000;
  */
 const ARCHIVE_UNDO_MAX_LIFETIME_MS = 5000;
 
-/** Stable id so repeated archives update ONE pill (merge). */
-const ARCHIVE_UNDO_TOAST_ID = "archive-undo";
+// A batch shares one popup; later batches get separate history entries.
+let batchSequence = 0;
+let activeToastId: string | null = null;
+let batchDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
 
-// The sessions the visible pill would undo. Archives in quick succession
-// (while the pill is still up) merge into this one batch; it's cleared when the
-// pill auto-closes, is dismissed, or Undo runs. Module-level so the three
-// archive entry points (row menu, header menu, bulk selection) share a single
-// pill rather than stacking one each. Full rows (not just ids) so Undo can
-// re-inject them into the sidebar even after a refetch evicted the archived
-// rows (see `undoArchiveConversations`).
+// Archive entry points merge one visible batch; each retained notification owns its captured rows for later restore.
 let batched: Conversation[] = [];
 // When the current batch's pill first appeared (epoch ms), or null if none.
 let batchStartedAtMs: number | null = null;
@@ -43,27 +39,13 @@ let activeQueryClient: QueryClient | null = null;
 let activeNavigate: NavigateFn | null = null;
 
 function clearBatch(): void {
+  if (batchDeadlineTimer !== null) clearTimeout(batchDeadlineTimer);
+  batchDeadlineTimer = null;
   batched = [];
   batchStartedAtMs = null;
   activeQueryClient = null;
   activeNavigate = null;
-}
-
-function runUndo(): void {
-  const conversations = batched;
-  const queryClient = activeQueryClient;
-  clearBatch();
-  toast.dismiss(ARCHIVE_UNDO_TOAST_ID);
-  if (queryClient && conversations.length > 0) {
-    void undoArchiveConversations(queryClient, conversations);
-  }
-}
-
-function runViewArchived(): void {
-  const navigate = activeNavigate;
-  clearBatch();
-  toast.dismiss(ARCHIVE_UNDO_TOAST_ID);
-  navigate?.("/settings/archived");
+  activeToastId = null;
 }
 
 /**
@@ -96,6 +78,10 @@ export function showArchiveUndoToast(
   if (batchStartedAtMs === null || now - batchStartedAtMs >= ARCHIVE_UNDO_MAX_LIFETIME_MS) {
     batched = [];
     batchStartedAtMs = now;
+    activeToastId = `archive-undo:${++batchSequence}`;
+    const expires = activeToastId;
+    if (batchDeadlineTimer !== null) clearTimeout(batchDeadlineTimer);
+    batchDeadlineTimer = setTimeout(() => hideNotification(expires), ARCHIVE_UNDO_MAX_LIFETIME_MS);
   }
   activeQueryClient = queryClient;
   activeNavigate = navigate;
@@ -114,14 +100,38 @@ export function showArchiveUndoToast(
     batchStartedAtMs + ARCHIVE_UNDO_MAX_LIFETIME_MS - now,
   );
   const count = batched.length;
+  const id = activeToastId!;
+  const members = [...batched];
+  const client = activeQueryClient!;
+  const navigateTo = activeNavigate!;
+  const clearActiveBatch = () => {
+    if (activeToastId === id) clearBatch();
+  };
+  const restore = () => {
+    clearActiveBatch();
+    toast.dismiss(id);
+    return undoArchiveConversations(client, members);
+  };
+  const view = () => {
+    clearActiveBatch();
+    toast.dismiss(id);
+    navigateTo("/settings/archived");
+  };
   toast(`Archived ${count} ${count === 1 ? "session" : "sessions"}`, {
-    id: ARCHIVE_UNDO_TOAST_ID,
+    id,
     duration: remaining,
-    action: { label: "Undo", onClick: runUndo },
-    cancel: { label: "View archived", onClick: runViewArchived },
+    action: { label: "Undo", onClick: restore },
+    cancel: { label: "View archived", onClick: view },
     testId: "archive-undo-toast-item",
-    onAutoClose: clearBatch,
-    onDismiss: clearBatch,
+    onAutoClose: () => {
+      clearActiveBatch();
+      // The brief Undo window protects a live runner; history offers an explicit restore afterward.
+      updateNotification(id, {
+        description: "Restore these sessions to the sidebar.",
+        action: { label: "Restore", onClick: restore },
+      });
+    },
+    onDismiss: clearActiveBatch,
   });
 }
 

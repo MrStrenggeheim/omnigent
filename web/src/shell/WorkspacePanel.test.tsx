@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import * as sessionsApi from "@/lib/sessionsApi";
 import { useChatStore } from "@/store/chatStore";
 import { ALT_KEY, MOD_KEY } from "@/components/KeyboardShortcut";
@@ -98,7 +98,7 @@ vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
 vi.mock("@/hooks/useAgents", () => ({
   useSessionAgent: vi.fn(() => ({ data: undefined })),
 }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+vi.mock("@/lib/notifications", () => ({ toast: { error: vi.fn() } }));
 // A side chat's pane is covered by its own suite; the stub just names its child.
 vi.mock("@/components/chat/SideChatPane", () => ({
   SideChatPane: ({ childId }: { childId: string }) => (

@@ -19,7 +19,7 @@ import type * as IdentityModule from "@/lib/identity";
 
 import { type InfiniteData, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import type { Conversation, ConversationsPage } from "@/hooks/useConversations";
 import type {
   AnyBlock,

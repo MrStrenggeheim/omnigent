@@ -5,6 +5,13 @@ import {
   filesystemOperation,
   type UploadItem,
 } from "./explorerOperations";
+import {
+  getNotificationSnapshot,
+  notify,
+  removeNotification,
+  updateNotification,
+} from "./notifications";
+import { formatBytes } from "@/shell/fileStatusUtils";
 
 /* eslint-disable no-await-in-loop -- Upload offsets and archive chunks depend on the previous response. */
 
@@ -21,12 +28,57 @@ export interface ExplorerTransfer {
 interface ActiveTransfer {
   controller: AbortController;
   value: ExplorerTransfer;
+  notificationId?: string | number;
+  notifiedValue?: ExplorerTransfer;
 }
 const transfers = new Map<string, ActiveTransfer>();
 const listeners = new Set<() => void>();
 let snapshot: ExplorerTransfer[] = [];
 
 function publish(): void {
+  for (const transfer of transfers.values()) {
+    if (transfer.notifiedValue === transfer.value) continue;
+    const value = transfer.value;
+    const active = transferIsActive(value);
+    const wasActive = transfer.notifiedValue && transferIsActive(transfer.notifiedValue);
+    const entry = {
+      title:
+        value.message ?? `${value.kind === "upload" ? "Uploading" : "Downloading"} ${value.name}`,
+      description: value.name,
+      type:
+        value.status === "failed"
+          ? ("error" as const)
+          : value.status === "completed"
+            ? ("success" as const)
+            : ("info" as const),
+      progress: active
+        ? {
+            active: true,
+            value:
+              value.total > 0 ? Math.min(100, (value.completed / value.total) * 100) : undefined,
+            label:
+              value.total > 1
+                ? `${formatBytes(value.completed)} of ${formatBytes(value.total)} · ${Math.round((value.completed / value.total) * 100)}%`
+                : "Preparing…",
+          }
+        : undefined,
+      action:
+        value.status === "running"
+          ? {
+              label: `Cancel ${value.kind}`,
+              onClick: () => cancelExplorerTransfer(value.conversationId),
+            }
+          : undefined,
+    };
+    if (transfer.notificationId === undefined) transfer.notificationId = notify(entry);
+    else if (
+      getNotificationSnapshot().entries.some(
+        (notification) => notification.id === transfer.notificationId,
+      )
+    )
+      updateNotification(transfer.notificationId, entry, { reveal: Boolean(wasActive && !active) });
+    transfer.notifiedValue = value;
+  }
   snapshot = [...transfers.values()].map((transfer) => transfer.value);
   for (const listener of listeners) listener();
 }
@@ -56,6 +108,7 @@ export function cancelExplorerTransfer(conversationId: string): void {
 export function dismissExplorerTransfer(conversationId: string): void {
   const transfer = transfers.get(conversationId);
   if (transfer && !transferIsActive(transfer.value)) {
+    if (transfer.notificationId !== undefined) removeNotification(transfer.notificationId);
     transfers.delete(conversationId);
     publish();
   }

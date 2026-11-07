@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 
 import { fetchHosts } from "@/hooks/useHosts";
 import { isArcaHost, readArcaHostId, writeArcaHostId } from "@/lib/arcaHost";

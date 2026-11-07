@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { useIdentityReady, useViewerId } from "@/hooks/useViewerId";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useIsCoarsePointer } from "@/hooks/useIsCoarsePointer";

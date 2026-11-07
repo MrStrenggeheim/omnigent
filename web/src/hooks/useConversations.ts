@@ -29,6 +29,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { authenticatedFetch, getCurrentUserId } from "@/lib/identity";
+import { toast } from "@/lib/notifications";
 import { filterSessionScope, sessionVisibility } from "@/lib/sessionVisibility";
 import { startTimedInteraction } from "@/lib/analyticsEmit";
 import {
@@ -1040,6 +1041,7 @@ export function useArchiveConversation() {
       // or drops it from that project folder's own paginated list. These read
       // the DB directly, so refetching them can't resurrect the archived row.
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
+
       void queryClient.invalidateQueries({ queryKey: ["project-sessions"] });
       // Archive membership just changed, so the archived-view picker's option
       // set may have gained/lost a project.
@@ -2208,6 +2210,24 @@ export function useArchiveProject() {
         ),
       );
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success(updated.archived ? "Archived project" : "Restored project", {
+        description: updated.name,
+        action: updated.archived
+          ? {
+              label: "Undo",
+              onClick: async () => {
+                const restored = await apiArchiveProject(updated.id, false);
+                queryClient.setQueryData<ProjectSummary[]>(["projects"], (old) =>
+                  old?.map((project) =>
+                    project.id === restored.id ? { ...project, archived: false } : project,
+                  ),
+                );
+                await queryClient.invalidateQueries({ queryKey: ["projects"] });
+                toast.success("Restored project", { description: restored.name });
+              },
+            }
+          : undefined,
+      });
     },
   });
 }

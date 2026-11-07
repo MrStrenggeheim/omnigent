@@ -19,7 +19,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useSearchParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { copyText } from "@/lib/clipboard";
 import type { Comment } from "@/hooks/useComments";
 import { isFilePositionPending } from "./filePositionState";
@@ -27,7 +27,10 @@ import { isFilePositionPending } from "./filePositionState";
 const codeViewerRenders = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn(() => Promise.resolve()) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/notifications", async (original) => ({
+  ...(await original<typeof NotificationsModule>()),
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 // ── Mock heavy child components ───────────────────────────────────────────────
 
@@ -2475,3 +2478,4 @@ it("keeps grid file viewers independent of shared URL parameters and copies a se
   expect(copied.searchParams.get("file")).toBe("file1.py");
   expect(copied.searchParams.has("comment")).toBe(false);
 });
+import type * as NotificationsModule from "@/lib/notifications";

@@ -17,7 +17,8 @@ import {
   isFilePositionPending,
   stopFilePosition,
 } from "./filePositionState";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
+import { NotificationBell } from "@/components/NotificationCenter";
 import {
   lazy,
   Suspense,
@@ -1626,6 +1627,7 @@ function FileViewerBody({
               then a single "⋯" menu with the same options. The offscreen clone
               below measures the full row's natural width. */}
           <div className="flex items-center justify-end gap-1">
+            {mobileOverlay && <NotificationBell />}
             {toolbarCollapsed ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

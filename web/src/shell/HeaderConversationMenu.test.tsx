@@ -12,7 +12,7 @@ import { CapabilitiesProvider } from "@/lib/CapabilitiesContext";
 import { FALLBACK_SERVER_INFO } from "@/lib/capabilities";
 import { USER_SESSION_TITLE_MAX_CHARS } from "@/lib/sessionTitles";
 import { PINNED_LABEL_KEY } from "@/lib/sessionListCache";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { HeaderConversationMenu } from "./HeaderConversationMenu";
 
@@ -75,7 +75,7 @@ vi.mock("@/hooks/useFileContent", async (importOriginal) => {
 });
 
 // `toast` is callable too: archiving shows the Undo pill via `toast(...)`.
-vi.mock("sonner", () => ({
+vi.mock("@/lib/notifications", () => ({
   toast: Object.assign(vi.fn(), { error: mocks.toastError, custom: vi.fn(), dismiss: vi.fn() }),
 }));
 

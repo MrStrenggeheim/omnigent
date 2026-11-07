@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 
 import {
   PINNED_CONVERSATIONS_KEY,

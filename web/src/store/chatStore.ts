@@ -165,7 +165,7 @@ import {
   nativeCodingAgentForHarness,
 } from "@/lib/nativeCodingAgents";
 import type { ReplyQuote, StoredReplyDraft } from "@/lib/replyDraft";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 
 export interface SendOptions {
   /** Compact is a control event, not a user-message turn. */

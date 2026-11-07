@@ -190,9 +190,18 @@ def test_workspace_search_replace_preview_and_undo(
         _cleanup_session_workdir(session_id)
 
 
-@pytest.mark.parametrize("cancel", [False, True], ids=["continue", "cancel"])
+@pytest.mark.parametrize(
+    "cancel,collapse,mobile",
+    [(False, False, False), (True, False, False), (True, True, False), (True, True, True)],
+    ids=["continue", "cancel", "cancel-from-center", "phone-center"],
+)
 def test_upload_continues_while_viewing_another_file(
-    page: Page, seeded_session: tuple[str, str], cancel: bool
+    page: Page,
+    seeded_session: tuple[str, str],
+    cancel: bool,
+    collapse: bool,
+    mobile: bool,
+    request: pytest.FixtureRequest,
 ) -> None:
     base_url, session_id = seeded_session
     _seed_file(base_url, session_id, "navigation.txt", "Keep browsing while uploading.\n")
@@ -207,11 +216,19 @@ def test_upload_continues_while_viewing_another_file(
 
     page.route("**/filesystem-operations", hold_first_chunk)
     try:
+        if mobile:
+            page.set_viewport_size({"width": 390, "height": 844})
         page.goto(f"{base_url}/c/{session_id}?view=explore")
         panel = page.get_by_role("complementary", name="Workspace")
+        if mobile:
+            page.get_by_role("button", name="Conversation actions").click()
+            page.get_by_role("menuitem", name="Files", exact=True).click()
+            panel = page.get_by_test_id("files-panel-drawer")
         expect(panel.get_by_role("button", name="Choose files to upload")).to_be_visible(
             timeout=30_000
         )
+        if collapse:
+            page.clock.install()
         payload = bytes(range(256)) * 1024
         panel.locator('input[type="file"][aria-label="Upload files"]').set_input_files(
             {"name": "background.bin", "mimeType": "application/octet-stream", "buffer": payload}
@@ -224,12 +241,43 @@ def test_upload_continues_while_viewing_another_file(
             )
         ):
             page.get_by_role("dialog").get_by_role("button", name="Upload", exact=True).click()
-        transfers = page.get_by_role("complementary", name="File transfers")
+        transfers = page.get_by_role("complementary", name="Notifications")
         expect(transfers.get_by_role("button", name="Cancel upload")).to_be_visible()
         assert len(held) == 1
+        if mobile:
+            panel.get_by_role("button", name="Notifications", exact=True).click()
+            drawer_center = page.get_by_role("dialog", name="Notifications")
+            expect(drawer_center.get_by_role("button", name="Cancel upload")).to_be_visible()
+            page.screenshot(
+                path=str(
+                    Path(request.config.getoption("output")) / "notifications-files-drawer.png"
+                ),
+                animations="disabled",
+            )
+            drawer_center.get_by_role("button", name="Close notifications").click()
         _entry(panel, "navigation.txt").locator("button").first.click()
         expect(page.get_by_test_id("file-viewer")).to_be_visible(timeout=30_000)
-        expect(transfers.get_by_role("button", name="Cancel upload")).to_be_visible()
+        if not mobile:
+            expect(transfers.get_by_role("button", name="Cancel upload")).to_be_visible()
+        if collapse:
+            page.clock.fast_forward(10_100)
+            expect(transfers).not_to_be_visible()
+            bell_surface = page.get_by_test_id("file-viewer") if mobile else page
+            bell_surface.get_by_role("button", name="Notifications", exact=True).click()
+            transfers = page.get_by_role("dialog", name="Notifications")
+            expect(transfers.get_by_role("button", name="Cancel upload")).to_be_visible()
+            expect(transfers.get_by_role("progressbar")).to_be_visible()
+            output = Path(request.config.getoption("output"))
+            page.screenshot(
+                path=str(
+                    output / f"notifications-activity-{'phone' if mobile else 'desktop'}.png"
+                ),
+                animations="disabled",
+            )
+            if mobile:
+                bounds = transfers.bounding_box()
+                assert bounds is not None and bounds["x"] >= 16
+                assert bounds["x"] + bounds["width"] <= page.viewport_size["width"] - 16
         if cancel:
             transfers.get_by_role("button", name="Cancel upload").click()
             held[0].abort()
@@ -282,9 +330,11 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         pending.value.save_as(archive)
         with zipfile.ZipFile(archive) as downloaded:
             assert set(downloaded.namelist()) == {"keyboard.txt", "b.txt"}
-        transfers = page.get_by_role("complementary", name="File transfers")
+        transfers = page.get_by_role("complementary", name="Notifications")
         expect(transfers.get_by_text("Download complete", exact=True)).to_be_visible()
-        transfers.get_by_role("button", name="Dismiss download status", exact=True).click()
+        transfers.get_by_role("status").filter(has_text="Download complete").get_by_role(
+            "button", name="Hide notification", exact=True
+        ).click()
         panel.get_by_role("checkbox", name="Select keyboard.txt", exact=True).uncheck()
         panel.get_by_role("checkbox", name="Select b.txt", exact=True).uncheck()
         panel.get_by_role("button", name="Collapse all folders", exact=True).click()

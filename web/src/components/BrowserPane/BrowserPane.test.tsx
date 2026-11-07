@@ -21,7 +21,7 @@ vi.mock("@/lib/nativeBridge", () => ({
 // The cookie-import flows report outcomes through toasts; capture them instead
 // of rendering a Toaster.
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }));
-vi.mock("sonner", () => ({ toast }));
+vi.mock("@/lib/notifications", () => ({ toast }));
 
 /**
  * Minimal `window.omnigentDesktop` stub. The empty-state tests only need the

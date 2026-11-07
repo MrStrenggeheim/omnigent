@@ -19,7 +19,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setSessionHost } from "@/lib/sessionHost";
 import { SideChatPane } from "@/components/chat/SideChatPane";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { handleSessionEvent, useChatStore, type ChatState } from "@/store/chatStore";
 import {

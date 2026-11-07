@@ -13,8 +13,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { StrictMode, act, useMemo, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toaster } from "@/components/ui/sonner";
+import { NotificationBell } from "@/components/NotificationCenter";
 import { FileViewerContext, type OpenFileOptions } from "@/shell/FileViewerContext";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import * as host from "@/lib/host";
 import { isHostKeyless, setSessionHost } from "@/lib/sessionHost";
 import { resolveInitialAttachUrl, watchDirectUpgrade } from "@/lib/terminals";
@@ -247,7 +248,7 @@ describe("terminal clipboard", () => {
     copyEvent?: ClipboardEvent,
   ): Promise<void> {
     act(() => terminalSessionMock.instances[terminalIndex].onClipboardRequest?.(text, copyEvent));
-    // Sonner publishes toast updates on the next event-loop turn.
+    // Flush the terminal's clipboard prompt effect.
     await act(async () => {
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 0);
@@ -313,6 +314,24 @@ describe("terminal clipboard", () => {
     await requestClipboardConsent("next text");
     expect(visibleClipboardConsent()).toBeInTheDocument();
     expect(clipboardMock.copyText).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a terminal-only clipboard choice when moving the prompt into history", async () => {
+    await renderClipboardView();
+    render(<NotificationBell />);
+    await requestClipboardConsent("terminal-only selection");
+    uncheckRemember();
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    const center = screen.getByRole("dialog", { name: "Notifications" });
+    expect(within(center).getByRole("checkbox", { name: "Remember my choice" })).not.toBeChecked();
+    fireEvent.click(within(center).getByRole("button", { name: "Allow for this session" }));
+    await waitFor(() =>
+      expect(clipboardMock.copyText).toHaveBeenCalledWith("terminal-only selection"),
+    );
+    expect(readTerminalClipboardPreference()).toBe("ask");
+    await requestClipboard("next selection");
+    await waitFor(() => expect(clipboardMock.copyText).toHaveBeenCalledWith("next selection"));
+    expect(visibleClipboardConsent()).toBeNull();
   });
 
   it("asks before copying browser selections and Copy once does not grant future copies", async () => {
@@ -727,8 +746,8 @@ describe("terminal clipboard", () => {
       .find((prompt) => prompt !== firstPrompt)!;
     expect(within(firstPrompt).getByRole("checkbox")).not.toBeChecked();
     expect(within(secondPrompt).getByRole("checkbox")).toBeChecked();
-    expect(firstPrompt.closest("[data-sonner-toast]")).not.toBe(
-      secondPrompt.closest("[data-sonner-toast]"),
+    expect(firstPrompt.closest("[data-notification-card]")).not.toBe(
+      secondPrompt.closest("[data-notification-card]"),
     );
 
     await requestClipboard("newest first terminal text");
@@ -769,8 +788,8 @@ describe("terminal clipboard", () => {
 
     expect(input).toHaveFocus();
     expect(screen.getByTestId("terminal-view")).not.toContainElement(prompt);
-    expect(prompt.closest("[data-sonner-toaster]")).toHaveAttribute("data-x-position", "right");
-    expect(prompt.closest("[data-sonner-toaster]")).toHaveAttribute("data-y-position", "bottom");
+    expect(prompt.closest("aside")).toHaveClass("right-4");
+    expect(prompt.closest("aside")?.style.bottom).toContain("1rem");
     expect(prompt).toHaveAttribute("role", "region");
     uncheckRemember();
     // Click before Sonner's asynchronous update publishes the new callback.
@@ -783,7 +802,7 @@ describe("terminal clipboard", () => {
     expect(readTerminalClipboardPreference()).toBe("ask");
   });
 
-  it("makes an exiting prompt inert while a different terminal asks for consent", async () => {
+  it("retires an obsolete prompt while a different terminal asks for consent", async () => {
     const view = render(<TerminalView sessionId="conv_abc" terminalId="terminal_bash_s1" />);
     await waitFor(() => expect(terminalSessionMock.instances).toHaveLength(1));
     const oldPrompt = await requestClipboardConsent("old terminal text");
@@ -794,14 +813,13 @@ describe("terminal clipboard", () => {
     await waitFor(() => expect(terminalSessionMock.instances).toHaveLength(2));
     await requestClipboard("new terminal text", 1);
     await waitFor(() =>
-      expect(screen.getAllByTestId("terminal-clipboard-consent")).toHaveLength(2),
+      expect(screen.getAllByTestId("terminal-clipboard-consent")).toHaveLength(1),
     );
     const newPrompt = screen
       .getAllByTestId("terminal-clipboard-consent")
       .find((prompt) => prompt !== oldPrompt)!;
 
-    // Sonner keeps the old controls in the DOM during their exit animation.
-    expect(oldPrompt).toBeInTheDocument();
+    expect(oldPrompt).not.toBeInTheDocument();
     fireEvent.click(oldAllow);
     fireEvent.click(oldDismiss);
     expect(clipboardMock.copyText).not.toHaveBeenCalled();

@@ -1,8 +1,9 @@
 import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toast, Toaster } from "sonner";
-import type * as SonnerModule from "sonner";
+import { toast } from "@/lib/notifications";
+import { Toaster } from "@/components/ui/sonner";
+import type * as SonnerModule from "@/lib/notifications";
 import { ArcaShutdownToast } from "./ArcaShutdownToast";
 import { ArcaShutdownBanner } from "./ArcaShutdownBanner";
 import { useArcaShutdownBanner } from "@/hooks/useArcaShutdownBanner";
@@ -38,7 +39,7 @@ vi.mock("@/hooks/useNow", () => ({
 vi.mock("@/lib/CapabilitiesContext", () => ({ useServerInfo: () => ({}) }));
 vi.mock("@/lib/capabilities", () => ({ isFeatureEnabled: () => state.enabled }));
 vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn() }));
-vi.mock("sonner", async (importOriginal) => {
+vi.mock("@/lib/notifications", async (importOriginal) => {
   const actual = await importOriginal<typeof SonnerModule>();
   const wrapped = ((title: unknown, options?: { id?: string }) => {
     if (options?.id?.startsWith("arca-shutdown:")) state.toastCalls += 1;

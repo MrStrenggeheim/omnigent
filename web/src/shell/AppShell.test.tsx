@@ -298,7 +298,7 @@ import { useSessionAgent } from "@/hooks/useAgents";
 import type { Agent } from "@/hooks/useAgents";
 import { forkSession, getSessionSlim } from "@/lib/sessionsApi";
 import type { Session } from "@/lib/types";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 
 const useSessionAgentMock = vi.mocked(useSessionAgent);
 const forkSessionMock = vi.mocked(forkSession);

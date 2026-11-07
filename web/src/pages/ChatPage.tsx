@@ -83,7 +83,7 @@ import {
   isSessionSharedWithOthers,
 } from "@/lib/permissionsApi";
 import { getCurrentAuthorId } from "@/lib/identity";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { ApiError, createSideChat, retrySession } from "@/lib/sessionsApi";
 import { getProject } from "@/lib/projectsApi";
 import { PROJECT_LABEL_KEY } from "@/lib/sessionListCache";

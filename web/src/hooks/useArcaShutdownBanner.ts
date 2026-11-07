@@ -1,5 +1,5 @@
 import { useEffect, useReducer } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { useHosts } from "@/hooks/useHosts";
 import { useNowSelector } from "@/hooks/useNow";
 import { isArcaHost, readArcaHostId } from "@/lib/arcaHost";

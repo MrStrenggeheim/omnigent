@@ -10,7 +10,7 @@ import { Loader2Icon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTerminalIsDark } from "@/components/theme/useTerminalIsDark";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import {
   isTerminalClipboardWritePending,
   queueTerminalClipboardWrite,

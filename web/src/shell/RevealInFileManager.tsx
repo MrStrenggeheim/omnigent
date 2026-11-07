@@ -5,7 +5,7 @@
 import { FolderOpenIcon } from "lucide-react";
 import { createContext, useContext, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckIcon, ChevronUpIcon, LogOutIcon, PlusIcon, ServerIcon } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

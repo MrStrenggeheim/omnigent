@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "sonner";
+import { toast } from "@/lib/notifications";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarServerPicker } from "./SidebarServerPicker";
 
