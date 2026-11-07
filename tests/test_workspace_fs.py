@@ -646,3 +646,14 @@ def test_search_from_filesystem_root_keeps_paths_intact(monkeypatch: pytest.Monk
     paths = [e["path"] for e in result["data"]]
     assert "etc" in paths, paths
     assert all((Path("/") / p).exists() for p in paths), paths
+
+
+def test_offline_agent_history_is_unavailable_instead_of_git_fallback(tmp_path: Path) -> None:
+    _git_repo(tmp_path)
+    (tmp_path / "committed.txt").write_text("manual Git change\n")
+    reader = WorkspaceReader(tmp_path)
+    with pytest.raises(WorkspaceReaderError) as unavailable:
+        reader.changes("session", source="agent")
+    assert unavailable.value.status == 404
+    assert unavailable.value.code == "agent_history_unavailable"
+    assert reader.changes("session")["data"]

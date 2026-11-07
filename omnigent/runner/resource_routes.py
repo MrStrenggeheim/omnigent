@@ -1314,6 +1314,7 @@ def register_resource_routes(
     async def list_filesystem_changes(
         session_id: str,
         environment_id: str,  # noqa: ARG001
+        source: str = Query(default="session", pattern="^(session|agent)$"),
     ) -> JSONResponse:
         import asyncio as _asyncio
 
@@ -1328,15 +1329,16 @@ def register_resource_routes(
             # Offload to a thread so it never blocks the event loop — a blocked
             # loop can't answer the server's runner-stream relay probe and the
             # session's first turn 503s with runner_unavailable.
-            raw_changes = (
-                await _asyncio.to_thread(
-                    session_registry.list_changed_files,
-                    session_id,
-                    limit=10_000,
+            if session_registry is None:
+                raw_changes = []
+            elif source == "agent":
+                raw_changes = await _asyncio.to_thread(
+                    session_registry.list_agent_changed_files, session_id, limit=10_000
                 )
-                if session_registry is not None
-                else []
-            )
+            else:
+                raw_changes = await _asyncio.to_thread(
+                    session_registry.list_changed_files, session_id, limit=10_000
+                )
         except GitStatusUnavailable as exc:
             return JSONResponse(
                 status_code=500,
@@ -1357,7 +1359,12 @@ def register_resource_routes(
         ]
         return JSONResponse(
             status_code=200,
-            content={"object": "list", "data": data, "has_more": False},
+            content={
+                "object": "list",
+                "data": data,
+                "has_more": False,
+                **({"source": "agent"} if source == "agent" else {}),
+            },
         )
 
     @app.get(

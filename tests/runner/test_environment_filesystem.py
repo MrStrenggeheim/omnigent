@@ -548,6 +548,14 @@ async def test_agent_diff_keeps_last_turn_snapshot_and_reads_current_session_con
                 "coverage": "observed_tools",
                 "turn_id": "t",
             }
+            changes = await client.get(
+                url.replace("agent-diff", "changes"), params={"source": "agent"}
+            )
+            assert changes.status_code == 200, changes.text
+            assert changes.json()["source"] == "agent"
+            assert [(row["path"], row["status"]) for row in changes.json()["data"]] == [
+                ("hello.txt", "modified")
+            ]
             file.write_text("later external edit\n")
             frozen = await client.get(url, params=params)
             assert frozen.status_code == 200, frozen.text

@@ -98,6 +98,7 @@ const DEFAULT_ENVIRONMENT_ID = "default";
 
 interface WorkspaceQueryOptions {
   enabled?: boolean;
+  source?: "agent";
 }
 
 // ── Changed files (flat, registry-backed) ────────────────────────────────────
@@ -236,6 +237,7 @@ export async function isRunnerUnavailable503(res: Response): Promise<boolean> {
 
 interface ChangedFilesResponse {
   object: "list";
+  source?: "agent";
   data: {
     path: string;
     name: string;
@@ -251,12 +253,13 @@ interface ChangedFilesResponse {
 async function fetchWorkspaceChangedFiles(
   conversationId: string,
   signal?: AbortSignal,
+  source?: "agent",
 ): Promise<WorkspaceChangedFilesResult> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/${DEFAULT_ENVIRONMENT_ID}/changes`,
+    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/${DEFAULT_ENVIRONMENT_ID}/changes${source ? "?source=agent" : ""}`,
     { signal },
   );
-  if (res.status === 404) {
+  if (res.status === 404 && source !== "agent") {
     return { available: false, data: [] };
   }
   // The bound runner isn't connected. Throw the typed error so the panel
@@ -280,6 +283,9 @@ async function fetchWorkspaceChangedFiles(
     throw new Error(message);
   }
   const json = (await res.json()) as ChangedFilesResponse;
+  if (source === "agent" && json.source !== "agent") {
+    throw new Error("Update the host to show recorded agent changes separately from Git status.");
+  }
   const data: WorkspaceChangedFile[] = json.data.map((e) => ({
     path: e.path,
     name: e.name,
@@ -313,8 +319,10 @@ export function useWorkspaceChangedFiles(
   const sessionActive = useSessionActive(conversationId);
   useTrailingInvalidate(conversationId, sessionActive, "workspace-changed-files");
   return useQuery({
-    queryKey: ["workspace-changed-files", conversationId],
-    queryFn: ({ signal }) => fetchWorkspaceChangedFiles(conversationId!, signal),
+    queryKey: options.source
+      ? ["workspace-changed-files", conversationId, options.source]
+      : ["workspace-changed-files", conversationId],
+    queryFn: ({ signal }) => fetchWorkspaceChangedFiles(conversationId!, signal, options.source),
     enabled:
       queryEnabled &&
       !!conversationId &&

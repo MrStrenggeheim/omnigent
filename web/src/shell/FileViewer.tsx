@@ -446,7 +446,10 @@ function FileViewerBody({
   const [diffComparison, setDiffComparison] = useState<DiffComparison>(DEFAULT_DIFF_COMPARISON);
   const agentComparison =
     diffComparison.source === "agent" || diffComparison.source === "last-turn";
-  const sessionChanges = useWorkspaceChangedFiles(conversationId, { enabled: agentComparison });
+  const sessionChanges = useWorkspaceChangedFiles(conversationId, {
+    enabled: agentComparison,
+    source: "agent",
+  });
   const gitChanges = useWorkspaceGitChanges(conversationId, {
     path:
       path?.startsWith("/") &&

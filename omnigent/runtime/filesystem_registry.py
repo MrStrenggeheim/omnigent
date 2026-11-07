@@ -617,6 +617,18 @@ class FilesystemRegistry(ABC):
         """Stop any background observers.  Idempotent."""
         return
 
+    def list_agent_changed_files(
+        self, session_id: str, *, limit: int = 10_000
+    ) -> list[dict[str, Any]]:
+        """Return only recorded agent history, including when Git status is clean."""
+        if limit <= 0:
+            return []
+        return [
+            row
+            for row in self.turn_history.list_files(session_id)
+            if not _is_ephemeral(row["path"]) and not _is_harness_plumbing(row["path"])
+        ][:limit]
+
     # ── Concrete: index-backed enumeration (no-op default) ─────────
 
     def list_tracked_files(self, subdir: str = "") -> list[str] | None:
@@ -824,6 +836,47 @@ class AgentEditFilesystemRegistry(FilesystemRegistry):
             }
             for r in records[:limit]
         ]
+
+    def list_agent_changed_files(
+        self, session_id: str, *, limit: int = 10_000
+    ) -> list[dict[str, Any]]:
+        """Merge legacy observations with prospective agent history, with new status winning."""
+        if limit <= 0:
+            return []
+        fresh = super().list_agent_changed_files(session_id)
+        # At most 1,024 session paths can replace or suppress legacy rows.
+        legacy = self.list_changed_files(session_id, limit=limit + 1024)
+        by_path = {
+            row["path"]: {
+                "name": Path(row["path"]).name,
+                "lines_added": None,
+                "lines_removed": None,
+                **row,
+            }
+            for row in legacy
+        }
+        fresh_paths = {row["path"] for row in fresh}
+        for path in list(by_path):
+            if (
+                path not in fresh_paths
+                and self.turn_history.lookup(session_id, path, False) is not None
+            ):
+                del by_path[path]
+        for row in fresh:
+            previous = by_path.get(row["path"], {})
+            by_path[row["path"]] = {
+                **previous,
+                **{
+                    key: value
+                    for key, value in row.items()
+                    if value is not None or key not in previous
+                },
+            }
+        return sorted(
+            by_path.values(),
+            key=lambda row: (row.get("modified_at") or 0, row["path"]),
+            reverse=True,
+        )[:limit]
 
     def get_changed_file(self, session_id: str, path: str) -> dict[str, Any] | None:
         """Return the change record for a single *path*, or ``None``.

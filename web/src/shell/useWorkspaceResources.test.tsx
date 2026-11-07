@@ -49,7 +49,10 @@ it.each([
     directories: [],
     enabled: browse,
   });
-  expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("first", { enabled: false });
+  expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("first", {
+    source: "agent",
+    enabled: false,
+  });
   expect(result.current.showFilesPanel).toBe(browse);
   expect(result.current.changedCount).toBe(1);
   expect(result.current.isChangedPath("notes.md")).toBe(true);
@@ -124,7 +127,10 @@ it("reacts to the shared agent preference and deduplicates Git and agent paths",
   expect(first.result.current.changedCount).toBe(2);
   expect(first.result.current.isChangedPath("agent.ts")).toBe(false);
   act(() => writeFilesPanelPreferences({ showAgentChanges: true }));
-  expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("overlay-b", { enabled: true });
+  expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("overlay-b", {
+    source: "agent",
+    enabled: true,
+  });
   for (const result of [first.result, second.result]) {
     expect(result.current.changedCount).toBe(3);
     expect(result.current.isChangedPath("same.ts")).toBe(true);
@@ -139,6 +145,7 @@ it("keeps legacy discovery disabled without file access even when the overlay is
   writeFilesPanelPreferences({ showAgentChanges: true });
   renderHook(() => useWorkspaceResources({ sessionId: "read-only-counter", permissionLevel: 1 }));
   expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("read-only-counter", {
+    source: "agent",
     enabled: false,
   });
   expect(useWorkspaceGitChanges).toHaveBeenLastCalledWith("read-only-counter", {

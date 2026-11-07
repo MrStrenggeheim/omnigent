@@ -258,3 +258,61 @@ def test_after_image_counts_toward_session_budget_and_is_replaced_not_accumulate
     file.write_text("34")
     history.record("session", "file", "modified")
     assert history.lookup("session", "file", True)["after"] == "34"
+
+
+@pytest.mark.parametrize(
+    ("known", "before", "operations", "expected"),
+    [
+        (True, None, ["created", "modified"], "created"),
+        (True, None, ["created", "deleted"], None),
+        (True, "old", ["deleted"], "deleted"),
+        (True, "", ["deleted", "created"], "modified"),
+        (False, None, ["modified", "created"], "created"),
+        (False, None, ["created", "deleted"], "deleted"),
+    ],
+)
+def test_agent_listing_uses_first_session_baseline_and_last_operation(
+    tmp_path: Path, known: bool, before: str | None, operations: list[str], expected: str | None
+) -> None:
+    history = TurnFileBaselines(tmp_path)
+    for index, operation in enumerate(operations):
+        history.begin("session", str(index))
+        if index == 0:
+            history.capture("session", "dir/file", before, known)
+        history.record("session", "dir/file", operation)
+        history.finish("session")
+    rows = history.list_files("session")
+    assert [row["status"] for row in rows] == ([] if expected is None else [expected])
+    if rows:
+        assert rows[0]["path"] == "dir/file" and rows[0]["name"] == "file"
+        assert rows[0]["lines_added"] is None and rows[0]["lines_removed"] is None
+    assert history.list_files("other-session") == []
+
+
+def test_agent_listing_metadata_is_recorded_and_sorted_without_rechecking_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from omnigent.runtime import turn_file_baselines
+
+    history = TurnFileBaselines(tmp_path)
+    history.begin("session", "one")
+    history.capture("session", "pending", "failed attempt", True)
+    for timestamp, path, text in [
+        (10, "first", "one"),
+        (20, "second", "two"),
+        (30, "first", "new"),
+    ]:
+        (tmp_path / path).write_text(text)
+        monkeypatch.setattr(
+            turn_file_baselines.time, "time", lambda timestamp=timestamp: timestamp
+        )
+        history.record("session", path, "modified")
+    history.finish("session")
+    (tmp_path / "first").write_text("unattributed external edit")
+    rows = history.list_files("session")
+    assert [(row["path"], row["modified_at"], row["bytes"]) for row in rows] == [
+        ("first", 30, 3),
+        ("second", 20, 3),
+    ]
+    rows[0]["status"] = "deleted"
+    assert history.list_files("session")[0]["status"] == "modified"

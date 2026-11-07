@@ -499,7 +499,7 @@ class WorkspaceReader:
             raise WorkspaceReaderError(result.get("status", 500), error["code"], error["message"])
         return result
 
-    def changes(self, session_id: str) -> _WorkspacePayload:
+    def changes(self, session_id: str, source: str = "session") -> _WorkspacePayload:
         """List changed files, mirroring ``list_filesystem_changes``.
 
         Git workspaces report the working-tree diff (``git status``);
@@ -511,6 +511,13 @@ class WorkspaceReader:
         :returns: A list payload of changed-file entries.
         :raises WorkspaceReaderError: 500 when ``git status`` fails.
         """
+        if source == "agent":
+            raise WorkspaceReaderError(
+                404,
+                "agent_history_unavailable",
+                "Recorded agent changes require the session runner. "
+                "Git status remains available while it is offline.",
+            )
         try:
             raw_changes = self._registry.list_changed_files(session_id, limit=10_000)
         except GitStatusUnavailable as exc:

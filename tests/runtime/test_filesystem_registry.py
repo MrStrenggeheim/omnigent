@@ -367,6 +367,73 @@ def test_turn_recording_distinguishes_created_from_missing_preimage(
     assert reg.turn_history.lookup("session", "edited", True)["known"] is False
 
 
+def test_git_agent_listing_survives_commit_and_excludes_unattributed_changes(
+    tmp_path: Path,
+) -> None:
+    env = _git_env()
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, env=env, check=True, capture_output=True)
+    reg = GitFilesystemRegistry(tmp_path, tmp_path)
+    reg.turn_history.begin("session", "one")
+    (tmp_path / "agent.txt").write_text("agent-created")
+    reg.record_change("agent.txt", "created", "session")
+    reg.turn_history.finish("session")
+    subprocess.run(
+        ["git", "add", "agent.txt"], cwd=tmp_path, env=env, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "agent edit"],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    assert reg.list_changed_files("session", limit=10) == []
+    assert [(row["path"], row["status"]) for row in reg.list_agent_changed_files("session")] == [
+        ("agent.txt", "created")
+    ]
+    (tmp_path / "manual.txt").write_text("unattributed")
+    assert [row["path"] for row in reg.list_changed_files("session", limit=10)] == ["manual.txt"]
+    assert [row["path"] for row in reg.list_agent_changed_files("session")] == ["agent.txt"]
+    assert reg.list_agent_changed_files("other") == []
+    assert reg.list_agent_changed_files("session", limit=0) == []
+
+
+def test_non_git_agent_listing_merges_legacy_metadata_with_new_status(tmp_path: Path) -> None:
+    reg = AgentEditFilesystemRegistry(tmp_path)
+    (tmp_path / "legacy.txt").write_text("old observer")
+    reg.record_change("legacy.txt", "modified", "session")
+    (tmp_path / "both.bin").write_bytes(b"\xfflegacy")
+    reg.record_change("both.bin", "created", "session")
+    reg.turn_history.begin("session", "one")
+    reg.record_change("both.bin", "modified", "session")
+    reg.turn_history.finish("session")
+    rows = {row["path"]: row for row in reg.list_agent_changed_files("session")}
+    assert rows["legacy.txt"]["status"] == "modified"
+    assert rows["legacy.txt"]["name"] == "legacy.txt"
+    assert rows["both.bin"]["status"] == "modified"
+    assert rows["both.bin"]["bytes"] == 7
+    assert len(reg.list_agent_changed_files("session", limit=1)) == 1
+    assert {row["path"]: row["status"] for row in reg.list_changed_files("session", limit=10)} == {
+        "legacy.txt": "modified",
+        "both.bin": "created",
+    }
+
+
+@pytest.mark.parametrize("git", [False, True])
+def test_agent_listing_drops_known_create_delete_even_with_legacy_history(
+    tmp_path: Path, git: bool
+) -> None:
+    reg = (
+        GitFilesystemRegistry(tmp_path, tmp_path) if git else AgentEditFilesystemRegistry(tmp_path)
+    )
+    reg.record_change("gone", "modified", "session")
+    reg.turn_history.begin("session", "one")
+    reg.record_change("gone", "created", "session")
+    reg.record_change("gone", "deleted", "session")
+    reg.turn_history.finish("session")
+    assert reg.list_agent_changed_files("session") == []
+
+
 def test_get_baseline_returns_none_when_no_snapshot(tmp_path: Path) -> None:
     """``get_baseline`` returns ``None`` when no snapshot exists and there is no git repo.
 

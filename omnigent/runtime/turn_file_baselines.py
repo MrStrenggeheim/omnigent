@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import stat
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,8 @@ class _File:
     turn_id: str
     operation: str | None = None
     after: _Baseline = field(default_factory=lambda: _Baseline(None, False))
+    bytes: int | None = None
+    modified_at: float | None = None
 
 
 @dataclass
@@ -224,11 +227,49 @@ class TurnFileBaselines:
             if session.content_bytes() + after.size > self._max_session_bytes:
                 after = _Baseline(None, False, reason="after_session_limit")
             entry.after = after
+            entry.bytes = after.size if after.known and after.before is not None else None
+            entry.modified_at = time.time()
             first = session.files.get(norm)
             if first is None and len(session.files) < self._max_paths:
-                session.files[norm] = _File(entry.baseline, turn.turn_id, operation)
+                first = session.files[norm] = _File(entry.baseline, turn.turn_id, operation)
             elif first is not None:
                 first.operation = operation
+            if first is not None:
+                first.bytes = entry.bytes
+                first.modified_at = entry.modified_at
+
+    def list_files(self, session_id: str) -> list[dict[str, Any]]:
+        """List recorded agent mutations, independent of Git or current disk status."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return []
+            records = []
+            for path, entry in session.files.items():
+                status = entry.operation
+                if status is None:
+                    continue
+                if entry.baseline.known:
+                    if entry.baseline.before is None:
+                        if status == "deleted":
+                            continue
+                        status = "created"
+                    else:
+                        status = "deleted" if status == "deleted" else "modified"
+                records.append(
+                    {
+                        "path": path,
+                        "name": Path(path).name,
+                        "status": status,
+                        "bytes": entry.bytes,
+                        "modified_at": entry.modified_at,
+                        "lines_added": None,
+                        "lines_removed": None,
+                    }
+                )
+            return sorted(
+                records, key=lambda row: (row["modified_at"] or 0, row["path"]), reverse=True
+            )
 
     def lookup(self, session_id: str, path: str, last_turn: bool) -> dict[str, Any] | None:
         """Return a baseline only for recorded mutations, never a Git fallback.

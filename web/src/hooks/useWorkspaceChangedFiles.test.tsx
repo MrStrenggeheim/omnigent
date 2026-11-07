@@ -249,6 +249,32 @@ afterEach(() => {
 });
 
 describe("useWorkspaceChangedFiles gating", () => {
+  it.each([true, false])(
+    "keeps agent records distinct from older Git-backed responses: %s",
+    async (supported) => {
+      onlineMock.mockReturnValue(true);
+      fetchMock.mockResolvedValueOnce(environmentResponse()).mockResolvedValueOnce(
+        jsonResponse({
+          object: "list",
+          source: supported ? "agent" : undefined,
+          data: [
+            { path: "agent.txt", name: "agent.txt", status: "modified", bytes: 3, modified_at: 1 },
+          ],
+        }),
+      );
+      const { result } = renderHook(
+        () => useWorkspaceChangedFiles("agent-source", { source: "agent" }),
+        { wrapper: Wrap },
+      );
+      await waitFor(() => expect(result.current.isSuccess || result.current.isError).toBe(true));
+      expect(fetchMock.mock.calls[1][0]).toContain("/changes?source=agent");
+      if (supported) expect(result.current.data?.data[0].path).toBe("agent.txt");
+      else {
+        expect(result.current.error?.message).toContain("Update the host");
+        expect(result.current.data).toBeUndefined();
+      }
+    },
+  );
   it("does not fetch when the runner is offline and the host is also down", async () => {
     onlineMock.mockReturnValue(false);
     hostOnlineMock.mockReturnValue(false);

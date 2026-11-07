@@ -332,6 +332,7 @@ export function FilesPanel({
   );
   const agentQuery = useWorkspaceChangedFiles(conversationId, {
     enabled: showAgentChanges,
+    source: "agent",
   });
   const envQuery = useWorkspaceEnvironment(conversationId, {
     enabled: true,

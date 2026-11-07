@@ -536,7 +536,10 @@ describe("FilesPanel scope (fixed by the caller's Files/Changes tab)", () => {
       directories: [""],
       enabled: true,
     });
-    expect(useAgentChangesMock).toHaveBeenCalledWith("conv_changed_only", { enabled: false });
+    expect(useAgentChangesMock).toHaveBeenCalledWith("conv_changed_only", {
+      source: "agent",
+      enabled: false,
+    });
     expect(useAllFilesMock).toHaveBeenCalledWith("conv_changed_only", { enabled: false }, "");
     expect(useSearchMock).toHaveBeenCalledWith(
       "conv_changed_only",
@@ -602,7 +605,10 @@ describe("Explorer Git and agent overlays", () => {
     });
     expect(screen.getByText("removed.ts")).toBeInTheDocument();
     expect(screen.queryByText("old-session.ts")).not.toBeInTheDocument();
-    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_default_changes", { enabled: false });
+    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_default_changes", {
+      source: "agent",
+      enabled: false,
+    });
     agentRefetch.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Refresh files" }));
     await waitFor(() => expect(gitChangesRefetchMock).toHaveBeenCalledTimes(1));
@@ -636,7 +642,10 @@ describe("Explorer Git and agent overlays", () => {
     expect(screen.getAllByText("session-only.ts")).toHaveLength(2);
     expect(screen.getAllByText("live.ts")).toHaveLength(2);
     expect(screen.getAllByTitle("Modified")).toHaveLength(2);
-    expect(useAgentChangesMock).toHaveBeenCalledWith("git_shared_changes", { enabled: true });
+    expect(useAgentChangesMock).toHaveBeenCalledWith("git_shared_changes", {
+      source: "agent",
+      enabled: true,
+    });
 
     await userEvent.click(screen.getAllByRole("button", { name: "More file actions" })[1]);
     await userEvent.click(
@@ -648,7 +657,10 @@ describe("Explorer Git and agent overlays", () => {
     tree.unmount();
     changes.unmount();
     renderPanel({ conversationId: "git_toggle_remount", files: [] });
-    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_toggle_remount", { enabled: true });
+    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_toggle_remount", {
+      source: "agent",
+      enabled: true,
+    });
   });
 
   it("decorates actual nested files without reconstructing absent change paths", async () => {

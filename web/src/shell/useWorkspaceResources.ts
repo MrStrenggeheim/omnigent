@@ -54,6 +54,7 @@ export function useWorkspaceResources({
   });
   const agentChanges = useWorkspaceChangedFiles(sessionId, {
     enabled: canBrowseWorkspace && showAgentChanges,
+    source: "agent",
   });
   const changedPaths = useMemo(
     () =>

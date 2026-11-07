@@ -3732,7 +3732,7 @@ class HostProcess:
                 order=str(params.get("order", "desc")),
             )
         if op == "changes":
-            return r.changes(session_id)
+            return r.changes(session_id, str(params.get("source", "session")))
         if op == "diff":
             return r.diff(session_id, str(params.get("path", "")))
         if op == "search":

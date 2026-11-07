@@ -83,6 +83,7 @@ def test_git_tracking_ignores_agent_ghosts_and_persists_toggle(
         route.fulfill(
             json={
                 "object": "list",
+                "source": "agent",
                 "data": [
                     {
                         "path": "vanished/dead.txt",

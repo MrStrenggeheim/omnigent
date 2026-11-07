@@ -3007,6 +3007,7 @@ def register_resources_routes(
         request: Request,
         session_id: str,
         environment_id: str,
+        source: str = Query(default="session", pattern="^(session|agent)$"),
     ) -> Any:
         """
         List all files changed since session start (flat, registry-backed).
@@ -3029,8 +3030,9 @@ def register_resources_routes(
             session_id,
             conv,
             op="changes",
-            host_params={},
+            host_params={"source": source} if source == "agent" else {},
             runner_path=path,
+            runner_params={"source": "agent"} if source == "agent" else None,
         )
 
     @file_read_router.get(
