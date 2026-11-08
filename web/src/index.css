@@ -145,20 +145,24 @@
 /* Give iOS Home Screen apps a top colour surface without painting over content. */
 .ios-status-surface {
   display: none;
+  position: fixed;
+  inset: 0 0 auto;
+  height: 11px;
+  z-index: 2147483647;
+  pointer-events: none;
+  background-color: var(--background);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+:root[data-ios-standalone] .ios-status-surface {
+  display: block;
 }
 
 @supports (-webkit-touch-callout: none) {
   @media (display-mode: standalone) {
     .ios-status-surface {
       display: block;
-      position: fixed;
-      inset: 0 0 auto;
-      height: 11px;
-      z-index: 2147483647;
-      pointer-events: none;
-      background-color: var(--background);
-      -webkit-background-clip: text;
-      background-clip: text;
     }
   }
 }
