@@ -545,8 +545,8 @@ def test_side_chat_opens_in_a_drawer_on_mobile(
     # Closing the drawer keeps the side chat; the header menu brings it back.
     drawer.get_by_role("button", name="Close", exact=True).click()
     expect(drawer).to_have_attribute("data-state", "closed")
-    page.get_by_role("button", name="Conversation actions").click()
-    page.get_by_role("menuitem", name="Side chats").click()
+    page.get_by_role("button", name="Open workspace").click()
+    page.get_by_role("tablist", name="Workspace").get_by_role("tab", name="Side chats").click()
     expect(drawer).to_have_attribute("data-state", "open")
     expect(drawer.locator(_ASSISTANT).filter(has_text=side_reply)).to_be_visible()
 

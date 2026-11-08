@@ -19,7 +19,7 @@ Users compare a text file against Git revisions or captured agent edits from the
 - Desktop web and desktop app: select a text file in Workspace → Files or Changes, or follow a file link in chat, then choose Show diff in the file viewer toolbar or its More actions menu when the toolbar is collapsed.
 - Desktop comparison controls: open Diff comparison and choose Git working tree, Last agent turn, Agent changes · session, Commit or Commit range.
 - Commit: enter Commit revision and press Compare; Commit range: enter Base revision and Target revision and press Compare.
-- Phone web and native shell: Conversation actions → Files or Changes opens the drawer; choose a text file to enter the full-screen file viewer, then use Show diff in the toolbar or More actions menu and the same comparison controls.
+- Phone web and native shell: Workspace → Files or Changes opens the drawer; choose a text file to enter the full-screen file viewer, then use Show diff in the toolbar or More actions menu and the same comparison controls.
 - A file link in chat can also open the phone file viewer; an existing link requesting a diff opens that viewer's diff mode.
 - A captured Codex turn summary is also visible in the chat transcript as its turn-level diff card.
 
@@ -36,8 +36,8 @@ Preconditions: follow the isolated [verification environment](skills/verify-omni
 - Selector labels, revision input, source switching, source independence from the Explorer overlay and unavailable-baseline recovery have component coverage in `web/src/shell/DiffComparisonControls.test.tsx`, `web/src/shell/FileViewer.test.tsx` and `web/src/hooks/useFileDiff.test.ts`.
 - Historical comment suppression has component coverage in `web/src/shell/MonacoDiffViewer.test.tsx`.
 - Phone viewer comparison controls have component coverage; browser verification of phone diff comparisons is still outstanding, so the desktop browser result does not prove this entry point.
-- To drive that phone entry point manually, open a temporary text file from Conversation actions → Files, choose Show diff, exercise all five sources and confirm revision inputs and errors remain usable in the full-screen viewer.
-- Repeat from Conversation actions → Changes with a deleted Git text file and from a chat file link; verify the selected comparison remains explicit and historical views offer no line-comment controls.
+- To drive that phone entry point manually, open a temporary text file from Workspace → Files, choose Show diff, exercise all five sources and confirm revision inputs and errors remain usable in the full-screen viewer.
+- Repeat from Workspace → Changes with a deleted Git text file and from a chat file link; verify the selected comparison remains explicit and historical views offer no line-comment controls.
 - For prospective capture, change A to B in one supported-tool turn, finish that turn, edit the file externally to C and verify Last agent turn still shows A to B while Agent changes · session reads current C.
 - For Codex, finish a turn that emits a stored turn diff and select Last agent turn for a file in that patch; verify the raw patch is readable without reconstructing full file contents from its hunks.
 - Select an invalid Git revision or a file with no captured agent baseline, verify the error, then switch sources and confirm the selector remains usable.

@@ -1,3 +1,4 @@
+import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Mobile-only full-screen drawer for right-rail tab content that has no
 // desktop push-panel of its own (Agents, Tasks). On desktop these live as
 // tabs inside the workspace rail; a phone has no room for the rail, so the
@@ -87,6 +88,7 @@ export function MobilePanelDrawer({
       data-collapsed={!open || undefined}
       inert={!open}
     >
+      {open && <MobileWorkspaceTabs />}
       <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-2">
         <h2 className="font-medium text-ui">{title}</h2>
         <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>

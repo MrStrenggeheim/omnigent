@@ -1,3 +1,4 @@
+import { MobileWorkspaceTabs } from "./MobileWorkspace";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -246,7 +247,9 @@ vi.mock("./FilesPanelDrawer", () => ({
       data-testid="files-panel-drawer"
       data-state={open ? "open" : "closed"}
       data-flat-view={String(flatView)}
-    />
+    >
+      {open && <MobileWorkspaceTabs />}
+    </div>
   ),
 }));
 vi.mock("./TerminalsPanel", () => ({
@@ -4052,17 +4055,20 @@ describe("Right-rail tab switching — file viewer close", () => {
 });
 
 describe("Mobile session menu", () => {
-  // The right-rail tabs have no room on a phone, so they're reached from the
-  // header's single kebab, which opens each tab's content as a full-screen
-  // drawer alongside the session actions. jsdom doesn't apply the `md:hidden`
-  // CSS, so the trigger and its items are present regardless of viewport.
+  beforeEach(() => {
+    const original = window.matchMedia;
+    const spy = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      ...original(query),
+      matches: query === "(max-width: 767.98px)",
+    }));
+    onTestFinished(() => spy.mockRestore());
+  });
 
-  /** Open the session-actions dropdown and return its trigger. */
-  function openSessionMenu() {
-    const trigger = screen.getByTestId("session-actions-menu");
-    // Radix DropdownMenu opens on pointerdown, not click.
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-    return trigger;
+  function openWorkspace() {
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+  }
+  function workspaceTab(name: RegExp) {
+    return within(screen.getByRole("tablist", { name: "Workspace" })).getByRole("tab", { name });
   }
 
   it("lists the native session's menu entries (Terminals folds into the pill)", () => {
@@ -4107,16 +4113,20 @@ describe("Mobile session menu", () => {
       error: null,
     });
     renderShell("/c/conv_native");
-    openSessionMenu();
+    openWorkspace();
 
     // Mirror of the desktop rail's tab strip for a native-wrapper session:
     // Files · Agents. Shells is absent because the only terminal is
     // the vendor pane (the pill's Terminal view — excluded from the shell
     // inventory) and the mocked agent declares no terminals. An unexpected
     // Shells entry means the vendor pane leaked into the inventory.
-    expect(screen.getByRole("menuitem", { name: /^Files$/i })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: /Shells/i })).toBeNull();
-    expect(screen.getByRole("menuitem", { name: /Agents/i })).toBeInTheDocument();
+    expect(workspaceTab(/^Files$/i)).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("tablist", { name: "Workspace" })).queryByRole("tab", {
+        name: /Shells/i,
+      }),
+    ).toBeNull();
+    expect(workspaceTab(/Agents/i)).toBeInTheDocument();
   });
 
   it("keeps the Terminals entry in terminal-first SDK sessions (no native wrapper)", () => {
@@ -4142,12 +4152,12 @@ describe("Mobile session menu", () => {
     });
 
     renderShell("/c/conv_native");
-    openSessionMenu();
+    openWorkspace();
 
     // A missing Terminals entry here means the hide gating wrongly keys on
     // `isTerminalFirst` again instead of the native wrapper label.
-    expect(screen.getByRole("menuitem", { name: /^Files$/i })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Shells/i })).toBeInTheDocument();
+    expect(workspaceTab(/^Files$/i)).toBeInTheDocument();
+    expect(workspaceTab(/Shells/i)).toBeInTheDocument();
   });
 
   it("shows the Shells entry on mobile at zero shells when the agent declares shell access", () => {
@@ -4171,11 +4181,11 @@ describe("Mobile session menu", () => {
     } as ReturnType<typeof useSessionAgent>);
 
     renderShell("/c/conv_sdk");
-    openSessionMenu();
+    openWorkspace();
 
-    const shellsEntry = screen.getByRole("menuitem", { name: /^Shells/i });
+    const shellsEntry = workspaceTab(/^Shells/i);
     expect(shellsEntry).toBeInTheDocument();
-    fireEvent.click(shellsEntry);
+    fireEvent.mouseDown(shellsEntry, { button: 0 });
 
     const drawer = screen.getByTestId("shells-panel-drawer");
     expect(drawer).toHaveAttribute("data-state", "open");
@@ -4219,8 +4229,8 @@ describe("Mobile session menu", () => {
     expect(drawer).toHaveAttribute("data-state", "closed");
     expect(within(drawer).queryByTestId("subagents-panel")).toBeNull();
 
-    openSessionMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: /Agents/i }));
+    openWorkspace();
+    fireEvent.mouseDown(workspaceTab(/Agents/i));
 
     // After selecting: drawer open, panel mounted against the active id.
     // Failure: openSubagentsPanel didn't set subagentsPanelOpen, or the
@@ -4243,8 +4253,8 @@ describe("Mobile session menu", () => {
 
     renderShell("/c/conv_abc");
 
-    openSessionMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Files$/i }));
+    openWorkspace();
+    fireEvent.mouseDown(workspaceTab(/^Files$/i));
 
     // Files → drawer open pinned to the full folder tree (flatView=false).
     // Failure: openFilesPanel didn't set filesPanelOpen / the drawer scope.
@@ -4262,8 +4272,8 @@ describe("Mobile session menu", () => {
 
     renderShell("/c/conv_abc");
 
-    openSessionMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Changes$/i }));
+    openWorkspace();
+    fireEvent.mouseDown(workspaceTab(/^Changes$/i));
 
     // Changes → same drawer, pinned to the changed-files-only list
     // (flatView=true). Failure: openChangesPanel didn't set the drawer scope.
@@ -4285,15 +4295,13 @@ describe("Mobile session menu", () => {
 
     renderShell("/c/conv_abc");
 
-    // Radix DropdownMenu opens on pointerdown, not click.
-    fireEvent.pointerDown(screen.getByTestId("session-actions-menu"), {
-      button: 0,
-      ctrlKey: false,
-    });
-    expect(screen.getByRole("menuitem", { name: /Agents\s*1/i })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: /Files/i })).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: /Changes/i })).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: /Shells/i })).toBeNull();
+    openWorkspace();
+    expect(workspaceTab(/^Agents$/i)).toHaveAttribute("aria-selected", "true");
+    expect(
+      within(screen.getByRole("tablist", { name: "Workspace" })).queryByRole("tab", {
+        name: /Files|Changes|Shells/i,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -5241,10 +5249,17 @@ describe("Mobile header actions menu", () => {
 });
 
 describe("Terminal-first shells — opening a shell from the mobile drawer", () => {
-  function openSessionMenu() {
-    const trigger = screen.getByTestId("session-actions-menu");
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-    return trigger;
+  beforeEach(() => {
+    const original = window.matchMedia;
+    const spy = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      ...original(query),
+      matches: query === "(max-width: 767.98px)",
+    }));
+    onTestFinished(() => spy.mockRestore());
+  });
+
+  function openWorkspace() {
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
   }
 
   it("keeps the tapped shell as the terminal-view target", () => {
@@ -5272,8 +5287,12 @@ describe("Terminal-first shells — opening a shell from the mobile drawer", () 
     } as ReturnType<typeof useSessionAgent>);
 
     renderShell("/c/conv_native");
-    openSessionMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Shells/i }));
+    openWorkspace();
+    fireEvent.mouseDown(
+      within(screen.getByRole("tablist", { name: "Workspace" })).getByRole("tab", {
+        name: /^Shells/i,
+      }),
+    );
 
     const drawer = screen.getByTestId("shells-panel-drawer");
     expect(drawer).toHaveAttribute("data-state", "open");

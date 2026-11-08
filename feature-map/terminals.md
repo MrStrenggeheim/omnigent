@@ -54,7 +54,7 @@ with their own terminal retain the switcher.
 
 **User shells:**
 
-- Open a new shell from the workspace rail on desktop, or from the header menu
+- Open a new shell from the workspace rail on desktop, or from Workspace → Shells
   on a phone.
 - Press ⌘/Ctrl+Alt+T to open a shell of the remembered default type. The chord
   is inert while the host is offline, the session is stranded, or a shell is

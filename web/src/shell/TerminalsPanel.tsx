@@ -1,3 +1,4 @@
+import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side panel that hosts the xterm.js views for the
 // conversation's open terminals. Triggered from `SessionRail` (or the
 // mobile FAB).
@@ -175,6 +176,7 @@ export function TerminalsPanel({
         />
       )}
 
+      {open && <MobileWorkspaceTabs />}
       <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-2">
         <h2 className="font-medium text-ui">Shells</h2>
         <div className="flex items-center gap-1">

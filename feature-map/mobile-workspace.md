@@ -1,0 +1,63 @@
+# Mobile workspace navigation
+
+On mobile, a separate **Open workspace** panel icon opens the current session's tools while the **Conversation actions** kebab contains chat actions.
+Workspace drawers and the phone's full-screen file viewer share horizontally scrolling tabs, reuse existing panel contents and lifecycles, and reopen the last selected available workspace page in the current session.
+
+## Sub-features
+
+- `header-split`: separate the workspace panel icon from the chat-actions kebab; workspace navigation remains reachable when no chat actions are available.
+- `tabs`: scroll horizontally through Files, Changes, Search, Shells, Agents, Pull Requests, Side chats and Logs when available for the session.
+- `capabilities`: omit unavailable pages and omit the workspace button when no pages are available, while a session is pending or on the landing composer.
+- `selection`: close and reopen the last selected page in the current session; fall back to the first available page if that page disappears or the session changes.
+- `focus`: selecting a tab opens its page, updates selection and brings the active tab into view; keyboard navigation follows the available tabs.
+- `files`: open Files or Changes, select a file and retain the shared workspace tabs in the phone's full-screen viewer.
+- `dirty-file`: switching workspace tabs from the file viewer uses the existing unsaved-edit confirmation before leaving the file.
+- `empty-shells`: expose Shells and New shell for shell-capable sessions before any user shells exist.
+- `lifecycle`: reuse existing loading, empty, error, permissions, search, terminal, agent, PR, side-chat and log behavior when changing pages.
+
+## How to get to it (user POV)
+
+- Mobile conversation header: tap the **Open workspace** panel icon beside the **Conversation actions** kebab to open the remembered available workspace page.
+- Mobile conversation header: open **Conversation actions** for chat management such as Rename or Archive; workspace pages are reached through the separate panel icon.
+- Workspace drawers: swipe the tab strip horizontally and select **Files**, **Changes**, **Search**, **Shells**, **Agents**, **Pull Requests**, **Side chats** or **Logs** as available; close the drawer and tap **Open workspace** to reopen the selected page.
+- Files or Changes drawer: select a file to open the phone's full-screen file viewer, then use the same workspace tabs to reach another page.
+- Shells drawer: select **Shells**, then **New shell**, including when the session has no user shells yet.
+- Files search actions: open content search from the Files toolbar or a folder's search action and continue navigating with the shared workspace tabs.
+
+## Driving it with the repro environment
+
+Preconditions: use the isolated [verification environment](skills/verify-omnigent/SKILL.md) and follow the [map's baseline and driving conventions](README.md#baseline-preconditions).
+Use a ready session with filesystem access for Files, Changes, Search and Pull Requests, a shell-capable session for the empty-shell case, and suitable session capabilities for Side chats.
+Agents requires a resolved root session; Logs requires debug mode.
+Use widths of 320px, 390px with dark appearance and 700px for the header and drawer journey, below the 768px desktop breakpoint.
+Seed a readable text file for the viewer journey; an empty Changes page in a non-Git workspace does not establish that Files is empty.
+
+- Header split, drawer tabs and reopening: `tests/e2e_ui/mobile/test_mobile_workflow.py::test_mobile_workspace_keeps_chat_actions_separate` covers 320px, 390px dark and 700px widths.
+  Confirm the separate header buttons, Rename in the chat menu, absence of workspace entries from that menu, Files → Changes → Search → Agents navigation, close/reopen on Agents, and navigation to Pull Requests and back to Files.
+- Files drawer to full-screen file viewer: `tests/e2e_ui/mobile/test_mobile_workflow.py::test_mobile_files_drawer_opens_seeded_file` opens the workspace and the seeded file, then checks its name and real content, then switches to Agents and back to Files.
+- Shells drawer before shell creation: `tests/e2e_ui/mobile/test_mobile_workflow.py::test_mobile_shells_drawer_exposes_new_shell_before_shells_exist` checks that Shells and New shell are reachable with zero user shells.
+- Header availability and chat-action separation: `web/src/shell/ChatHeader.test.tsx` covers owner and nonowner menus, workspace access without chat actions, unavailable controls and pending sessions.
+- Shared tab selection, focus, capability changes, session changes and deferred navigation confirmation: `web/src/shell/MobileWorkspace.test.tsx`.
+- Existing drawer routing, page availability and shell entry behavior: `web/src/shell/AppShell.test.tsx`.
+
+For full-screen viewer tab navigation, open the seeded file, confirm the same workspace tabs remain visible, and switch to Changes or Search.
+Reopen the file, edit without saving, and select another workspace tab.
+Confirm that cancelling the unsaved-edit prompt keeps the file and tab selected, then repeat and confirm leaving to reach the requested page.
+This checks the viewer's existing unsaved-file guard; the seeded-file E2E alone does not prove unsaved-edit protection.
+
+For Side chats and Logs, enable their prerequisites, open each through the tab strip and confirm that its existing content appears and closing/reopening returns to it.
+For Files search actions, open search from the toolbar and a folder action, verify the selected search page, then switch to another workspace tab.
+At 320px, swipe to the final available tab and back, checking that tabs remain reachable without widening the page.
+Keep these manual results separate from the automated journeys above and record unmet capability prerequisites.
+
+## Gotchas
+
+- This implements mobile navigation within the selected session; no global host, files or shell scope is implemented.
+- Desktop navigation remains unchanged; phone-width browser checks do not establish desktop behavior.
+- The last-page memory applies to closing and reopening within the current session, not durable restoration across reloads or a history of selections across sessions.
+- Page availability follows existing capabilities and permissions; Search can be disabled, Side chats depends on harness support and Logs appears only in debug mode.
+- The agent's own terminal and user shells retain their existing distinction and lifecycle; the Shells tab does not create a host-owned terminal service.
+- Shared navigation reuses existing panel contents and lifecycles; it does not redefine loading, errors, permissions or persistence for each tool.
+- Switching away from an unsaved file must pass the existing dirty-file guard; tab navigation must not silently discard edits.
+- Some older test names or docstrings still mention kebab workspace entries; follow the current separate Open workspace button and shared tabs.
+- Responsive browser coverage at 320px, 390px dark and 700px is not physical native-device verification; no physical iOS or Android device verification is recorded yet.

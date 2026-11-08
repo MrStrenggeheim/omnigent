@@ -113,6 +113,8 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 ## Features
 
+- [Mobile Workspace](./mobile-workspace.md) covers the separate chat menu and Workspace button, shared tool tabs and remembered mobile navigation.
+
 - [Notifications](./notifications.md) covers shared popups, retained history, required prompts, archive recovery and transfer activity from conversation, file-viewer and Files drawer bells.
 
 - [Workspace Explorer](./workspace-explorer.md) covers file operations, transfers, selection, recovery, Git status and the optional agent-change overlay on desktop and mobile within the selected session.

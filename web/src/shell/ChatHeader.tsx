@@ -1,14 +1,9 @@
 import {
   ArrowLeftIcon,
-  BotIcon,
   EllipsisVerticalIcon,
-  FileIcon,
   FolderPlusIcon,
-  GitCompareIcon,
   GitForkIcon,
-  GitPullRequestIcon,
   InfoIcon,
-  ListIcon,
   Maximize2Icon,
   MessagesSquareIcon,
   PanelLeftIcon,
@@ -46,72 +41,16 @@ import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useOmnigentAnalytics } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { MOBILE_GLASS_SURFACE } from "./mobileGlass";
-import { TAB_BADGE_BASE } from "./railTabs";
+import { MobileWorkspaceButton } from "./MobileWorkspace";
 import { TerminalSplitControls } from "./TerminalSplitControls";
 import { ViewModeMenuItems, ViewModeToggle } from "./ViewModeToggle";
 import { SidebarOpenButton } from "./SidebarOpenButton";
 
 const RIGHT_PANEL_KEYS = [MOD_KEY, ALT_KEY, "]"] as const;
 
-/**
- * Gating flags + handlers for the mobile workspace-rail entries (Files ·
- * Changes · Agents · Shells · Logs), which ride in the header's single kebab.
- * Folded into one object because the block is a self-contained unit never read
- * by the desktop action row — keeping it grouped halves ChatHeader's
- * top-level prop count.
- */
 interface MobileSessionMenuProps {
-  /** True while the desktop file viewer is open (suppresses the entries). */
-  fileViewerOpen: boolean;
-  /** True while a terminals/exec-logs push panel owns the right side. */
-  panelOpen: boolean;
-  /** Terminal-first session — terminal renders inline, entries stay available. */
+  /** The chat menu also exposes the agent's Chat/Terminal view switch. */
   terminalFirst: boolean;
-  /** True while the execution-logs push panel is open. */
-  executionLogsOpen: boolean;
-  /** True while the mobile files drawer is open. */
-  filesPanelOpen: boolean;
-  /** True while the mobile agents drawer is open. */
-  subagentsPanelOpen: boolean;
-  /** True while the mobile shells drawer is open. */
-  shellsPanelOpen: boolean;
-  /** Hide the Shells entry (claude-native sub-agents only). */
-  hideTerminalsTab: boolean;
-  /** Whether the Shells entry is available. */
-  showShellsTab: boolean;
-  /** Number of open terminals (entry badge). */
-  terminalsLength: number;
-  /** Debug mode — surfaces the Logs entry. */
-  debugMode: boolean;
-  /** Changed-file count (Files entry badge). */
-  changedCount: number;
-  /** Working child-agent count (Agents entry badge). */
-  subagentsWorking: number;
-  /**
-   * Total agents in the session tree, main agent included (Agents
-   * entry badge) — starts at 1 for a lone agent.
-   */
-  agentCount: number;
-  /** Open the mobile files drawer (full folder tree). */
-  onOpenFiles: () => void;
-  /** Open the mobile files drawer pinned to the changed-files list. */
-  onOpenChanges: () => void;
-  /** Open the mobile shells drawer. */
-  onOpenShells: () => void;
-  /** Open the mobile agents drawer. */
-  onOpenSubagents: () => void;
-  /** True while the mobile Pull Requests drawer is open. */
-  githubPanelOpen: boolean;
-  /** Open the mobile Pull Requests drawer. */
-  onOpenGithub: () => void;
-  /** True while the mobile side-chats drawer is open. */
-  sideChatsPanelOpen: boolean;
-  /** Whether the session's harness supports side chats. */
-  showSideChats: boolean;
-  /** Open the mobile side-chats drawer. */
-  onOpenSideChats: () => void;
-  /** Open the main execution-log push panel. */
-  onOpenMainExecutionLog: () => void;
 }
 
 /**
@@ -310,14 +249,8 @@ function PendingHeaderActions({ isMobile }: { isMobile: boolean }) {
  * terminal-first via ``pt-14``). Left slot: open-sidebar + a conversation
  * breadcrumb (``[folder] / <title> [/ <sub-agent>]``, with the session-actions
  * kebab on desktop and a "Move to…" project picker on the folder tag). Right
- * slot: desktop action buttons (Agent info ·
- * Share · right-panel toggle) and, on mobile, a **single** kebab holding both
- * the session actions (pin/share/rename/project/archive/delete) and the
- * workspace-rail entries that open Files · Agents · Shells as full-screen
- * drawers — one trigger rather than two adjacent ones. It falls back to a
- * smaller Share · Agent info + rail menu when the session isn't
- * owner-managed. Stop session lives in the sidebar row's kebab menu; Clone
- * lives on each assistant message's "Fork from here" action (ChatPage).
+ * slot: desktop action buttons and, on phones, separate Workspace and chat-actions controls.
+ * Workspace opens the shared tab navigation; the kebab contains only chat actions.
  *
  * All state lives in AppShell — this is a pure presentational component.
  */
@@ -346,7 +279,6 @@ export function ChatHeader({
   hasAgentInfo,
   onAgentInfo,
   hasHeaderMenu,
-  showFilesPanel,
   hasRailContent,
   rightPanelOpen,
   onToggleRightPanel,
@@ -356,119 +288,6 @@ export function ChatHeader({
   const isMobile = useIsMobileViewport();
   const canvas = useCanvasWorkspace();
   const { trackClick } = useOmnigentAnalytics();
-  // Workspace-rail entries (Files · Changes · Agents · Shells · Logs), each
-  // opening the matching rail tab as a full-screen drawer. Mobile only: they
-  // ride in the header's single kebab rather than a second trigger of their
-  // own. Suppressed while a push panel already owns the right side — except in
-  // a terminal-first session, where `panelOpen` means the terminal renders
-  // inline in main and no drawer is mounted.
-  const workspaceItems =
-    conversationId &&
-    !pending &&
-    !mobileMenu.fileViewerOpen &&
-    (!mobileMenu.panelOpen || mobileMenu.terminalFirst) &&
-    !mobileMenu.executionLogsOpen &&
-    !mobileMenu.filesPanelOpen &&
-    !mobileMenu.subagentsPanelOpen &&
-    !mobileMenu.shellsPanelOpen &&
-    !mobileMenu.githubPanelOpen &&
-    !mobileMenu.sideChatsPanelOpen &&
-    (hasRailContent || mobileMenu.debugMode) ? (
-      <>
-        {showFilesPanel && (
-          <DropdownMenuItem
-            onSelect={mobileMenu.onOpenFiles}
-            className="gap-2.5 px-2.5 py-2 text-ui"
-          >
-            <FileIcon className="size-4" />
-            Files
-          </DropdownMenuItem>
-        )}
-        {showFilesPanel && (
-          <DropdownMenuItem
-            onSelect={mobileMenu.onOpenChanges}
-            className="gap-2.5 px-2.5 py-2 text-ui"
-          >
-            <GitCompareIcon className="size-4" />
-            Changes
-            {mobileMenu.changedCount > 0 && (
-              <span className={cn(TAB_BADGE_BASE, "ml-auto bg-muted text-muted-foreground")}>
-                {mobileMenu.changedCount}
-              </span>
-            )}
-          </DropdownMenuItem>
-        )}
-        {showFilesPanel && (
-          <DropdownMenuItem
-            onSelect={mobileMenu.onOpenGithub}
-            className="gap-2.5 px-2.5 py-2 text-ui"
-          >
-            <GitPullRequestIcon className="size-4" />
-            Pull Requests
-          </DropdownMenuItem>
-        )}
-        {/* Agents — always present (the panel lists at least
-            the main agent); the badge counts the whole tree,
-            main agent included. */}
-        <DropdownMenuItem
-          onSelect={mobileMenu.onOpenSubagents}
-          className="gap-2.5 px-2.5 py-2 text-ui"
-        >
-          <BotIcon className="size-4" />
-          Agents
-          <span
-            className={cn(
-              TAB_BADGE_BASE,
-              "ml-auto",
-              mobileMenu.subagentsWorking > 0
-                ? "bg-success/15 text-success"
-                : "bg-muted text-muted-foreground",
-            )}
-          >
-            {mobileMenu.subagentsWorking > 0
-              ? `${mobileMenu.subagentsWorking}/${mobileMenu.agentCount}`
-              : mobileMenu.agentCount}
-          </span>
-        </DropdownMenuItem>
-        {mobileMenu.showSideChats && (
-          <DropdownMenuItem
-            onSelect={mobileMenu.onOpenSideChats}
-            className="gap-2.5 px-2.5 py-2 text-ui"
-          >
-            <MessagesSquareIcon className="size-4" />
-            Side chats
-          </DropdownMenuItem>
-        )}
-        {/* Shells — the mobile entry into the session's shells
-            (desktop has no Shells tab; it opens shells as soft tabs):
-            visible when a real shell exists, or when the agent spec
-            declares shell access so the empty-state "+ New shell"
-            affordance is reachable on mobile too. */}
-        {!mobileMenu.hideTerminalsTab && mobileMenu.showShellsTab && (
-          <DropdownMenuItem
-            onSelect={mobileMenu.onOpenShells}
-            className="gap-2.5 px-2.5 py-2 text-ui"
-          >
-            <TerminalIcon className="size-4" />
-            Shells
-            {mobileMenu.terminalsLength > 0 && (
-              <span className={cn(TAB_BADGE_BASE, "ml-auto bg-muted text-muted-foreground")}>
-                {mobileMenu.terminalsLength}
-              </span>
-            )}
-          </DropdownMenuItem>
-        )}
-        {mobileMenu.debugMode && (
-          <DropdownMenuItem
-            onSelect={mobileMenu.onOpenMainExecutionLog}
-            className="gap-2.5 px-2.5 py-2 text-ui"
-          >
-            <ListIcon className="size-4" />
-            Logs
-          </DropdownMenuItem>
-        )}
-      </>
-    ) : null;
   const showShare = !pending && canShare;
   // Session actions (pin/share/rename/project/archive/delete). Desktop hangs
   // them off the breadcrumb title; mobile puts the kebab in the right-hand
@@ -490,7 +309,6 @@ export function ChatHeader({
         hasAgentInfo={isMobile && hasAgentInfo}
         onAgentInfo={onAgentInfo}
         viewItems={isMobile ? <ViewModeMenuItems /> : null}
-        workspaceItems={isMobile ? workspaceItems : null}
       />
     ) : null;
   // Slack-style "Move to…" shortcut on the breadcrumb's folder tag: click it to
@@ -658,11 +476,9 @@ export function ChatHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {/* Fallback mobile kebab for sessions with no owner-managed menu.
-            It carries Fork, Share, Agent info, and the workspace-rail entries
-            so a phone still needs only one trigger. */}
+        {/* Chat actions for sessions without an owner-managed menu. */}
         {!pending &&
-          (hasHeaderMenu || workspaceItems || canFork || (isMobile && mobileMenu.terminalFirst)) &&
+          (hasHeaderMenu || canFork || (isMobile && mobileMenu.terminalFirst)) &&
           (!actionConversation || !isMobile) && (
             // Non-modal on mobile: modal mode's body-wide pointer-events:none
             // makes the menu the sole touch target, so touch-target adjustment
@@ -741,8 +557,6 @@ export function ChatHeader({
                     Agent info
                   </DropdownMenuItem>
                 )}
-                {hasHeaderMenu && workspaceItems && <DropdownMenuSeparator />}
-                {workspaceItems}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -815,6 +629,7 @@ export function ChatHeader({
             </TooltipContent>
           </Tooltip>
         )}
+        {!pending && conversationId && <MobileWorkspaceButton />}
         {/* Mobile-only session-actions kebab, rightmost in the cluster. Same
             menu the desktop breadcrumb hangs off its title. */}
         {isMobile && conversationMenu}

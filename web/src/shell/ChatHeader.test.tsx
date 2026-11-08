@@ -10,6 +10,7 @@ import type { Conversation } from "@/hooks/useConversations";
 import type * as NativeBridgeModule from "@/lib/nativeBridge";
 import { setOmnigentHostConfig } from "@/lib/host";
 import { ChatHeader } from "./ChatHeader";
+import { MobileWorkspaceProvider, type MobileWorkspaceTab } from "./MobileWorkspace";
 import {
   TerminalFirstContextProvider,
   type TerminalFirstContextValue,
@@ -34,9 +35,8 @@ vi.mock("@/lib/nativeBridge", async (importOriginal) => {
   };
 });
 
-// Minimal mobile-menu prop block. All gating booleans are false / counts are
-// zero so the mobile FAB and three-dot menu never render — these tests only
-// care about the left-slot open-sidebar toggle.
+// Legacy shell inputs supply workspace context only in this test harness.
+// Production AppShell constructs the provider's tabs directly.
 const mobileMenu = {
   fileViewerOpen: false,
   panelOpen: false,
@@ -92,43 +92,74 @@ function renderHeader(props: {
   settingsMode?: boolean;
 }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const menu = props.mobileMenu ?? mobileMenu;
+  const tabs: MobileWorkspaceTab[] = [];
+  const addTab = (id: string, label: string, open: () => void) =>
+    tabs.push({ id, label, icon: null, open });
+  if (props.conversationId && props.hasRailContent !== false && !props.pending) {
+    if (props.showFilesPanel) {
+      addTab("files", "Files", menu.onOpenFiles);
+      addTab("changes", "Changes", menu.onOpenChanges);
+    }
+    if (!menu.hideTerminalsTab && (menu.showShellsTab || menu.terminalsLength > 0))
+      addTab("shells", "Shells", menu.onOpenShells);
+    if (menu.agentCount > 0) addTab("agents", "Agents", menu.onOpenSubagents);
+    if (props.showFilesPanel) addTab("github", "Pull Requests", menu.onOpenGithub);
+    if (menu.showSideChats) addTab("sidechats", "Side chats", menu.onOpenSideChats);
+    if (menu.debugMode) addTab("logs", "Logs", menu.onOpenMainExecutionLog);
+  }
+  const active = menu.filesPanelOpen
+    ? "files"
+    : menu.subagentsPanelOpen
+      ? "agents"
+      : menu.shellsPanelOpen || (menu.panelOpen && !menu.terminalFirst)
+        ? "shells"
+        : menu.githubPanelOpen
+          ? "github"
+          : menu.sideChatsPanelOpen
+            ? "sidechats"
+            : menu.executionLogsOpen
+              ? "logs"
+              : null;
   return render(
     <MemoryRouter initialEntries={["/"]}>
       <QueryClientProvider client={qc}>
         <TooltipProvider>
-          <ChatHeader
-            sidebarOpen={props.sidebarOpen}
-            onOpenSidebar={props.onOpenSidebar ?? (() => {})}
-            settingsMode={props.settingsMode}
-            isChildSession={props.isChildSession ?? false}
-            subAgentName={props.subAgentName ?? null}
-            // Defaults to no active session: PresenceAvatars / AgentInfoButton /
-            // right-panel toggle / rail entries all gate on conversationId and
-            // stay unmounted, isolating the left-slot affordances under test.
-            conversationId={props.conversationId}
-            actionConversation={props.actionConversation}
-            conversationTitle={props.conversationTitle ?? null}
-            projectName={props.projectName ?? null}
-            titleLinkTo={props.titleLinkTo}
-            boundAgent={props.boundAgent}
-            wrapperLabel={props.wrapperLabel ?? null}
-            canShare={props.canShare ?? false}
-            canFork={props.canFork ?? false}
-            forkDisabledReason={props.forkDisabledReason}
-            shareDisabled={props.shareDisabled}
-            shareDisabledReason={props.shareDisabledReason}
-            onShare={() => {}}
-            onFork={props.onFork ?? (() => {})}
-            hasAgentInfo={props.hasAgentInfo ?? false}
-            onAgentInfo={() => {}}
-            hasHeaderMenu={props.hasHeaderMenu ?? false}
-            showFilesPanel={props.showFilesPanel ?? false}
-            hasRailContent={props.hasRailContent ?? true}
-            rightPanelOpen={props.rightPanelOpen ?? false}
-            onToggleRightPanel={() => {}}
-            pending={props.pending}
-            mobileMenu={props.mobileMenu ?? mobileMenu}
-          />
+          <MobileWorkspaceProvider sessionId={props.conversationId} tabs={tabs} active={active}>
+            <ChatHeader
+              sidebarOpen={props.sidebarOpen}
+              onOpenSidebar={props.onOpenSidebar ?? (() => {})}
+              settingsMode={props.settingsMode}
+              isChildSession={props.isChildSession ?? false}
+              subAgentName={props.subAgentName ?? null}
+              // Defaults to no active session: PresenceAvatars / AgentInfoButton /
+              // right-panel toggle / rail entries all gate on conversationId and
+              // stay unmounted, isolating the left-slot affordances under test.
+              conversationId={props.conversationId}
+              actionConversation={props.actionConversation}
+              conversationTitle={props.conversationTitle ?? null}
+              projectName={props.projectName ?? null}
+              titleLinkTo={props.titleLinkTo}
+              boundAgent={props.boundAgent}
+              wrapperLabel={props.wrapperLabel ?? null}
+              canShare={props.canShare ?? false}
+              canFork={props.canFork ?? false}
+              forkDisabledReason={props.forkDisabledReason}
+              shareDisabled={props.shareDisabled}
+              shareDisabledReason={props.shareDisabledReason}
+              onShare={() => {}}
+              onFork={props.onFork ?? (() => {})}
+              hasAgentInfo={props.hasAgentInfo ?? false}
+              onAgentInfo={() => {}}
+              hasHeaderMenu={props.hasHeaderMenu ?? false}
+              showFilesPanel={props.showFilesPanel ?? false}
+              hasRailContent={props.hasRailContent ?? true}
+              rightPanelOpen={props.rightPanelOpen ?? false}
+              onToggleRightPanel={() => {}}
+              pending={props.pending}
+              mobileMenu={{ terminalFirst: menu.terminalFirst }}
+            />
+          </MobileWorkspaceProvider>
         </TooltipProvider>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -580,7 +611,7 @@ function renderHeaderWithSession(
       hasRailContent={false}
       rightPanelOpen={false}
       onToggleRightPanel={() => {}}
-      mobileMenu={mobileMenu}
+      mobileMenu={{ terminalFirst: false }}
       {...overrides}
     />
   );
@@ -668,7 +699,7 @@ describe("ChatHeader — floating mobile controls", () => {
     isMobileMock.mockReturnValue(true);
     renderHeaderWithSession(makeTerminalFirstCtx(), {
       // terminalFirst surfaces the fallback kebab even without other actions.
-      mobileMenu: { ...mobileMenu, terminalFirst: true },
+      mobileMenu: { terminalFirst: true },
     });
 
     // The segmented track is gone on mobile.
@@ -903,9 +934,7 @@ describe("ChatHeader — title-adjacent conversation actions", () => {
     expect(onFork).not.toHaveBeenCalled();
   });
 
-  it("folds the workspace-rail entries into the one mobile kebab", () => {
-    // Previously a second `PanelRight` trigger sat beside the kebab; the rail
-    // entries now ride in the same menu, so a phone has a single trigger.
+  it("keeps the owner kebab limited to chat actions beside a separate Workspace button", () => {
     isMobileMock.mockReturnValue(true);
     renderHeader({
       sidebarOpen: true,
@@ -914,12 +943,20 @@ describe("ChatHeader — title-adjacent conversation actions", () => {
       actionConversation: conversation,
       hasRailContent: true,
       showFilesPanel: true,
+      mobileMenu: {
+        ...mobileMenu,
+        showShellsTab: true,
+        showSideChats: true,
+        debugMode: true,
+      },
     });
 
-    expect(screen.queryByRole("button", { name: "Open session menu" })).toBeNull();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Conversation actions" }), {
-      button: 0,
-    });
+    const workspace = screen.getByRole("button", { name: "Open workspace" });
+    const actions = screen.getByRole("button", { name: "Conversation actions" });
+    expect(workspace).toHaveClass("size-11", "md:hidden");
+    expect(workspace.parentElement).toBe(actions.parentElement);
+    expect(actions.parentElement?.lastElementChild).toBe(actions);
+    fireEvent.pointerDown(actions, { button: 0 });
 
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
       "Pin",
@@ -927,106 +964,114 @@ describe("ChatHeader — title-adjacent conversation actions", () => {
       "Rename",
       "Mark as unread",
       "Add to project",
-      "Files",
-      "Changes",
-      "Pull Requests",
-      "Agents1",
       "Archive",
       "Delete",
     ]);
   });
 
-  it("routes a rail entry from the kebab to its drawer", () => {
+  it("opens the Files drawer directly from Workspace", () => {
     const onOpenFiles = vi.fn();
     isMobileMock.mockReturnValue(true);
     renderHeader({
       sidebarOpen: true,
       conversationId: conversation.id,
-      conversationTitle: conversation.title,
       actionConversation: conversation,
-      hasRailContent: true,
       showFilesPanel: true,
       mobileMenu: { ...mobileMenu, onOpenFiles },
     });
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Conversation actions" }), {
-      button: 0,
-    });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Files" }));
-    expect(onOpenFiles).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+
+    expect(onOpenFiles).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("opens the side-chats drawer from the kebab when the harness supports it", () => {
+  it("opens Side chats when it is the only available workspace tab", () => {
     const onOpenSideChats = vi.fn();
     isMobileMock.mockReturnValue(true);
     renderHeader({
       sidebarOpen: true,
       conversationId: conversation.id,
-      conversationTitle: conversation.title,
-      actionConversation: conversation,
-      hasRailContent: true,
-      mobileMenu: { ...mobileMenu, showSideChats: true, onOpenSideChats },
+      mobileMenu: { ...mobileMenu, agentCount: 0, showSideChats: true, onOpenSideChats },
     });
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Conversation actions" }), {
-      button: 0,
-    });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Side chats" }));
-    expect(onOpenSideChats).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+
+    expect(onOpenSideChats).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("session-actions-menu")).toBeNull();
   });
 
-  it("hides the side-chats entry for a harness without side chat", () => {
+  it("keeps the nonowner fallback menu limited to chat actions", () => {
     isMobileMock.mockReturnValue(true);
     renderHeader({
       sidebarOpen: true,
       conversationId: conversation.id,
-      conversationTitle: conversation.title,
-      actionConversation: conversation,
-      hasRailContent: true,
-      mobileMenu: { ...mobileMenu, showSideChats: false },
+      actionConversation: null,
+      canShare: true,
+      canFork: true,
+      hasHeaderMenu: true,
+      hasAgentInfo: true,
+      showFilesPanel: true,
+      mobileMenu: { ...mobileMenu, showShellsTab: true, showSideChats: true, debugMode: true },
     });
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Conversation actions" }), {
-      button: 0,
-    });
-    expect(screen.queryByRole("menuitem", { name: "Side chats" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Open workspace" })).toBeEnabled();
+    fireEvent.pointerDown(screen.getByTestId("session-actions-menu"), { button: 0 });
+
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
+      "Fork",
+      "Share",
+      "Agent info",
+    ]);
   });
 
-  it("keeps the rail entries reachable when the session isn't owner-managed", () => {
-    // No owner menu and nothing else to offer: the fallback kebab must still
-    // render, or the drawers have no mobile entry point at all.
+  it("keeps Workspace reachable without an owner menu or other chat actions", () => {
+    const onOpenFiles = vi.fn();
     isMobileMock.mockReturnValue(true);
     renderHeader({
       sidebarOpen: true,
       conversationId: conversation.id,
-      conversationTitle: conversation.title,
       actionConversation: null,
       hasHeaderMenu: false,
-      hasRailContent: true,
       showFilesPanel: true,
+      mobileMenu: { ...mobileMenu, onOpenFiles },
     });
 
-    fireEvent.pointerDown(screen.getByTestId("session-actions-menu"), { button: 0 });
-    expect(screen.getByRole("menuitem", { name: "Files" })).toBeInTheDocument();
+    expect(screen.queryByTestId("session-actions-menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+    expect(onOpenFiles).toHaveBeenCalledOnce();
   });
 
-  it("drops the rail entries while a push panel owns the right side", () => {
+  it("keeps Workspace expanded while its drawer is open", () => {
     isMobileMock.mockReturnValue(true);
     renderHeader({
       sidebarOpen: true,
       conversationId: conversation.id,
-      conversationTitle: conversation.title,
       actionConversation: conversation,
-      hasRailContent: true,
       showFilesPanel: true,
       mobileMenu: { ...mobileMenu, filesPanelOpen: true },
     });
 
+    expect(screen.getByRole("button", { name: "Open workspace" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
     fireEvent.pointerDown(screen.getByRole("button", { name: "Conversation actions" }), {
       button: 0,
     });
     expect(screen.queryByRole("menuitem", { name: "Files" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Pin" })).toBeInTheDocument();
+  });
+
+  it.each([
+    { name: "landing composer", mobile: true },
+    { name: "pending session", mobile: true, conversationId: "temp:1", pending: true },
+    { name: "no available tabs", mobile: true, conversationId: "conv-1", hasRailContent: false },
+  ])("omits the mobile Workspace button on $name", ({ mobile, ...props }) => {
+    isMobileMock.mockReturnValue(mobile);
+    renderHeader({ sidebarOpen: true, ...props });
+
+    expect(screen.queryByRole("button", { name: "Open workspace" })).toBeNull();
   });
 
   it("does not add a management menu to a sub-agent breadcrumb", () => {

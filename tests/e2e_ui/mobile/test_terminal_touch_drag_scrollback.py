@@ -169,12 +169,10 @@ def test_touch_drag_scrolls_terminal_scrollback(
 
         # Step 2: header kebab → Shells → "New shell". On a phone the header
         # carries one kebab (owner menu, else the fallback session menu).
-        kebab = page.get_by_test_id("header-conversation-actions").or_(
-            page.get_by_test_id("session-actions-menu")
-        )
-        expect(kebab).to_be_visible(timeout=60_000)
-        kebab.click()
-        page.get_by_role("menuitem", name="Shells").click()
+        page.get_by_role("button", name="Open workspace").click()
+        page.get_by_role("tablist", name="Workspace").get_by_role(
+            "tab", name="Shells", exact=True
+        ).click()
         drawer = page.get_by_test_id("shells-panel-drawer")
         expect(drawer).to_be_visible(timeout=10_000)
         drawer.get_by_role("button", name="New shell").click()

@@ -115,8 +115,7 @@ def test_git_tracking_ignores_agent_ghosts_and_persists_toggle(
         page.goto(f"{base}/c/{session_id}?view=explore")
         panel = page.get_by_role("complementary", name="Workspace")
         if mobile:
-            page.get_by_role("button", name="Conversation actions").click()
-            page.get_by_role("menuitem", name="Files", exact=True).click()
+            page.get_by_role("button", name="Open workspace").click()
             panel = page.get_by_test_id("files-panel-drawer")
         expect(_entry(panel, prefix)).to_be_visible(timeout=30_000)
         expect(_entry(panel, "vanished")).to_have_count(0)
@@ -165,8 +164,7 @@ def test_git_tracking_ignores_agent_ghosts_and_persists_toggle(
         )
         page.reload()
         if mobile:
-            page.get_by_role("button", name="Conversation actions").click()
-            page.get_by_role("menuitem", name="Files", exact=True).click()
+            page.get_by_role("button", name="Open workspace").click()
         panel.get_by_role("button", name="More file actions", exact=True).click()
         expect(
             page.get_by_role("menuitemcheckbox", name="Show agent changes", exact=True)

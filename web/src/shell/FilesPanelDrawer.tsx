@@ -1,3 +1,4 @@
+import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side push panel that hosts the working-folder file tree.
 // Triggered from `SessionRail`'s files card (or the mobile FAB).
 //
@@ -102,6 +103,7 @@ export function FilesPanelDrawer({
           className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
         />
       )}
+      {open && <MobileWorkspaceTabs />}
       {/* FilesPanel switches to its full-screen layout when `onClose`
           is set: it owns the header (title + X close button) and
           fills the parent's height. Mount it only while open so the

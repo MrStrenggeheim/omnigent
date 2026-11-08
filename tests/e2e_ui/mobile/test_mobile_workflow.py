@@ -7,10 +7,10 @@ tests run a real browser at a 390×844 (phone) viewport and assert the
 behaviors only real CSS can produce:
 
   - the desktop workspace rail (``md:flex``) is collapsed off-screen;
-  - the header's session kebab is the one navigation entry point;
+  - chat actions and workspace navigation use separate header buttons;
   - the desktop right-panel toggle (``hidden md:inline-flex``) is gone;
   - each rail surface (Changes/Files/Agents) is reachable through the
-    kebab and opens a full-screen drawer;
+    Workspace tabs and opens a full-screen drawer;
   - the chat composer is usable and streams a response on a phone.
 
 Files are seeded via the filesystem PUT endpoint so the navigation
@@ -70,15 +70,7 @@ def test_mobile_collapses_rail_and_surfaces_kebab(
     page: Page,
     seeded_session: tuple[str, str],
 ) -> None:
-    """At a phone width the rail is hidden and the header kebab replaces it.
-
-    Proves the responsive layout swap that jsdom can't: the desktop
-    workspace ``aside`` (``hidden md:flex``) must not be visible, the
-    header's session kebab must be — as the *only* trigger, carrying both
-    the session actions and the rail entries — and the desktop-only
-    right-panel collapse toggle (``hidden md:inline-flex``) must be absent
-    from the viewport.
-    """
+    """Phone layout exposes separate chat and workspace controls."""
     base_url, session_id = seeded_session
     page.set_viewport_size(_MOBILE_VIEWPORT)
     page.goto(f"{base_url}/c/{session_id}")
@@ -94,8 +86,7 @@ def test_mobile_collapses_rail_and_surfaces_kebab(
 
     # Kebab present; desktop right-panel toggle present-but-hidden.
     expect(page.get_by_role("button", name="Conversation actions")).to_be_visible()
-    # Exactly one trigger on a phone — the rail entries were folded into the
-    # kebab, so the old PanelRight FAB must be gone.
+    expect(page.get_by_role("button", name="Open workspace")).to_be_visible()
     expect(page.get_by_role("button", name="Open session menu")).to_have_count(0)
     expect(
         page.locator(
@@ -151,41 +142,74 @@ def mobile_session_with_child_agent(
         )
 
 
-def test_mobile_kebab_lists_file_surfaces_and_omits_absent_ones(
+@pytest.mark.parametrize(
+    "width,dark", [(320, False), (390, True), (700, False)], ids=["small", "phone-dark", "tablet"]
+)
+def test_mobile_workspace_keeps_chat_actions_separate(
     page: Page,
     seeded_session: tuple[str, str],
+    request: pytest.FixtureRequest,
+    width: int,
+    dark: bool,
 ) -> None:
-    """The kebab menu degrades gracefully to only the available surfaces.
-
-    A plain ``hello_world`` session has a workspace (os_env), no child
-    agents, and is not claude-native — so the menu must list Files and
-    Changes (the two files surfaces — folder tree and changed-files list)
-    and Agents (unconditional — the panel lists at least the main
-    agent, badge "1"), and must NOT list Shells or Tasks. The session's
-    only terminal is the auto-created embedded Omnigent REPL, which is
-    plumbing for the Chat/Terminal pill, not inventory — listing it
-    read as a phantom "main" terminal on agents that don't run a TUI,
-    so ``inventoryTerminals`` excludes it from the kebab/rail.
-    """
+    """Tools stay reachable as tabs and reopening retains the last workspace page."""
     base_url, session_id = seeded_session
-    page.set_viewport_size(_MOBILE_VIEWPORT)
+    page.set_viewport_size({"width": width, "height": 844})
+    if dark:
+        page.emulate_media(color_scheme="dark")
     page.goto(f"{base_url}/c/{session_id}")
-
-    page.get_by_role("button", name="Conversation actions").click()
-
-    expect(page.get_by_role("menuitem", name="Files", exact=True)).to_be_visible()
-    # Changes is a peer files surface (the changed-files list), listed
-    # alongside Files whenever the workspace is available.
-    expect(page.get_by_role("menuitem", name="Changes", exact=True)).to_be_visible()
-    # Agents is always present; "1" = just the main agent. "0" means
-    # the main agent was dropped from the count.
-    expect(page.get_by_role("menuitem", name=re.compile(r"Agents\s*1"))).to_be_visible()
-    # No Shells entry: the embedded REPL terminal is excluded from
-    # the inventory (reachable via the Chat/Terminal pill instead). An
-    # entry here means the REPL leaked back into the kebab gating.
-    expect(page.get_by_role("menuitem", name="Shells")).to_have_count(0)
-    # No todos on a plain hello_world session.
-    expect(page.get_by_role("menuitem", name="Tasks")).to_have_count(0)
+    chat = page.get_by_role("button", name="Conversation actions", exact=True)
+    workspace = page.get_by_role("button", name="Open workspace", exact=True)
+    expect(chat).to_be_visible()
+    expect(workspace).to_be_visible()
+    assert (
+        chat.bounding_box()["x"]
+        >= workspace.bounding_box()["x"] + workspace.bounding_box()["width"]
+    )
+    chat.click()
+    expect(page.get_by_role("menuitem", name="Rename", exact=True)).to_be_visible()
+    expect(
+        page.get_by_role(
+            "menuitem", name=re.compile("^(Files|Changes|Agents|Shells|Pull Requests)$")
+        )
+    ).to_have_count(0)
+    page.keyboard.press("Escape")
+    output = Path(request.config.getoption("output"))
+    page.screenshot(path=str(output / f"mobile-header-{width}.png"), animations="disabled")
+    workspace.click()
+    tabs = page.get_by_role("tablist", name="Workspace", exact=True)
+    expect(tabs.get_by_role("tab", name="Files", exact=True)).to_have_attribute(
+        "aria-selected", "true"
+    )
+    expect(tabs.get_by_role("tab", name="Shells", exact=True)).to_have_count(0)
+    tabs.get_by_role("tab", name="Changes", exact=True).click()
+    expect(
+        page.get_by_test_id("files-panel-drawer").get_by_role(
+            "heading", name="Changes", exact=True
+        )
+    ).to_be_visible()
+    tabs.get_by_role("tab", name="Search", exact=True).click()
+    expect(page.get_by_test_id("content-search-panel-drawer")).to_have_attribute(
+        "data-state", "open"
+    )
+    tabs.get_by_role("tab", name="Agents", exact=True).click()
+    agents = page.get_by_test_id("subagents-panel-drawer")
+    expect(agents).to_have_attribute("data-state", "open")
+    expect(page.get_by_test_id("content-search-panel-drawer")).to_have_attribute(
+        "data-state", "closed"
+    )
+    expect(tabs.get_by_role("tab", name="Agents", exact=True)).to_be_focused()
+    page.screenshot(path=str(output / f"mobile-workspace-{width}.png"), animations="disabled")
+    agents.get_by_role("button", name="Close", exact=True).click()
+    workspace.click()
+    expect(agents).to_have_attribute("data-state", "open")
+    expect(tabs.get_by_role("tab", name="Agents", exact=True)).to_have_attribute(
+        "aria-selected", "true"
+    )
+    tabs.get_by_role("tab", name="Pull Requests", exact=True).click()
+    expect(page.get_by_test_id("github-panel-drawer")).to_have_attribute("data-state", "open")
+    tabs.get_by_role("tab", name="Files", exact=True).click()
+    expect(page.get_by_test_id("files-panel-drawer")).to_have_attribute("data-state", "open")
 
 
 def test_mobile_shells_drawer_exposes_new_shell_before_shells_exist(
@@ -195,7 +219,7 @@ def test_mobile_shells_drawer_exposes_new_shell_before_shells_exist(
     """Shell-capable agents expose the mobile Shells drawer at zero shells.
 
     Mobile has no tab-strip "+" menu, so the Shells drawer is the create entry
-    point: when the session agent declares a ``terminals:`` block, the kebab lists
+    point: when the session agent declares a ``terminals:`` block, Workspace lists
     Shells before any user shell exists, and selecting it opens the full-screen
     drawer carrying a "+ New shell" row. (On desktop the create affordance lives
     in the tab strip's "+" menu and the rail's Shells tab only lists existing
@@ -205,9 +229,11 @@ def test_mobile_shells_drawer_exposes_new_shell_before_shells_exist(
     page.set_viewport_size(_MOBILE_VIEWPORT)
     page.goto(f"{base_url}/c/{session_id}")
 
-    page.get_by_role("button", name="Conversation actions").click()
+    page.get_by_role("button", name="Open workspace").click()
 
-    shells_entry = page.get_by_role("menuitem", name="Shells", exact=True)
+    shells_entry = page.get_by_role("tablist", name="Workspace").get_by_role(
+        "tab", name="Shells", exact=True
+    )
     expect(shells_entry).to_be_visible(timeout=10_000)
     shells_entry.click()
 
@@ -224,20 +250,24 @@ def test_mobile_kebab_shows_agents_entry_when_child_agents_exist(
 
     Counterpart to the omits-absent-ones test: with one sub-agent
     seeded under the parent, the multi-agent gate
-    (``childSessions.length > 0``) is satisfied, so the kebab now lists
+    (``childSessions.length > 0``) is satisfied, so Workspace now lists
     Agents alongside Files. Selecting it opens the agents drawer.
     """
     base_url, session_id = mobile_session_with_child_agent
     page.set_viewport_size(_MOBILE_VIEWPORT)
     page.goto(f"{base_url}/c/{session_id}")
 
-    page.get_by_role("button", name="Conversation actions").click()
+    page.get_by_role("button", name="Open workspace").click()
 
-    agents_entry = page.get_by_role("menuitem", name="Agents")
+    agents_entry = page.get_by_role("tablist", name="Workspace").get_by_role(
+        "tab", name="Agents", exact=True
+    )
     # 10s budget: the rail fetches child_sessions on load, so the entry
     # can take a fetch cycle (plus cold-start latency) to appear.
     expect(agents_entry).to_be_visible(timeout=10_000)
-    expect(page.get_by_role("menuitem", name="Files", exact=True)).to_be_visible()
+    expect(
+        page.get_by_role("tablist", name="Workspace").get_by_role("tab", name="Files", exact=True)
+    ).to_be_visible()
 
     # Selecting Agents opens the agents (sub-agents) drawer.
     agents_entry.click()
@@ -249,9 +279,9 @@ def test_mobile_files_drawer_opens_seeded_file(
     page: Page,
     mobile_session_with_file: tuple[str, str],
 ) -> None:
-    """Open the Files drawer from the header kebab and view the seeded file.
+    """Open Files from Workspace and view the seeded file.
 
-    The full chain a phone user hits: kebab → Files → full-screen files
+    The full chain a phone user hits: Workspace → Files → full-screen files
     drawer → tap a file → full-screen file viewer with real content.
     Uses the Files (folder-tree) surface rather than Changes: the
     session workspace isn't a git repo, so the changed-files diff is
@@ -263,8 +293,7 @@ def test_mobile_files_drawer_opens_seeded_file(
     page.set_viewport_size(_MOBILE_VIEWPORT)
     page.goto(f"{base_url}/c/{session_id}")
 
-    page.get_by_role("button", name="Conversation actions").click()
-    page.get_by_role("menuitem", name="Files", exact=True).click()
+    page.get_by_role("button", name="Open workspace").click()
 
     drawer = page.get_by_test_id("files-panel-drawer")
     expect(drawer).to_have_attribute("data-state", "open")
@@ -284,6 +313,16 @@ def test_mobile_files_drawer_opens_seeded_file(
     file_viewer = page.locator('[data-testid="file-viewer"]:visible')
     expect(file_viewer).to_contain_text(_SEEDED_FILE_PATH)
     expect(file_viewer.get_by_text(_SEEDED_FILE_CONTENT).first).to_be_visible(timeout=20_000)
+    file_viewer.get_by_role("tablist", name="Workspace").get_by_role(
+        "tab", name="Agents", exact=True
+    ).click()
+    agents = page.get_by_test_id("subagents-panel-drawer")
+    expect(agents).to_have_attribute("data-state", "open")
+    agents.get_by_role("tab", name="Files", exact=True).click()
+    expect(drawer).to_have_attribute("data-state", "open")
+    expect(
+        drawer.get_by_role("button", name=re.compile(rf"^{re.escape(_SEEDED_FILE_PATH)}"))
+    ).to_be_visible()
 
 
 # The agent turn is dispatched to the in-process harness, which

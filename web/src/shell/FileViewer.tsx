@@ -19,6 +19,7 @@ import {
 } from "./filePositionState";
 import { toast } from "@/lib/notifications";
 import { NotificationBell } from "@/components/NotificationCenter";
+import { MobileWorkspaceTabs } from "./MobileWorkspace";
 import {
   lazy,
   Suspense,
@@ -1525,6 +1526,7 @@ function FileViewerBody({
 
   const innerContent = (
     <>
+      {mobileOverlay && <MobileWorkspaceTabs beforeNavigate={guardDirty} />}
       <div
         ref={toolbarHeaderRef}
         className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3"

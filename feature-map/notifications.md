@@ -21,7 +21,7 @@ Notifications combine brief popups, retained history, required prompts and file-
 - Conversation header, desktop web: open a session and click Notifications beside the other header actions; the shared header also exposes the bell on the new-session page.
 - Conversation header, mobile web: open a session and tap Notifications in its header; close the sidebar first if it covers the conversation.
 - Mobile full-screen file viewer: open a file from Files, Changes or a file link, then tap Notifications in the viewer's header without returning to chat.
-- Files or Changes drawer: open Conversation actions → Files or Changes and tap Notifications in the drawer header; the desktop Files/Changes push panel also exposes this bell.
+- Files or Changes drawer: open Workspace → Files or Changes and tap Notifications in the drawer header; the desktop Files/Changes push panel also exposes this bell.
 - Popup stack: trigger an operation such as copying a path, archiving a project or session, unpinning a session, or uploading files; use its action or Hide notification directly.
 - Retained activity and recovery: open any available bell, use a transfer's Cancel upload or Cancel download, use project Undo or session Restore, or choose View archived.
 - History controls: use Remove notification on a settled card, Clear completed notifications in the center header, or Close notifications; required prompts retain their own decision controls.

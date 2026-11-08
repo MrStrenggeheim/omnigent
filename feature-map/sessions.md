@@ -342,8 +342,7 @@ a separate action that leaves the session connected.
 parent composer, or choose **Start a new side chat** from the composer's add
 tray. Selecting assistant text also offers **Ask in side chat** unless the
 composer is read-only. On mobile,
-side chats open in a drawer; the header's **Conversation actions → Side
-chats** reopens it. A generic hosted parent can start a new side chat
+side chats open in a drawer; the header's **Workspace → Side chats** reopens it. A generic hosted parent can start a new side chat
 after stopping; this relaunches the parent and both use one runner. Sending to
 an existing side chat or choosing Resume after the parent's runner exited (for
 example, on its idle timeout) also relaunches the parent, then moves the side

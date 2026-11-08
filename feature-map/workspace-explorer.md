@@ -30,7 +30,7 @@ Git supplies change status by default, while an optional agent-change overlay ex
 - Keyboard: arrows and Home/End move through visible rows; F2 renames; Delete moves selections to trash; Ctrl/Cmd+C, X and V copy, cut and paste.
 - Drag-and-drop: move selected entries onto a folder, hold the copy modifier to copy, or drop files/directories from the local computer to upload them.
 - Drop feedback uses the same dashed overlay as chat; the hovered destination folder is highlighted beneath it.
-- Mobile web and native shell: Conversation actions → Files or Changes opens the shared Explorer in a drawer.
+- Mobile web and native shell: Workspace → Files or Changes opens the shared Explorer in a drawer.
 - Notifications in the conversation header, Files/Changes drawer or mobile full-screen file viewer opens shared transfer activity after its popup collapses.
 - Search in folder opens the shared [workspace content search](workspace-content-search.md) with the chosen scope.
 
@@ -44,7 +44,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Desktop and mobile toolbar search, replacement preview, apply and undo: `tests/e2e_ui/files/test_explorer_file_operations.py::test_workspace_search_replace_preview_and_undo`.
 - Filename search and directory reveal: `tests/e2e_ui/files/test_file_search.py`.
 - Desktop and phone More file actions → Show agent changes, nested repository status, retained parent status during delayed discovery, absent historical paths and reload persistence: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_git_tracking_ignores_agent_ghosts_and_persists_toggle`.
-- The same browser scenario checks Git deletions in Changes on desktop; on a phone, close Files, choose Conversation actions → Changes and open a deleted text file for review as a separate manual check.
+- The same browser scenario checks Git deletions in Changes on desktop; on a phone, close Files, choose Workspace → Changes and open a deleted text file for review as a separate manual check.
 - For the overlay check, expand a nested repository under the session root, verify current Git markers with Show agent changes off, enable the checkbox to reveal retained agent history, disable it to remove absent historical paths and reload to confirm the preference remains off.
 - Nearest-repository discovery, explicit directory scopes, Git-file worktrees, nested repository boundaries and current status are covered by `tests/test_workspace_git.py`.
 - Overlay preferences and live tree behavior have component coverage in `web/src/lib/filesPanelPreferences.test.ts`, `web/src/shell/FilesPanel.test.tsx` and `web/src/shell/FolderTree.test.tsx`.

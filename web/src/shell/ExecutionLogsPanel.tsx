@@ -1,3 +1,4 @@
+import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side panel that shows the raw JSON items for a conversation,
 // scoped to either the main thread or a sub-agent (child) session.
 // Triggered from `SessionRail`'s execution-logs card.
@@ -154,6 +155,7 @@ export function ExecutionLogsPanel({
           className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
         />
       )}
+      {open && <MobileWorkspaceTabs />}
       <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-3">
         <h2 className="font-medium text-ui">Execution logs</h2>
         <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>

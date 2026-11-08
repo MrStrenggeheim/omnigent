@@ -155,8 +155,7 @@ def test_workspace_search_replace_preview_and_undo(
             page.set_viewport_size({"width": 390, "height": 844})
         page.goto(f"{base_url}/c/{session_id}?view=explore")
         if mobile:
-            page.get_by_role("button", name="Conversation actions").click()
-            page.get_by_role("menuitem", name="Files", exact=True).click()
+            page.get_by_role("button", name="Open workspace").click()
             page.get_by_role("button", name="New file", exact=True).filter(visible=True).click()
             _apply_name(page, "phone.txt")
             _open_row_actions(page.get_by_test_id("files-panel-drawer"), "phone.txt")
@@ -221,8 +220,7 @@ def test_upload_continues_while_viewing_another_file(
         page.goto(f"{base_url}/c/{session_id}?view=explore")
         panel = page.get_by_role("complementary", name="Workspace")
         if mobile:
-            page.get_by_role("button", name="Conversation actions").click()
-            page.get_by_role("menuitem", name="Files", exact=True).click()
+            page.get_by_role("button", name="Open workspace").click()
             panel = page.get_by_test_id("files-panel-drawer")
         expect(panel.get_by_role("button", name="Choose files to upload")).to_be_visible(
             timeout=30_000

@@ -207,8 +207,10 @@ def test_terminal_touch_swipe_scrolls_back(
         # Step 2 — open a terminal pane the way a phone user does: the header
         # kebab lists Shells (the agent declares a ``terminals:`` block), and
         # the drawer's "New shell" row creates and opens the shell full-screen.
-        page.get_by_role("button", name="Conversation actions").click()
-        shells_entry = page.get_by_role("menuitem", name="Shells", exact=True)
+        page.get_by_role("button", name="Open workspace").click()
+        shells_entry = page.get_by_role("tablist", name="Workspace").get_by_role(
+            "tab", name="Shells", exact=True
+        )
         expect(shells_entry).to_be_visible(timeout=10_000)
         shells_entry.click()
         drawer = page.get_by_test_id("shells-panel-drawer")
