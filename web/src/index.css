@@ -142,6 +142,27 @@
  * unread state, and the active sidebar highlight; surfaces and primary
  * buttons stay neutral grey (hue 240). See designs/UI/WEB_UI.md (still
  * describes the older cobalt direction). */
+/* Give iOS Home Screen apps a top colour surface without painting over content. */
+.ios-status-surface {
+  display: none;
+}
+
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    .ios-status-surface {
+      display: block;
+      position: fixed;
+      inset: 0 0 auto;
+      height: 11px;
+      z-index: 2147483647;
+      pointer-events: none;
+      background-color: var(--background);
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+  }
+}
+
 :root {
   /* User-controlled UI font size (see Appearance settings /
    * lib/uiFontPreferences.ts). Stored as a discrete px value and overridden at
