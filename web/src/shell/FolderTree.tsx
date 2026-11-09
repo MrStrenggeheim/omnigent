@@ -1150,7 +1150,7 @@ function FileRowItem({
           "group relative flex w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 pr-1",
           isDeleted ? "opacity-50" : "hover:bg-muted",
           explorerRowClass,
-          explorer.selected && "bg-accent",
+          (explorer.selected || explorer.active) && "bg-accent",
         )}
         style={{ paddingLeft: `${indentFor(depth)}px` }}
       >

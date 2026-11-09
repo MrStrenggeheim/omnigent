@@ -14,6 +14,7 @@ import {
 import { BellIcon, CheckCheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import type { ToasterProps } from "sonner";
 import { Button } from "@/components/ui/button";
+import { HeaderActionButton } from "./HeaderActionButton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { NotificationCard } from "./NotificationCard";
@@ -112,7 +113,7 @@ export function NotificationBell() {
           <TooltipTrigger asChild>
             <span className="inline-flex">
               <PopoverTrigger asChild>
-                <Button
+                <HeaderActionButton
                   type="button"
                   variant="ghost"
                   size="icon-xs"
@@ -124,6 +125,7 @@ export function NotificationBell() {
                   {running.length > 0 && (
                     <Loader2Icon
                       aria-hidden
+                      data-icon-size="status"
                       className="absolute -bottom-0.5 -right-0.5 size-2.5 animate-spin rounded-full bg-background text-primary motion-reduce:animate-none"
                     />
                   )}
@@ -138,7 +140,7 @@ export function NotificationBell() {
                   <span className="sr-only">
                     {unread} unread, {running.length} activities in progress
                   </span>
-                </Button>
+                </HeaderActionButton>
               </PopoverTrigger>
             </span>
           </TooltipTrigger>

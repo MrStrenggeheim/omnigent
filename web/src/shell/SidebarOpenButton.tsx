@@ -1,6 +1,9 @@
-import { ArrowLeftIcon, MenuIcon, PanelLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, PanelLeftIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { createPortal } from "react-dom";
+import { cn } from "@/lib/utils";
+import { SidebarPanelIcon, mobileSidebarToggleStyle } from "./SidebarToggle";
+import { HeaderActionButton } from "@/components/HeaderActionButton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 
@@ -46,7 +49,8 @@ export function SidebarOpenButton({
   useEffect(() => cancelPeek, [cancelPeek]);
 
   const label = settingsMode ? "Back to settings menu" : "Open sidebar";
-  return (
+  const floating = isMobile && !settingsMode;
+  const control = (
     <Tooltip
       open={tooltipOpen}
       onOpenChange={(next) => {
@@ -55,32 +59,45 @@ export function SidebarOpenButton({
       }}
     >
       <TooltipTrigger asChild>
-        <Button
+        <HeaderActionButton
           type="button"
           variant="ghost"
           size={size}
           aria-label={label}
+          aria-expanded={false}
           componentId={componentId}
           onClick={() => {
             cancelPeek();
             onOpenSidebar(false);
           }}
           // macOS uses the persistent titlebar cluster in place of this button.
-          className={`chat-header-sidebar-toggle pointer-events-auto border-none text-muted-foreground hover:text-foreground ${size === "icon-xs" ? "max-md:size-11" : ""}`}
+          className={cn(
+            "chat-header-sidebar-toggle pointer-events-auto border-none text-muted-foreground hover:text-foreground max-md:size-11",
+            floating && "fixed z-[60]",
+          )}
+          style={floating ? mobileSidebarToggleStyle("left") : undefined}
           onPointerEnter={onPeekSidebar}
           onPointerDown={cancelPeek}
           onPointerLeave={cancelPeek}
         >
           {settingsMode ? (
-            <ArrowLeftIcon className="size-4 max-md:size-5" />
+            <ArrowLeftIcon className="size-4" />
           ) : isMobile ? (
-            <MenuIcon className="size-5" />
+            <SidebarPanelIcon side="left" />
           ) : (
             <PanelLeftIcon className="size-4" />
           )}
-        </Button>
+        </HeaderActionButton>
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
+  );
+  return floating ? (
+    <>
+      <span aria-hidden className="size-11 shrink-0" />
+      {createPortal(control, document.body)}
+    </>
+  ) : (
+    control
   );
 }

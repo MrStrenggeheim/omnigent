@@ -10664,3 +10664,104 @@ async def test_explorer_operations_fall_back_to_authorized_idle_host(
     assert captured["params"]["_roots"][0]["path"] == _OFFLINE_WORKSPACE
     if status == 409:
         assert response.json()["detail"] == "Destination already exists"
+
+
+async def test_agent_comparisons_use_persisted_selected_turns_after_runner_restart(
+    app: FastAPI,
+    client: httpx.AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from omnigent.inner.datamodel import OSEnvSandboxSpec, OSEnvSpec
+    from tests.server.test_agent_file_diff import _turn
+
+    session = "79b22ebd2309e48fdeb450c65611d51b"
+    store = app.state.test_conversation_store
+    conv = store.get_conversation(session)
+    conv.workspace = str(tmp_path)
+    monkeypatch.setattr(
+        "omnigent.server.routes.sessions.routes_resources._load_agent_spec_for_session",
+        lambda *_args: SimpleNamespace(
+            os_env=OSEnvSpec(
+                type="caller_process",
+                cwd=str(tmp_path),
+                sandbox=OSEnvSandboxSpec(type="none"),
+            )
+        ),
+    )
+    patch = (
+        "diff --git a/inside/a b/inside/a\n--- a/inside/a\n+++ b/inside/a\n@@ -1 +1 @@\n-A\n+B\n"
+    )
+    outside = (
+        "diff --git a/outside/b b/outside/b\n--- a/outside/b\n+++ b/outside/b\n"
+        "@@ -1 +1 @@\n-X\n+Y\n"
+    )
+    store.appended_items = list(reversed([*_turn("new", outside), *_turn("old", patch)]))
+    base = f"/v1/sessions/{session}/resources/environments/default"
+    runner = _FakeRunnerClient(
+        responses={
+            f"{base}/changes": (
+                200,
+                {
+                    "source": "agent",
+                    "data": [],
+                    "turns": [],
+                    "root_is_repository": True,
+                },
+            ),
+            f"{base}/agent-diff": (404, {"error": {"code": "baseline_unavailable"}}),
+        }
+    )
+    set_runner_router(_FakeRunnerRouter(runner))
+    choices = await client.get(
+        f"{base}/changes",
+        params={
+            "source": "agent",
+            "path": "inside",
+            "baseline": "last_turn",
+        },
+    )
+    assert choices.status_code == 200, choices.text
+    assert choices.json()["data"] == []
+    assert choices.json()["root_is_repository"] is True
+    assert [turn["id"] for turn in choices.json()["turns"]] == ["new", "old"]
+    selected = await client.get(
+        f"{base}/changes",
+        params={
+            "source": "agent",
+            "path": "inside",
+            "baseline": "last_turn",
+            "turn_id": "old",
+        },
+    )
+    assert [row["path"] for row in selected.json()["data"]] == ["inside/a"]
+    diff = await client.get(f"{base}/agent-diff", params={"path": "inside/a", "turn_id": "old"})
+    assert diff.status_code == 200 and diff.json()["patch"] == patch
+    assert diff.json()["turn_id"] == "old" and diff.json()["warning"]
+    # Default selects the latest capture, rather than falling back per file.
+    latest = await client.get(f"{base}/agent-diff", params={"path": "inside/a"})
+    assert latest.status_code == 404, latest.text
+    current = await client.get(
+        f"{base}/agent-diff", params={"path": "inside/a", "turn_id": "current"}
+    )
+    assert current.status_code == 404 and "patch" not in current.json()
+    assert runner.get_params[-1]["turn_id"] == "current"
+
+
+async def test_agent_choices_reject_old_runner_git_payload_and_report_missing_capture(
+    client: httpx.AsyncClient,
+) -> None:
+    session = "79b22ebd2309e48fdeb450c65611d51b"
+    runner = _FakeRunnerClient(payload={"object": "list", "data": [{"path": "git-only"}]})
+    set_runner_router(_FakeRunnerRouter(runner))
+    response = await client.get(
+        f"/v1/sessions/{session}/resources/environments/default/changes",
+        params={"source": "agent", "baseline": "last_turn", "path": "src"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source"] == "agent" and body["turns"] == body["data"] == []
+    assert body["warning"].startswith("No captured")
+    assert body["root_is_repository"] is False

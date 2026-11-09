@@ -2899,11 +2899,12 @@ def register_resources_routes(
         request: Request,
         session_id: str,
         environment_id: str,
-        operation: str = Query(default="changes", pattern="^(changes|diff)$"),
+        operation: str = Query(default="changes", pattern="^(changes|diff|repository)$"),
         path: str = Query(default="", max_length=8192),
         directories: str = Query(default="[]", max_length=32768),
         base: str = Query(default="HEAD", max_length=256),
         target: str = Query(default="WORKTREE", max_length=256),
+        scope: str | None = Query(default=None, max_length=8192),
     ) -> Any:
         """Read Git status and diffs independently from session edit history."""
         from omnigent.runner.workspace_git import parse_git_directories
@@ -2912,7 +2913,7 @@ def register_resources_routes(
             discovered = parse_git_directories(directories)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        paths = [path, *discovered]
+        paths = [path, *discovered, *([scope] if scope is not None else [])]
         authorization_path = next((item for item in paths if ntpath.isabs(item)), path)
         conv = await _authorize_browse_read(session_id, request, authorization_path)
 
@@ -2946,6 +2947,7 @@ def register_resources_routes(
                     "directories": discovered,
                     "base": base,
                     "target": target,
+                    **({"scope": scope} if scope is not None else {}),
                 },
                 runner_path=f"/v1/sessions/{session_id}/resources/environments/{_runner_environment_segment(environment_id)}/git",
                 runner_params={
@@ -2954,6 +2956,7 @@ def register_resources_routes(
                     "directories": directories,
                     "base": base,
                     "target": target,
+                    **({"scope": scope} if scope is not None else {}),
                 },
                 host_workspace_resolver=authorized_host_workspace,
                 runner_timeout=30.0,
@@ -2961,6 +2964,22 @@ def register_resources_routes(
                 preserve_errors=True,
             )
         )
+
+    async def _authorize_recorded_scope(conv: Conversation, path: str) -> str:
+        from omnigent.runner.environment_filesystem import resolve_browse_target
+
+        if ".." in path.split("/"):
+            raise HTTPException(status_code=400, detail="Parent segments are not permitted")
+        reach = await _environment_reach_for_session(conv)
+        if reach is None:
+            raise HTTPException(status_code=403, detail="Workspace is unavailable")
+        roots, unconfined, workspace = reach
+        resolved = resolve_browse_target(
+            path if ntpath.isabs(path) else str(Path(workspace) / path),
+            roots,
+            unconfined=unconfined,
+        )
+        return str(resolved)
 
     @file_read_router.get(
         "/sessions/{session_id}/resources/environments/{environment_id}/agent-diff",
@@ -2973,30 +2992,89 @@ def register_resources_routes(
         environment_id: str,
         path: str = Query(max_length=8192),
         baseline: str = Query(default="last_turn", pattern="^(last_turn|session)$"),
+        turn_id: str | None = Query(default=None, max_length=256),
     ) -> Any:
-        """Prefer a persisted per-turn patch, then captured tool preimages."""
+        """Read a captured turn or its persisted patch; current is always explicit."""
+        from omnigent.server.agent_file_diff import (
+            read_recorded_turn_items,
+            recorded_agent_changes,
+            recorded_turn_file_diff,
+        )
+
         conv = await _authorize_browse_read(session_id, request, path)
         if ".." in path.split("/"):
             raise HTTPException(status_code=400, detail="Parent segments are not permitted")
-        if baseline == "last_turn":
-            from omnigent.server.agent_file_diff import recorded_turn_file_diff
-
-            items = await asyncio.to_thread(
-                conversation_store.list_items, session_id, limit=512, order="desc"
+        if baseline == "last_turn" and turn_id is None:
+            selection = await list_environment_filesystem_changes(
+                request,
+                session_id,
+                environment_id,
+                source="agent",
+                path=path,
+                baseline=baseline,
+                turn_id=None,
             )
-            captured = recorded_turn_file_diff(items.data, path, conv.workspace)
-            if captured is not None:
-                return captured
-        return await _resource_read_response(
-            _proxy_get_to_runner(
+            turn_id = selection.get("turn_id")
+        if baseline == "last_turn" and turn_id != "current":
+            items, truncated = await asyncio.to_thread(
+                read_recorded_turn_items, conversation_store, session_id
+            )
+            history = recorded_agent_changes(
+                items, "", conv.workspace, baseline, turn_id, truncated=truncated
+            )
+            if turn_id and any(turn["id"] == turn_id for turn in history["turns"]):
+                await _authorize_recorded_scope(conv, path)
+                captured = recorded_turn_file_diff(items, path, conv.workspace, turn_id)
+                if captured is not None:
+                    return captured
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "baseline_unavailable",
+                            "message": "File is absent from the selected turn capture.",
+                        }
+                    },
+                    status_code=404,
+                )
+        params = {"path": path, "baseline": baseline}
+        if turn_id is not None:
+            params["turn_id"] = turn_id
+        try:
+            return await _proxy_get_to_runner(
                 session_id,
                 f"/v1/sessions/{session_id}/resources/environments/{_runner_environment_segment(environment_id)}/agent-diff",
                 conv,
-                params={"path": path, "baseline": baseline},
+                params=params,
                 timeout=15.0,
                 unsupported_endpoint_message="Update the host to capture agent-turn baselines.",
                 preserve_errors=True,
             )
+        except OmnigentError as exc:
+            if exc.code != ErrorCode.RUNNER_UNAVAILABLE:
+                raise
+            runner_error = exc
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            if (
+                exc.status_code != 404
+                or detail.get("error", {}).get("code") != "baseline_unavailable"
+            ):
+                if isinstance(exc.detail, dict):
+                    return JSONResponse(exc.detail, status_code=exc.status_code)
+                raise
+            runner_error = exc
+        if isinstance(runner_error, HTTPException) and isinstance(runner_error.detail, dict):
+            return JSONResponse(runner_error.detail, status_code=runner_error.status_code)
+        return JSONResponse(
+            {
+                "error": {
+                    "code": "baseline_unavailable",
+                    "message": "No captured agent baseline is available for this file and turn.",
+                },
+                "source": "agent",
+                "coverage": "unavailable",
+            },
+            status_code=404,
         )
 
     @router.get(
@@ -3008,32 +3086,116 @@ def register_resources_routes(
         session_id: str,
         environment_id: str,
         source: str = Query(default="session", pattern="^(session|agent)$"),
+        path: str = Query(default="", max_length=8192),
+        baseline: str = Query(default="session", pattern="^(last_turn|session)$"),
+        turn_id: str | None = Query(default=None, max_length=256),
     ) -> Any:
-        """
-        List all files changed since session start (flat, registry-backed).
-
-        Returns the watchdog change set for the session — every file
-        created, modified, or deleted since the session began, regardless
-        of directory depth.  Use for the flat "changed files" view.
-
-        :param request: The incoming FastAPI request (for auth).
-        :param session_id: Session/conversation identifier.
-        :param environment_id: Environment resource id.
-        :returns: Flat list of changed filesystem entries with ``status``.
-        """
-        path = (
+        """List Git-backed session status or explicitly scoped captured agent history."""
+        conv = await _authorize_browse_read(session_id, request, path)
+        runner_path = (
             f"/v1/sessions/{session_id}/resources/environments"
             f"/{_runner_environment_segment(environment_id)}/changes"
         )
-        conv = await _authorize_browse_read(session_id, request)
-        return await _fs_get_with_host_fallback(
-            session_id,
-            conv,
-            op="changes",
-            host_params={"source": source} if source == "agent" else {},
-            runner_path=path,
-            runner_params={"source": "agent"} if source == "agent" else None,
+        if source != "agent":
+            return await _fs_get_with_host_fallback(
+                session_id,
+                conv,
+                op="changes",
+                host_params={},
+                runner_path=runner_path,
+            )
+        if ".." in path.split("/"):
+            raise HTTPException(status_code=400, detail="Parent segments are not permitted")
+        from omnigent.server.agent_file_diff import (
+            read_recorded_turn_items,
+            recorded_agent_changes,
         )
+
+        params = {"source": "agent", "path": path, "baseline": baseline}
+        if turn_id is not None:
+            params["turn_id"] = turn_id
+        live = None
+        try:
+            live = await _proxy_get_to_runner(
+                session_id,
+                runner_path,
+                conv,
+                params=params,
+                preserve_errors=True,
+            )
+        except OmnigentError as exc:
+            if exc.code != ErrorCode.RUNNER_UNAVAILABLE:
+                raise
+        if live is not None and live.get("source") != "agent":
+            live = None
+        items, truncated = await asyncio.to_thread(
+            read_recorded_turn_items, conversation_store, session_id
+        )
+        persisted = recorded_agent_changes(
+            items, path, conv.workspace, baseline, turn_id, truncated=truncated
+        )
+        if persisted["turns"]:
+            resolved = await _authorize_recorded_scope(conv, path)
+            persisted = recorded_agent_changes(
+                items, resolved, conv.workspace, baseline, turn_id, truncated=truncated
+            )
+        turns = {
+            turn["id"]: turn for turn in [*(live or {}).get("turns", []), *persisted["turns"]]
+        }
+        ordered_turns = sorted(
+            turns.values(), key=lambda turn: turn.get("created_at", 0), reverse=True
+        )
+        selected = turn_id
+        if selected is None and baseline == "last_turn":
+            selected = next((turn["id"] for turn in ordered_turns if turn["finished"]), None)
+        selected_persisted = selected is not None and any(
+            t["id"] == selected for t in persisted["turns"]
+        )
+        if live is None or selected_persisted or not live.get("turns"):
+            result = persisted
+        else:
+            result = live
+            if baseline == "session" and turn_id is None and persisted["data"]:
+                rows = {row["path"]: row for row in persisted["data"]}
+                rows.update((row["path"], row) for row in live["data"])
+                result["data"] = sorted(rows.values(), key=lambda row: row["path"])
+                result["warning"] = live.get("warning", "") + " " + persisted["warning"]
+        result["turns"] = ordered_turns[:20]
+        if baseline == "last_turn":
+            result["turn_id"] = selected if selected != "current" else (live or {}).get("turn_id")
+        if live is not None:
+            result["root_is_repository"] = live.get("root_is_repository", False)
+            if live.get("repository_warning") and result is not live:
+                result["repository_warning"] = live["repository_warning"]
+                result["warning"] += " Repository metadata unavailable: " + str(
+                    live["repository_warning"]
+                )
+        else:
+            try:
+                metadata = await inspect_environment_git(
+                    request,
+                    session_id,
+                    environment_id,
+                    operation="repository",
+                    path=path,
+                    directories="[]",
+                    base="HEAD",
+                    target="WORKTREE",
+                    scope=None,
+                )
+                result["root_is_repository"] = (
+                    metadata.get("root_is_repository", False)
+                    if isinstance(metadata, dict)
+                    else False
+                )
+            except OmnigentError as exc:
+                if exc.code != ErrorCode.RUNNER_UNAVAILABLE:
+                    raise
+                result["root_is_repository"] = False
+                result["warning"] += (
+                    " Repository metadata is unavailable while the host is offline."
+                )
+        return result
 
     @file_read_router.get(
         "/sessions/{session_id}/resources/environments/{environment_id}/diff/{relative_path:path}",

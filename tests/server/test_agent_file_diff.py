@@ -88,3 +88,51 @@ def test_rename_only_patch_remains_available_for_the_new_path() -> None:
     )
     result = recorded_turn_file_diff(_turn("t", patch), "new.txt", "/workspace")
     assert result is not None and result["patch"] == patch
+
+
+def test_persisted_choices_scope_and_explicit_previous_turn_selection() -> None:
+    from omnigent.server.agent_file_diff import recorded_agent_changes
+
+    old_patch = (
+        "diff --git a/inside/a b/inside/a\n--- a/inside/a\n+++ b/inside/a\n"
+        "@@ -1 +1 @@\n-old\n+new\n"
+    )
+    new_patch = (
+        "diff --git a/outside/b b/outside/b\n--- a/outside/b\n+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n-gone\n"
+    )
+    items = [*_turn("new", new_patch), *_turn("old", old_patch)]
+    latest = recorded_agent_changes(items, "inside", "/workspace")
+    assert latest["source"] == "agent" and latest["data"] == []
+    assert [turn["id"] for turn in latest["turns"]] == ["new", "old"]
+    assert all(turn["finished"] for turn in latest["turns"])
+    selected = recorded_agent_changes(items, "inside", "/workspace", turn_id="old")
+    assert [row["path"] for row in selected["data"]] == ["inside/a"]
+    assert selected["data"][0]["lines_added"] == selected["data"][0]["lines_removed"] == 1
+    assert recorded_turn_file_diff(items, "inside/a", "/workspace", "old")["patch"] == old_patch
+    assert recorded_turn_file_diff(items, "inside/a", "/workspace", "new") is None
+    assert recorded_agent_changes(items, "inside", "/workspace", turn_id="current")["data"] == []
+    assert recorded_agent_changes([], "", "/workspace")["warning"].startswith("No captured")
+
+
+def test_persisted_history_pagination_is_bounded_and_follows_descending_cursor() -> None:
+    from types import SimpleNamespace
+
+    from omnigent.server.agent_file_diff import read_recorded_turn_items
+
+    class Store:
+        def __init__(self):
+            self.calls = []
+
+        def list_items(self, session_id, *, limit, after, order):
+            self.calls.append((session_id, limit, after, order))
+            number = len(self.calls)
+            return SimpleNamespace(
+                data=_turn(str(number), "patch"), has_more=True, last_id=str(number)
+            )
+
+    store = Store()
+    items, truncated = read_recorded_turn_items(store, "session")
+    assert truncated and len(store.calls) == 8 and len(items) == 16
+    assert store.calls[0] == ("session", 512, None, "desc")
+    assert store.calls[-1] == ("session", 512, "7", "desc")

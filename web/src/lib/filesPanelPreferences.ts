@@ -13,7 +13,7 @@ const STORAGE_KEY = "omnigent:files-panel-preferences";
 const CHANGE_EVENT = "omnigent:files-panel-preferences-changed";
 
 export const DEFAULT_FILES_PANEL_PREFERENCES: FilesPanelPreferences = {
-  sort: "recent",
+  sort: "alpha",
   showAgentChanges: false,
 };
 

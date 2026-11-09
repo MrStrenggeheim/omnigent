@@ -105,17 +105,18 @@ export function useFileDiff(
 export function useGitFileDiff(
   conversationId: string | undefined,
   path: string | null,
-  options: { enabled: boolean; base: string; target: string },
+  options: { enabled: boolean; base: string; target: string; scope?: string },
 ) {
   const serveable = useWorkspaceServeable(conversationId);
   return useQuery<FileDiffResponse & { repository?: string; base?: string; target?: string }>({
-    queryKey: ["git-file-diff", conversationId, path, options.base, options.target],
+    queryKey: ["git-file-diff", conversationId, path, options.base, options.target, options.scope],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({
         operation: "diff",
         path: path!,
         base: options.base,
         target: options.target,
+        ...(options.scope !== undefined ? { scope: options.scope } : {}),
       });
       const response = await authenticatedFetch(
         `/v1/sessions/${encodeURIComponent(conversationId!)}/resources/environments/default/git?${params}`,
@@ -144,14 +145,17 @@ export function useGitFileDiff(
 export function useAgentFileDiff(
   conversationId: string | undefined,
   path: string | null,
-  options: { enabled: boolean; lastTurn: boolean },
+  options: { enabled: boolean; lastTurn: boolean; turnId?: string },
 ) {
-  return useQuery<FileDiffResponse & { patch?: string; coverage?: string; turn_id?: string }>({
-    queryKey: ["agent-file-diff", conversationId, path, options.lastTurn],
+  return useQuery<
+    FileDiffResponse & { patch?: string; coverage?: string; turn_id?: string; warning?: string }
+  >({
+    queryKey: ["agent-file-diff", conversationId, path, options.lastTurn, options.turnId],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({
         path: path!,
         baseline: options.lastTurn ? "last_turn" : "session",
+        ...(options.turnId ? { turn_id: options.turnId } : {}),
       });
       const response = await authenticatedFetch(
         `/v1/sessions/${encodeURIComponent(conversationId!)}/resources/environments/default/agent-diff?${params}`,

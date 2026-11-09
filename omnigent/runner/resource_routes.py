@@ -1218,11 +1218,12 @@ def register_resource_routes(
     async def inspect_environment_git(
         session_id: str,
         environment_id: str,
-        operation: str = Query(default="changes", pattern="^(changes|diff)$"),
+        operation: str = Query(default="changes", pattern="^(changes|diff|repository)$"),
         path: str = Query(default="", max_length=8192),
         directories: str = Query(default="[]", max_length=32768),
         base: str = Query(default="HEAD", max_length=256),
         target: str = Query(default="WORKTREE", max_length=256),
+        scope: str | None = Query(default=None, max_length=8192),
     ) -> JSONResponse:
         """Read nearest-repository status or compare explicit Git versions."""
         from omnigent.runner.workspace_git import inspect_git, parse_git_directories
@@ -1242,6 +1243,7 @@ def register_resource_routes(
                 "directories": discovered,
                 "base": base,
                 "target": target,
+                **({"scope": scope} if scope is not None else {}),
             },
         )
         return JSONResponse(result, status_code=int(result.pop("status", 200)))
@@ -1252,9 +1254,9 @@ def register_resource_routes(
         environment_id: str,
         path: str = Query(max_length=8192),
         baseline: str = Query(default="last_turn", pattern="^(last_turn|session)$"),
+        turn_id: str | None = Query(default=None, max_length=256),
     ) -> JSONResponse:
         """Return observed tool baselines without substituting Git HEAD."""
-        from omnigent.entities.environment_filesystem import FilesystemPathNotFound
         from omnigent.runner.environment_filesystem import CallerProcessFilesystem
 
         spec = await _require_os_env(session_id)
@@ -1264,7 +1266,9 @@ def register_resource_routes(
         resolved = filesystem._resolve(path)
         registry = await _resolve_session_fs_registry(session_id)
         record = (
-            registry.turn_history.lookup(session_id, str(resolved), baseline == "last_turn")
+            registry.turn_history.lookup(
+                session_id, str(resolved), baseline == "last_turn", turn_id
+            )
             if registry
             else None
         )
@@ -1281,57 +1285,59 @@ def register_resource_routes(
                 },
                 status_code=404,
             )
-        if baseline == "last_turn":
-            if not record.get("after_known"):
-                return JSONResponse(
-                    {
-                        "error": {
-                            "code": "baseline_unavailable",
-                            "message": "The turn's final file content was not captured.",
-                        }
+        if not record.get("after_known"):
+            return JSONResponse(
+                {
+                    "error": {
+                        "code": "baseline_unavailable",
+                        "message": "The agent's final file content was not captured.",
                     },
-                    status_code=404,
-                )
-            after = record.get("after")
-        else:
-            try:
-                content = await filesystem.read(path, limit=None)
-                if content.truncated:
-                    return JSONResponse(
-                        {
-                            "error": {
-                                "code": "file_too_large",
-                                "message": "Current file exceeds the diff read limit.",
-                            }
-                        },
-                        status_code=400,
-                    )
-                after = content.data.decode(content.encoding or "utf-8", errors="replace")
-            except FilesystemPathNotFound:
-                after = None
+                    "coverage": record["coverage"],
+                    "warning": record.get("after_reason"),
+                },
+                status_code=404,
+            )
         return JSONResponse(
             {
                 "object": "session.environment.filesystem.file_diff",
                 "path": path,
                 "before": record["before"],
-                "after": after,
+                "after": record["after"],
                 "coverage": record["coverage"],
                 "turn_id": record["turn_id"],
+                "baseline": baseline,
+                "source": "agent",
+                "finished": record["finished"],
+                "warning": record["warning"],
             }
         )
 
     @app.get("/v1/sessions/{session_id}/resources/environments/{environment_id}/changes")
     async def list_filesystem_changes(
         session_id: str,
-        environment_id: str,  # noqa: ARG001
+        environment_id: str,
         source: str = Query(default="session", pattern="^(session|agent)$"),
+        path: str = Query(default="", max_length=8192),
+        baseline: str = Query(default="session", pattern="^(last_turn|session)$"),
+        turn_id: str | None = Query(default=None, max_length=256),
     ) -> JSONResponse:
         import asyncio as _asyncio
 
         from omnigent.runtime.filesystem_registry import GitStatusUnavailable
 
-        await _require_os_env(session_id)
+        spec = await _require_os_env(session_id)
         await _ensure_session_registered(session_id)
+        from omnigent.runner.environment_filesystem import CallerProcessFilesystem
+
+        environment = resource_registry.resolve_environment(session_id, environment_id, spec)
+        resolved_scope = CallerProcessFilesystem(environment)._resolve(path)
+        root_metadata = {}
+        if source == "agent":
+            from omnigent.runner.workspace_git import inspect_git
+
+            root_metadata = await inspect_git(
+                environment, {"operation": "repository", "path": path}
+            )
         session_registry = await _resolve_session_fs_registry(session_id)
         try:
             # ``list_changed_files`` shells out to ``git status`` synchronously,
@@ -1343,7 +1349,12 @@ def register_resource_routes(
                 raw_changes = []
             elif source == "agent":
                 raw_changes = await _asyncio.to_thread(
-                    session_registry.list_agent_changed_files, session_id, limit=10_000
+                    session_registry.list_agent_changed_files,
+                    session_id,
+                    limit=10_000,
+                    baseline=baseline,
+                    turn_id=turn_id,
+                    scope=str(resolved_scope),
                 )
             else:
                 raw_changes = await _asyncio.to_thread(
@@ -1364,17 +1375,38 @@ def register_resource_routes(
                 "modified_at": rec.get("modified_at"),
                 "lines_added": rec.get("lines_added"),
                 "lines_removed": rec.get("lines_removed"),
+                **(
+                    {key: rec.get(key) for key in ("before_known", "after_known", "coverage")}
+                    if source == "agent"
+                    else {}
+                ),
             }
             for rec in raw_changes
         ]
+        metadata: dict[str, Any] = {}
+        if source == "agent":
+            metadata = (
+                session_registry.turn_history.comparison_metadata(session_id, baseline, turn_id)
+                if session_registry
+                else {
+                    "source": "agent",
+                    "turns": [],
+                    "coverage": "unavailable",
+                    "warning": "No captured agent history is available for this session.",
+                }
+            )
+            metadata["baseline"] = baseline
+            metadata["root_is_repository"] = root_metadata.get("root_is_repository", False)
+            if root_metadata.get("error"):
+                metadata["repository_warning"] = root_metadata["error"].get(
+                    "message", "Repository metadata unavailable"
+                )
+                metadata["warning"] += (
+                    " Repository metadata is unavailable: " + metadata["repository_warning"]
+                )
         return JSONResponse(
             status_code=200,
-            content={
-                "object": "list",
-                "data": data,
-                "has_more": False,
-                **({"source": "agent"} if source == "agent" else {}),
-            },
+            content={"object": "list", "data": data, "has_more": False, **metadata},
         )
 
     @app.get(

@@ -1,20 +1,24 @@
 import type * as TerminalsModule from "@/hooks/useTerminals";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import {
-  useWorkspaceEnvironment,
-  useWorkspaceChangedFiles,
-  useWorkspaceGitChanges,
-} from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceEnvironment } from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceComparisonChanges } from "@/hooks/useWorkspaceComparisons";
 import { useTerminals } from "@/hooks/useTerminals";
 import { useWorkspaceResources } from "./useWorkspaceResources";
 import { setExplorerGitScope } from "@/lib/explorerGitScope";
+import {
+  DEFAULT_WORKSPACE_COMPARISON,
+  setWorkspaceComparison,
+  useWorkspaceComparison,
+} from "@/lib/workspaceComparison";
 import { writeFilesPanelPreferences } from "@/lib/filesPanelPreferences";
 
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
   useWorkspaceEnvironment: vi.fn(() => ({ data: { available: true, root: "/workspace" } })),
-  useWorkspaceChangedFiles: vi.fn(() => ({ data: { data: [{ path: "notes.md" }] } })),
-  useWorkspaceGitChanges: vi.fn(() => ({ data: { data: [{ path: "notes.md" }] } })),
+}));
+vi.mock("@/hooks/useWorkspaceComparisons", () => ({
+  useAgentTurnChoices: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useWorkspaceComparisonChanges: vi.fn(),
 }));
 vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
   ...(await importOriginal<typeof TerminalsModule>()),
@@ -24,12 +28,14 @@ afterEach(cleanup);
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
-  vi.mocked(useWorkspaceGitChanges).mockReturnValue({
-    data: { data: [{ path: "notes.md" }] },
-  } as ReturnType<typeof useWorkspaceGitChanges>);
-  vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
-    data: { data: [{ path: "ghost.md" }] },
-  } as ReturnType<typeof useWorkspaceChangedFiles>);
+  vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
+    data: {
+      available: true,
+      data: [{ path: "notes.md" }],
+      repositories: [],
+      root_is_repository: false,
+    },
+  } as unknown as ReturnType<typeof useWorkspaceComparisonChanges>);
 });
 
 it.each([
@@ -44,20 +50,15 @@ it.each([
     { initialProps: { sessionId: "first", terminalFirst: false } },
   );
   expect(useWorkspaceEnvironment).toHaveBeenLastCalledWith("first", { enabled: browse });
-  expect(useWorkspaceGitChanges).toHaveBeenLastCalledWith("first", {
+  expect(useWorkspaceComparisonChanges).toHaveBeenLastCalledWith("first", {
     path: "",
     directories: [],
     enabled: browse,
-  });
-  expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("first", {
-    source: "agent",
-    enabled: false,
   });
   expect(result.current.showFilesPanel).toBe(browse);
   expect(result.current.changedCount).toBe(1);
   expect(result.current.isChangedPath("notes.md")).toBe(true);
   expect(result.current.isChangedPath("unknown.md")).toBe(false);
-  expect(result.current.isChangedPath("ghost.md")).toBe(false);
   expect(result.current.openTerminals).toEqual(["terminal:terminal_tui_main", "terminal:shell"]);
   rerender({ sessionId: "second", terminalFirst: true });
   expect(useTerminals).toHaveBeenLastCalledWith("second", { reconcileWhilePending: true });
@@ -65,13 +66,18 @@ it.each([
   expect(result.current.openTerminals).toEqual(["terminal:shell"]);
 });
 
-it("uses the published nested Git scope for both the counter and file links", () => {
-  const gitFiles = ["repo/a.ts", "repo/nested/b.ts", "repo/deleted.ts"];
-  vi.mocked(useWorkspaceGitChanges).mockImplementation(
+it("uses the published nested comparison scope for both the counter and file links", () => {
+  const files = ["repo/a.ts", "repo/nested/b.ts", "repo/deleted.ts"];
+  vi.mocked(useWorkspaceComparisonChanges).mockImplementation(
     (_sessionId, options) =>
       ({
-        data: { data: options?.path === "repo" ? gitFiles.map((path) => ({ path })) : [] },
-      }) as ReturnType<typeof useWorkspaceGitChanges>,
+        data: {
+          available: true,
+          data: options?.path === "repo" ? files.map((path) => ({ path })) : [],
+          repositories: ["repo"],
+          root_is_repository: options?.path === "repo",
+        },
+      }) as unknown as ReturnType<typeof useWorkspaceComparisonChanges>,
   );
   const { result, rerender } = renderHook(
     ({ sessionId }) => useWorkspaceResources({ sessionId, permissionLevel: 2 }),
@@ -84,16 +90,16 @@ it("uses the published nested Git scope for both the counter and file links", ()
       directories: ["repo/nested", "repo"],
     }),
   );
-  expect(useWorkspaceGitChanges).toHaveBeenLastCalledWith("nested-counter", {
+  expect(useWorkspaceComparisonChanges).toHaveBeenLastCalledWith("nested-counter", {
     path: "repo",
     directories: ["repo", "repo/nested"],
     enabled: true,
   });
   expect(result.current.changedCount).toBe(3);
-  for (const path of gitFiles) expect(result.current.isChangedPath(path)).toBe(true);
+  for (const path of files) expect(result.current.isChangedPath(path)).toBe(true);
   expect(result.current.isChangedPath("ghost.md")).toBe(false);
   rerender({ sessionId: "counter-other-session" });
-  expect(useWorkspaceGitChanges).toHaveBeenLastCalledWith("counter-other-session", {
+  expect(useWorkspaceComparisonChanges).toHaveBeenLastCalledWith("counter-other-session", {
     path: "",
     directories: [],
     enabled: true,
@@ -101,56 +107,68 @@ it("uses the published nested Git scope for both the counter and file links", ()
   expect(result.current.changedCount).toBe(0);
 });
 
-it("reacts to the shared agent preference and deduplicates Git and agent paths", () => {
-  vi.mocked(useWorkspaceGitChanges).mockReturnValue({
-    data: {
-      data: [
-        { path: "same.ts", status: "deleted" },
-        { path: "git.ts", status: "modified" },
-      ],
-    },
-  } as ReturnType<typeof useWorkspaceGitChanges>);
-  vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
-    data: {
-      data: [
-        { path: "same.ts", status: "created" },
-        { path: "agent.ts", status: "created" },
-      ],
-    },
-  } as ReturnType<typeof useWorkspaceChangedFiles>);
+it("counts only the selected comparison, deduplicates paths, and isolates sessions", () => {
+  vi.mocked(useWorkspaceComparisonChanges).mockImplementation((sessionId) => {
+    const { comparison } = useWorkspaceComparison(sessionId);
+    return {
+      data: {
+        available: true,
+        data:
+          comparison.source === "last-turn"
+            ? [{ path: "turn.ts" }, { path: "turn.ts" }, { path: "deleted.ts", status: "deleted" }]
+            : [{ path: "live.ts" }],
+        repositories: [],
+        root_is_repository: false,
+      },
+    } as unknown as ReturnType<typeof useWorkspaceComparisonChanges>;
+  });
   const first = renderHook(() =>
-    useWorkspaceResources({ sessionId: "overlay-a", permissionLevel: 2 }),
+    useWorkspaceResources({ sessionId: "comparison-a", permissionLevel: 2 }),
   );
   const second = renderHook(() =>
-    useWorkspaceResources({ sessionId: "overlay-b", permissionLevel: 2 }),
+    useWorkspaceResources({ sessionId: "comparison-b", permissionLevel: 2 }),
+  );
+  expect(first.result.current.changedCount).toBe(1);
+  expect(first.result.current.isChangedPath("live.ts")).toBe(true);
+  act(() =>
+    setWorkspaceComparison("comparison-a", {
+      ...DEFAULT_WORKSPACE_COMPARISON,
+      source: "last-turn",
+      turnId: "captured-turn",
+    }),
   );
   expect(first.result.current.changedCount).toBe(2);
-  expect(first.result.current.isChangedPath("agent.ts")).toBe(false);
+  expect(first.result.current.isChangedPath("turn.ts")).toBe(true);
+  expect(first.result.current.isChangedPath("deleted.ts")).toBe(true);
+  expect(first.result.current.isChangedPath("live.ts")).toBe(false);
+  expect(second.result.current.changedCount).toBe(1);
+  expect(second.result.current.isChangedPath("turn.ts")).toBe(false);
   act(() => writeFilesPanelPreferences({ showAgentChanges: true }));
-  expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("overlay-b", {
-    source: "agent",
-    enabled: true,
-  });
-  for (const result of [first.result, second.result]) {
-    expect(result.current.changedCount).toBe(3);
-    expect(result.current.isChangedPath("same.ts")).toBe(true);
-    expect(result.current.isChangedPath("agent.ts")).toBe(true);
-  }
-  act(() => writeFilesPanelPreferences({ showAgentChanges: false }));
   expect(first.result.current.changedCount).toBe(2);
-  expect(second.result.current.isChangedPath("agent.ts")).toBe(false);
+  expect(second.result.current.changedCount).toBe(1);
+  act(() => setWorkspaceComparison("comparison-a", DEFAULT_WORKSPACE_COMPARISON));
+  expect(first.result.current.changedCount).toBe(1);
+  expect(first.result.current.isChangedPath("turn.ts")).toBe(false);
 });
 
-it("keeps legacy discovery disabled without file access even when the overlay is enabled", () => {
+it("keeps comparison discovery disabled without file access even when the overlay is enabled", () => {
   writeFilesPanelPreferences({ showAgentChanges: true });
   renderHook(() => useWorkspaceResources({ sessionId: "read-only-counter", permissionLevel: 1 }));
-  expect(useWorkspaceChangedFiles).toHaveBeenLastCalledWith("read-only-counter", {
-    source: "agent",
-    enabled: false,
-  });
-  expect(useWorkspaceGitChanges).toHaveBeenLastCalledWith("read-only-counter", {
+  expect(useWorkspaceComparisonChanges).toHaveBeenLastCalledWith("read-only-counter", {
     path: "",
     directories: [],
     enabled: false,
   });
+});
+
+it("returns an empty counter while comparison discovery has no data", () => {
+  vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
+    data: undefined,
+    isLoading: true,
+  } as unknown as ReturnType<typeof useWorkspaceComparisonChanges>);
+  const { result } = renderHook(() =>
+    useWorkspaceResources({ sessionId: "loading-counter", permissionLevel: 2 }),
+  );
+  expect(result.current.changedCount).toBe(0);
+  expect(result.current.isChangedPath("notes.md")).toBe(false);
 });

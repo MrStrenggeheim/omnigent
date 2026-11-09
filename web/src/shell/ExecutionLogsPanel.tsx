@@ -155,13 +155,15 @@ export function ExecutionLogsPanel({
           className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
         />
       )}
-      {open && <MobileWorkspaceTabs />}
-      <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-3">
-        <h2 className="font-medium text-ui">Execution logs</h2>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
-          <XIcon className="size-4" />
-        </Button>
-      </header>
+      {open && <MobileWorkspaceTabs onClose={onClose} />}
+      {isDesktop && (
+        <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-3">
+          <h2 className="font-medium text-ui">Execution logs</h2>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
+            <XIcon className="size-4" />
+          </Button>
+        </header>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         {!open || !activeEntry ? (

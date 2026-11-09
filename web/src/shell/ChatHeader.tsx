@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AgentInfoButton } from "@/components/AgentInfo";
+import { HeaderActionButton } from "@/components/HeaderActionButton";
 import { NotificationBell } from "@/components/NotificationCenter";
 import { ConversationBreadcrumb } from "./ConversationBreadcrumb";
 import { HeaderConversationMenu } from "./HeaderConversationMenu";
@@ -154,17 +155,17 @@ const PENDING_ACTION_TITLE = "Available when the session starts";
 function PendingHeaderActions({ isMobile }: { isMobile: boolean }) {
   if (isMobile) {
     return (
-      <Button
+      <HeaderActionButton
         type="button"
         variant="ghost"
-        size="icon"
+        size="icon-xs"
         aria-label="Session actions"
         title={PENDING_ACTION_TITLE}
         disabled
         className="text-muted-foreground md:hidden max-md:size-11"
       >
-        <EllipsisVerticalIcon className="size-4 max-md:size-5" />
-      </Button>
+        <EllipsisVerticalIcon className="size-4" />
+      </HeaderActionButton>
     );
   }
 
@@ -360,7 +361,7 @@ export function ChatHeader({
         // Scrolled chat text can't render through the controls because the
         // conversation viewport fades its top edge instead (chat-scroll-fade
         // in index.css, applied in ChatPage).
-        "chat-header absolute inset-x-0 top-0 z-30 flex h-14 md:h-12 items-center justify-between px-2 md:px-4 py-3 md:right-[var(--workspace-panel-offset,0px)]",
+        "chat-header absolute inset-x-0 top-0 z-30 flex h-14 md:h-12 items-center justify-between px-2 max-md:pl-[max(0.5rem,var(--omnigent-safe-left,0px))] max-md:pr-[max(0.5rem,var(--omnigent-safe-right,0px))] md:px-4 py-3 md:right-[var(--workspace-panel-offset,0px)]",
         settingsMode && "settings-mobile-header",
       )}
     >
@@ -406,26 +407,35 @@ export function ChatHeader({
             right-hand action cluster. On the macOS shell with the sidebar
             collapsed, the slot's traffic-light-clearance pads it past the
             window controls + title-bar cluster (index.css). */}
-        {conversationId && (conversationTitle || titleLinkTo) && (
-          <ConversationBreadcrumb
-            conversationTitle={conversationTitle ?? UNTITLED_CONVERSATION_LABEL}
-            projectName={projectName}
-            projectIcon={projectIcon}
-            projectTag={projectTag ?? undefined}
-            titleSlot={titleSlot ?? undefined}
-            titleLinkTo={titleLinkTo}
-            isChildSession={isChildSession}
-            subAgentName={subAgentName}
-            boundAgent={boundAgent}
-            wrapperLabel={wrapperLabel}
-            actions={isMobile ? undefined : (conversationMenu ?? undefined)}
-            className="pr-1"
-          />
-        )}
+        {conversationId &&
+          (conversationTitle || titleLinkTo) &&
+          (isMobile && !titleLinkTo ? (
+            <span
+              className="min-w-0 truncate text-ui font-medium"
+              title={conversationTitle ?? undefined}
+            >
+              {conversationTitle ?? UNTITLED_CONVERSATION_LABEL}
+            </span>
+          ) : (
+            <ConversationBreadcrumb
+              conversationTitle={conversationTitle ?? UNTITLED_CONVERSATION_LABEL}
+              projectName={projectName}
+              projectIcon={projectIcon}
+              projectTag={projectTag ?? undefined}
+              titleSlot={titleSlot ?? undefined}
+              titleLinkTo={titleLinkTo}
+              isChildSession={isChildSession}
+              subAgentName={subAgentName}
+              boundAgent={boundAgent}
+              wrapperLabel={wrapperLabel}
+              actions={isMobile ? undefined : (conversationMenu ?? undefined)}
+              className="pr-1"
+            />
+          ))}
       </div>
 
-      <div className="flex items-center gap-2 max-md:gap-0 max-md:empty:hidden">
-        <NotificationBell />
+      <div className="flex shrink-0 items-center gap-2 max-md:gap-0 max-md:empty:hidden">
+        {!isMobile && <NotificationBell />}
         {/* Other users currently viewing this session (presence).
             Self-contained — reads the chat store directly, renders
             nothing when the user is alone. */}
@@ -486,16 +496,16 @@ export function ChatHeader({
             // HeaderConversationMenu).
             <DropdownMenu modal={!isMobile}>
               <DropdownMenuTrigger asChild>
-                <Button
+                <HeaderActionButton
                   type="button"
                   variant="ghost"
-                  size="icon"
+                  size="icon-xs"
                   aria-label="Session actions"
                   data-testid="session-actions-menu"
                   className="text-muted-foreground hover:text-foreground md:hidden max-md:size-11"
                 >
-                  <EllipsisVerticalIcon className="size-4 max-md:size-5" />
-                </Button>
+                  <EllipsisVerticalIcon className="size-4" />
+                </HeaderActionButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
@@ -629,10 +639,9 @@ export function ChatHeader({
             </TooltipContent>
           </Tooltip>
         )}
-        {!pending && conversationId && <MobileWorkspaceButton />}
-        {/* Mobile-only session-actions kebab, rightmost in the cluster. Same
-            menu the desktop breadcrumb hangs off its title. */}
         {isMobile && conversationMenu}
+        {isMobile && <NotificationBell />}
+        {!pending && conversationId && <MobileWorkspaceButton />}
         {canvas && !canvas.compact && (
           <>
             <Button

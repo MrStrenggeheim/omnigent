@@ -354,7 +354,9 @@ export function useWorkspaceGitChanges(
   const environment = useWorkspaceEnvironment(conversationId, { enabled: options.enabled });
   const path = options.path ?? "";
   const directories = [...new Set(options.directories ?? [])].sort().slice(0, 128);
-  return useQuery<WorkspaceChangedFilesResult & { repositories: string[] }>({
+  return useQuery<
+    WorkspaceChangedFilesResult & { repositories: string[]; root_is_repository?: boolean }
+  >({
     queryKey: ["workspace-git-changes", conversationId, path, directories],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({
@@ -370,7 +372,12 @@ export function useWorkspaceGitChanges(
       if (!response.ok) {
         throw new Error(payload.error?.message ?? payload.detail ?? "Git status is unavailable");
       }
-      return { available: true, data: payload.data, repositories: payload.repositories ?? [] };
+      return {
+        available: true,
+        data: payload.data,
+        repositories: payload.repositories ?? [],
+        root_is_repository: payload.root_is_repository === true,
+      };
     },
     enabled:
       options.enabled !== false &&

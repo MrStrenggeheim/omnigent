@@ -7,11 +7,18 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
-import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { readFilesPanelPreferences, writeFilesPanelPreferences } from "@/lib/filesPanelPreferences";
+import {
+  DEFAULT_WORKSPACE_COMPARISON,
+  getWorkspaceComparison,
+  setWorkspaceComparison,
+} from "@/lib/workspaceComparison";
+import {
+  useWorkspaceComparisonChanges,
+  type WorkspaceComparisonResult,
+} from "@/hooks/useWorkspaceComparisons";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type WorkspaceChangedFile,
@@ -19,8 +26,6 @@ import {
   PathUnreachableError,
   useWorkspaceAllFiles,
   useWorkspaceAsleep,
-  useWorkspaceChangedFiles,
-  useWorkspaceGitChanges,
   useWorkspaceDirectories,
   useWorkspaceDirectory,
   useWorkspaceEnvironment,
@@ -32,6 +37,7 @@ import type * as WorkspacePickerModule from "./WorkspacePicker";
 const { copyTextMock } = vi.hoisted(() => ({ copyTextMock: vi.fn(() => Promise.resolve()) }));
 vi.mock("@/lib/clipboard", () => ({ copyText: copyTextMock }));
 
+import * as ExplorerOperations from "@/lib/explorerOperations";
 import { useSession } from "@/hooks/useSession";
 import { FilesPanel } from "./FilesPanel";
 import { FilesPanelDrawer } from "./FilesPanelDrawer";
@@ -45,8 +51,6 @@ vi.mock("@/hooks/useWorkspaceChangedFiles", async (importOriginal) => ({
   ...(await importOriginal<typeof WorkspaceChangedFilesModule>()),
   useWorkspaceAllFiles: vi.fn(),
   useWorkspaceAsleep: vi.fn(),
-  useWorkspaceChangedFiles: vi.fn(),
-  useWorkspaceGitChanges: vi.fn(),
   useWorkspaceDirectory: vi.fn(),
   // The tree fetches expanded lazy dirs centrally via the plural hook; default
   // it to no expanded dirs (empty map). Tests that drive lazy content override.
@@ -84,10 +88,19 @@ vi.mock("@/hooks/useSession", () => ({
   useSession: vi.fn(() => ({ session: { hostId: "host_test" } })),
 }));
 
+vi.mock("@/hooks/useWorkspaceComparisons", () => ({ useWorkspaceComparisonChanges: vi.fn() }));
+
+function openFileMenu() {
+  fireEvent.keyDown(screen.getByRole("button", { name: "More file actions" }), { key: "Enter" });
+}
+function showFilenameFilters() {
+  openFileMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Filename include/exclude filters" }));
+}
+
 const useAllFilesMock = vi.mocked(useWorkspaceAllFiles);
 const useAsleepMock = vi.mocked(useWorkspaceAsleep);
-const useGitChangesMock = vi.mocked(useWorkspaceGitChanges);
-const useAgentChangesMock = vi.mocked(useWorkspaceChangedFiles);
+const useComparisonChangesMock = vi.mocked(useWorkspaceComparisonChanges);
 const useDirectoryMock = vi.mocked(useWorkspaceDirectory);
 const useDirectoriesMock = vi.mocked(useWorkspaceDirectories);
 const useEnvironmentMock = vi.mocked(useWorkspaceEnvironment);
@@ -152,14 +165,23 @@ function allFilesResult(files: WorkspaceFile[]) {
   } as unknown as ReturnType<typeof useWorkspaceAllFiles>;
 }
 
-function changedFilesResult(files: WorkspaceChangedFile[] = []) {
+function changedFilesResult(
+  files: WorkspaceChangedFile[] = [],
+  metadata: Partial<WorkspaceComparisonResult> = {},
+) {
   return {
-    data: { available: true, data: files, repositories: [] },
+    data: {
+      available: true,
+      data: files,
+      repositories: [],
+      root_is_repository: false,
+      ...metadata,
+    },
     error: null,
     isError: false,
     isLoading: false,
     refetch: gitChangesRefetchMock,
-  } as unknown as ReturnType<typeof useWorkspaceGitChanges>;
+  } as unknown as ReturnType<typeof useWorkspaceComparisonChanges>;
 }
 
 function unloadedResult() {
@@ -222,6 +244,8 @@ function renderPanel({
   reachable = null,
   onFileSelect = vi.fn(),
   listsLoaded = true,
+  rootIsRepository = false,
+  warning,
 }: {
   conversationId: string;
   flatView?: boolean;
@@ -241,16 +265,18 @@ function renderPanel({
   onFileSelect?: (path: string) => void;
   /** False: both list queries are disabled and hold no data (nothing could serve them). */
   listsLoaded?: boolean;
+  rootIsRepository?: boolean;
+  warning?: string;
 }) {
   useAllFilesMock.mockReturnValue(
     listsLoaded
       ? allFilesResult(files)
       : (unloadedResult() as ReturnType<typeof useWorkspaceAllFiles>),
   );
-  useGitChangesMock.mockReturnValue(
+  useComparisonChangesMock.mockReturnValue(
     listsLoaded
-      ? changedFilesResult(changedFiles)
-      : (unloadedResult() as ReturnType<typeof useWorkspaceGitChanges>),
+      ? changedFilesResult(changedFiles, { root_is_repository: rootIsRepository, warning })
+      : (unloadedResult() as ReturnType<typeof useWorkspaceComparisonChanges>),
   );
   useDirectoryMock.mockReturnValue(directoryResult());
   useEnvironmentMock.mockReturnValue(environmentResult(workingDir, reachable));
@@ -258,7 +284,7 @@ function renderPanel({
     searchResult(treeSearchResults, isSearching, isSearchPlaceholder, isSearchTruncated),
   );
 
-  return render(
+  const panel = () => (
     <MemoryRouter initialEntries={[`/c/${conversationId}`]}>
       <Routes>
         <Route
@@ -276,18 +302,18 @@ function renderPanel({
           }
         />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const view = render(panel());
+  return { ...view, refreshPanel: () => view.rerender(panel()) };
 }
 
 beforeEach(() => {
   useAllFilesMock.mockReset();
   useAsleepMock.mockReturnValue(false);
   localStorage.clear();
-  useGitChangesMock.mockReset();
-  useGitChangesMock.mockReturnValue(changedFilesResult());
-  useAgentChangesMock.mockReset();
-  useAgentChangesMock.mockReturnValue(changedFilesResult());
+  useComparisonChangesMock.mockReset();
+  useComparisonChangesMock.mockReturnValue(changedFilesResult());
   useDirectoryMock.mockReset();
   useDirectoriesMock.mockClear();
   useEnvironmentMock.mockReset();
@@ -424,28 +450,23 @@ describe("FilesPanel header role", () => {
     expect(search.parentElement).not.toHaveClass("rounded-full");
   });
 
-  it("labels the changed-files scope with a Changes heading", () => {
+  it("uses the shared folder header for Changes", () => {
     renderPanel({
       conversationId: "conv_header_changes",
       files: [],
       flatView: true,
       workingDir: "/home/user/proj",
     });
-    const changesHeading = screen.getByRole("heading", { name: "Changes" });
-    expect(changesHeading).toBeInTheDocument();
-    expect(changesHeading).toHaveClass("pl-1");
-    expect(changesHeading.parentElement).toHaveClass("h-11");
-    expect(screen.queryByRole("heading", { name: "Working folder" })).toBeNull();
-    expect(screen.queryByTestId("browse-location-path")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Go to parent folder" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Copy folder path: proj" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Changes" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Go to parent folder" })).toBeInTheDocument();
+    expect(screen.getByText("proj")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh files" })).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search changed files" })).toBeInTheDocument();
   });
 
   it("uses the breadcrumb as the frameless inline-rail header", () => {
     useAllFilesMock.mockReturnValue(allFilesResult([]));
-    useGitChangesMock.mockReturnValue(changedFilesResult([]));
+    useComparisonChangesMock.mockReturnValue(changedFilesResult([]));
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult("/home/user/workspace"));
     useSearchMock.mockReturnValue(searchResult());
@@ -483,21 +504,19 @@ describe("FilesPanel header role", () => {
   });
 });
 
-describe("FilesPanel hidden-files toggle icon", () => {
-  // The icon previews the action the toggle will perform.
-  it("shows a slashed eye when clicking will hide hidden files", () => {
-    renderPanel({ conversationId: "conv_eye_on", files: [], showHidden: true });
-    const toggle = screen.getByRole("button", { name: "Hide hidden files" });
-    expect(toggle).toHaveAttribute("data-size", "icon-sm");
-    expect(toggle.querySelector(".lucide-eye-off")).not.toBeNull();
-  });
-
-  it("shows a plain eye when clicking will reveal hidden files", () => {
-    renderPanel({ conversationId: "conv_eye_off", files: [], showHidden: false });
-    const toggle = screen.getByRole("button", { name: "Show hidden files" });
-    expect(toggle.querySelector(".lucide-eye")).not.toBeNull();
-    expect(toggle.querySelector(".lucide-eye-off")).toBeNull();
-  });
+describe("FilesPanel hidden-files menu", () => {
+  it.each([true, false])(
+    "shows hidden-file state and its action icon in overflow (%s)",
+    (showHidden) => {
+      renderPanel({ conversationId: `conv_eye_${showHidden}`, files: [], showHidden });
+      expect(screen.queryByRole("button", { name: /hidden files/ })).toBeNull();
+      openFileMenu();
+      const toggle = screen.getByRole("menuitemcheckbox", { name: "Show hidden files" });
+      expect(toggle).toHaveAttribute("aria-checked", String(showHidden));
+      expect(toggle.querySelector(showHidden ? ".lucide-eye-off" : ".lucide-eye")).not.toBeNull();
+      expect(screen.queryByRole("menuitemcheckbox", { name: "Show agent changes" })).toBeNull();
+    },
+  );
 });
 
 describe("FilesPanel on an asleep sandbox", () => {
@@ -531,14 +550,10 @@ describe("FilesPanel scope (fixed by the caller's Files/Changes tab)", () => {
       changedFiles: [changedFile("src/App.tsx")],
     });
 
-    expect(useGitChangesMock).toHaveBeenCalledWith("conv_changed_only", {
+    expect(useComparisonChangesMock).toHaveBeenCalledWith("conv_changed_only", {
       path: "",
       directories: [""],
       enabled: true,
-    });
-    expect(useAgentChangesMock).toHaveBeenCalledWith("conv_changed_only", {
-      source: "agent",
-      enabled: false,
     });
     expect(useAllFilesMock).toHaveBeenCalledWith("conv_changed_only", { enabled: false }, "");
     expect(useSearchMock).toHaveBeenCalledWith(
@@ -585,18 +600,8 @@ describe("FilesPanel scope (fixed by the caller's Files/Changes tab)", () => {
   });
 });
 
-describe("Explorer Git and agent overlays", () => {
-  const agentRefetch = vi.fn(() => Promise.resolve());
-
-  function setAgentChanges(files: WorkspaceChangedFile[]) {
-    useAgentChangesMock.mockReturnValue({
-      ...changedFilesResult(files),
-      refetch: agentRefetch,
-    } as unknown as ReturnType<typeof useWorkspaceChangedFiles>);
-  }
-
-  it("defaults to Git only, keeps deleted Git files in Changes, and skips agent refreshes", async () => {
-    setAgentChanges([changedFile("old-session.ts", "created")]);
+describe("Explorer shared comparisons", () => {
+  it("keeps Git deletions in Changes and refreshes the selected comparison", async () => {
     renderPanel({
       conversationId: "git_default_changes",
       flatView: true,
@@ -604,64 +609,166 @@ describe("Explorer Git and agent overlays", () => {
       changedFiles: [changedFile("removed.ts", "deleted")],
     });
     expect(screen.getByText("removed.ts")).toBeInTheDocument();
-    expect(screen.queryByText("old-session.ts")).not.toBeInTheDocument();
-    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_default_changes", {
-      source: "agent",
-      enabled: false,
-    });
-    agentRefetch.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Refresh files" }));
     await waitFor(() => expect(gitChangesRefetchMock).toHaveBeenCalledTimes(1));
-    expect(agentRefetch).not.toHaveBeenCalled();
   });
 
-  it("shares the More setting between Files and Changes and lets Git win duplicate paths", async () => {
-    setAgentChanges([
-      changedFile("session-only.ts", "created"),
-      changedFile("/work/live.ts", "created"),
-    ]);
-    const tree = renderPanel({
-      conversationId: "git_shared_tree",
+  it("shares comparison selection with the viewer store and never reconstructs historical Files paths", () => {
+    renderPanel({
+      conversationId: "comparison_shared",
       files: [file("live.ts")],
-      workingDir: "/work",
-      changedFiles: [changedFile("live.ts", "modified")],
+      changedFiles: [changedFile("live.ts"), changedFile("missing/gone.ts", "deleted")],
     });
-    const changes = renderPanel({
-      conversationId: "git_shared_changes",
-      flatView: true,
-      files: [],
-      workingDir: "/work",
-      changedFiles: [changedFile("live.ts", "modified")],
-    });
-    expect(screen.queryByText("session-only.ts")).not.toBeInTheDocument();
-    await userEvent.click(screen.getAllByRole("button", { name: "More file actions" })[0]);
-    const toggle = await screen.findByRole("menuitemcheckbox", { name: "Show agent changes" });
-    expect(toggle).not.toBeChecked();
-    await userEvent.click(toggle);
-    expect(readFilesPanelPreferences().showAgentChanges).toBe(true);
-    expect(screen.getAllByText("session-only.ts")).toHaveLength(2);
-    expect(screen.getAllByText("live.ts")).toHaveLength(2);
-    expect(screen.getAllByTitle("Modified")).toHaveLength(2);
-    expect(useAgentChangesMock).toHaveBeenCalledWith("git_shared_changes", {
-      source: "agent",
-      enabled: true,
-    });
-
-    await userEvent.click(screen.getAllByRole("button", { name: "More file actions" })[1]);
-    await userEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Show agent changes" }),
+    act(() =>
+      setWorkspaceComparison("comparison_shared", { source: "agent", base: "", target: "" }),
     );
-    expect(screen.queryByText("session-only.ts")).not.toBeInTheDocument();
-    expect(readFilesPanelPreferences().showAgentChanges).toBe(false);
-    act(() => writeFilesPanelPreferences({ showAgentChanges: true }));
-    tree.unmount();
-    changes.unmount();
-    renderPanel({ conversationId: "git_toggle_remount", files: [] });
-    expect(useAgentChangesMock).toHaveBeenLastCalledWith("git_toggle_remount", {
-      source: "agent",
-      enabled: true,
-    });
+    expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
+    expect(screen.getByText("live.ts")).toBeInTheDocument();
+    expect(screen.queryByText("gone.ts")).toBeNull();
+    openFileMenu();
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Show agent changes" })).toBeNull();
   });
+
+  it.each(["since", "range", "commit"] as const)(
+    "resets %s before querying an explicitly selected folder",
+    (source) => {
+      const conversationId = `revision_navigation_${source}`;
+      setWorkspaceComparison(conversationId, {
+        source,
+        base: "old-repository-hash",
+        target: "HEAD",
+      });
+      renderPanel({
+        conversationId,
+        files: [file("src/a.ts")],
+        workingDir: "/work",
+        rootIsRepository: true,
+      });
+      const requests: { path: string | undefined; source: string }[] = [];
+      useComparisonChangesMock.mockImplementation((id, options) => {
+        requests.push({ path: options?.path, source: getWorkspaceComparison(id).source });
+        return changedFilesResult([]);
+      });
+      fireEvent.doubleClick(screen.getByRole("button", { name: "src/" }));
+      expect(getWorkspaceComparison(conversationId)).toEqual(DEFAULT_WORKSPACE_COMPARISON);
+      expect(requests.filter((request) => request.path === "src")).not.toHaveLength(0);
+      expect(
+        requests
+          .filter((request) => request.path === "src")
+          .every((request) => request.source === "git"),
+      ).toBe(true);
+    },
+  );
+
+  it("shares folder scope across Files and Changes and applies selected-folder operations to canonical paths", async () => {
+    const conversationId = "shared_scope_operations";
+    const operation = vi.spyOn(ExplorerOperations, "filesystemOperation").mockResolvedValue({});
+    const first = renderPanel({ conversationId, files: [file("src/a.ts")], workingDir: "/work" });
+    fireEvent.doubleClick(screen.getByRole("button", { name: "src/" }));
+    first.unmount();
+    renderPanel({
+      conversationId,
+      files: [],
+      flatView: true,
+      workingDir: "/work",
+      changedFiles: [
+        changedFile("src/a.ts"),
+        changedFile("src-old/outside.ts"),
+        changedFile("elsewhere.ts"),
+      ],
+    });
+    expect(screen.getByText("a.ts")).toBeInTheDocument();
+    expect(screen.queryByText("outside.ts")).toBeNull();
+    expect(screen.queryByText("elsewhere.ts")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/a.ts" }));
+    openFileMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move selected items to trash…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move to trash" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith(conversationId, {
+        operation: "trash",
+        path: "src",
+        paths: ["src/a.ts"],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New file" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "new.ts" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith(conversationId, {
+        operation: "create_file",
+        path: "src/new.ts",
+      }),
+    );
+    operation.mockRestore();
+  });
+
+  it("preserves expanded folders, selection, search and scroll through background comparison refreshes", () => {
+    const view = renderPanel({
+      conversationId: "stable_comparison_refresh",
+      files: [file("src/a.ts"), file("src/b.ts")],
+      workingDir: "/work",
+      changedFiles: [changedFile("src/a.ts")],
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/a.ts" }));
+    const tree = screen.getByRole("tree", { name: "Workspace files" });
+    tree.scrollTop = 40;
+    fireEvent.scroll(tree);
+    const selected = screen.getByRole("treeitem", { selected: true });
+    useComparisonChangesMock.mockReturnValue({
+      ...changedFilesResult([changedFile("src/a.ts"), changedFile("src/b.ts")]),
+      isFetching: true,
+    } as ReturnType<typeof useWorkspaceComparisonChanges>);
+    view.refreshPanel();
+    expect(screen.getByRole("treeitem", { selected: true })).toBe(selected);
+    expect(screen.getByRole("button", { name: "src/" })).toHaveAttribute("aria-expanded", "true");
+    expect(tree.scrollTop).toBe(40);
+    const search = screen.getByRole("searchbox", { name: "Search all files" });
+    fireEvent.change(search, { target: { value: "a.ts" } });
+    view.refreshPanel();
+    expect(search).toHaveValue("a.ts");
+  });
+
+  it("keeps agent comparison scoped and shows coverage warnings", () => {
+    const conversationId = "agent_selected_folder";
+    setWorkspaceComparison(conversationId, { source: "agent", base: "", target: "" });
+    renderPanel({
+      conversationId,
+      files: [],
+      flatView: true,
+      workingDir: "/work",
+      reachable: { unconfined: true, roots: [] },
+      changedFiles: [changedFile("/etc/selected.ts"), changedFile("other.ts")],
+      warning: "Captured coverage is partial",
+    });
+    fireEvent.click(screen.getByTestId("browse-location-path"));
+    fireEvent.click(screen.getByTestId("stub-picker-confirm"));
+    expect(getWorkspaceComparison(conversationId).source).toBe("agent");
+    expect(screen.getByText("selected.ts")).toBeInTheDocument();
+    expect(screen.queryByText("other.ts")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Captured coverage is partial");
+  });
+
+  it.each([false, true])(
+    "keeps actions inside the path row without a Reveal or search shortcut (Changes=%s)",
+    (flatView) => {
+      renderPanel({
+        conversationId: `merged_header_${flatView}`,
+        files: [],
+        workingDir: "/work",
+        flatView,
+      });
+      const up = screen.getByRole("button", { name: "Go to parent folder" });
+      const newFile = screen.getByRole("button", { name: "New file" });
+      const header = up.closest("div.h-11");
+      expect(header).toContainElement(newFile);
+      expect(header).toContainElement(screen.getByRole("button", { name: "More file actions" }));
+      expect(screen.queryByRole("button", { name: "Reveal active file" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Search folder contents" })).toBeNull();
+    },
+  );
 
   it("decorates actual nested files without reconstructing absent change paths", async () => {
     renderPanel({
@@ -680,7 +787,7 @@ describe("Explorer Git and agent overlays", () => {
     expect(await screen.findByText("live.ts")).toHaveClass("text-amber-500");
     expect(screen.queryByText("gone.ts")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "absent/" })).not.toBeInTheDocument();
-    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_actual_tree", {
+    expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_actual_tree", {
       path: "",
       directories: ["", "repo"],
       enabled: true,
@@ -692,7 +799,7 @@ describe("Explorer Git and agent overlays", () => {
       file(`repo-${String(i).padStart(3, "0")}/a.ts`),
     );
     const tree = renderPanel({ conversationId: "git_visited", workingDir: "/work", files });
-    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_visited", {
+    expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_visited", {
       path: "",
       directories: ["", ...files.slice(0, 127).map((f) => f.path.split("/")[0])],
       enabled: true,
@@ -704,7 +811,7 @@ describe("Explorer Git and agent overlays", () => {
       files: [],
       flatView: true,
     });
-    expect(useGitChangesMock.mock.lastCall?.[1]?.directories).toHaveLength(128);
+    expect(useComparisonChangesMock.mock.lastCall?.[1]?.directories).toHaveLength(128);
     changes.unmount();
 
     const scoped = renderPanel({
@@ -716,7 +823,7 @@ describe("Explorer Git and agent overlays", () => {
       allFilesResult(location === "src" ? [file("nested/a.ts")] : [file("src/nested/a.ts")]),
     );
     fireEvent.doubleClick(screen.getByRole("button", { name: "src/" }));
-    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
+    expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
       path: "src",
       directories: ["src", "src/nested"],
       enabled: true,
@@ -728,7 +835,7 @@ describe("Explorer Git and agent overlays", () => {
       files: [],
       flatView: true,
     });
-    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
+    expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
       path: "src",
       directories: ["src", "src/nested"],
       enabled: true,
@@ -744,7 +851,7 @@ describe("Explorer Git and agent overlays", () => {
     });
     fireEvent.click(screen.getByTestId("browse-location-path"));
     fireEvent.click(screen.getByTestId("stub-picker-confirm"));
-    expect(useGitChangesMock).toHaveBeenLastCalledWith("git_absolute_scope", {
+    expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_absolute_scope", {
       path: "/etc",
       directories: ["/etc", "/etc/nested"],
       enabled: true,
@@ -905,7 +1012,7 @@ describe("FilesPanel changed files search", () => {
     vi.useFakeTimers();
     const files = [file("docs/Guide.md"), file("src/App.tsx")];
     useAllFilesMock.mockReturnValue(allFilesResult(files));
-    useGitChangesMock.mockReturnValue(changedFilesResult());
+    useComparisonChangesMock.mockReturnValue(changedFilesResult());
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult());
     useSearchMock.mockReturnValue(searchResult());
@@ -977,9 +1084,9 @@ describe("FilesPanel changed files search", () => {
     expect(screen.queryByText("App.tsx")).toBeNull();
   });
 
-  it("preserves eye-icon (show-hidden) state when opening the drawer", () => {
+  it("preserves show-hidden state when opening the drawer", () => {
     useAllFilesMock.mockReturnValue(allFilesResult([file("src/App.tsx")]));
-    useGitChangesMock.mockReturnValue(changedFilesResult());
+    useComparisonChangesMock.mockReturnValue(changedFilesResult());
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult());
     useSearchMock.mockReturnValue(searchResult());
@@ -1029,20 +1136,16 @@ describe("FilesPanel changed files search", () => {
 
     render(<Harness />);
 
-    // Toggle "show hidden" on in the inline panel
-    expect(screen.getByRole("button", { name: "Show hidden files" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show hidden files" }));
-
-    // Open the drawer
+    openFileMenu();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Show hidden files" }));
     fireEvent.click(screen.getByRole("button", { name: "open drawer" }));
-
-    // Drawer should reflect the same show-hidden state (toggle now reads "Hide hidden files")
-    expect(screen.getByRole("button", { name: "Hide hidden files" })).toBeInTheDocument();
+    openFileMenu();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Show hidden files" })).toBeChecked();
   });
 
   it("keeps hidden search results hidden until the hidden-file toggle is enabled", () => {
     useAllFilesMock.mockReturnValue(allFilesResult([file(".env"), file("src/App.tsx")]));
-    useGitChangesMock.mockReturnValue(
+    useComparisonChangesMock.mockReturnValue(
       changedFilesResult([changedFile(".env"), changedFile("src/App.tsx")]),
     );
     useDirectoryMock.mockReturnValue(directoryResult());
@@ -1080,7 +1183,8 @@ describe("FilesPanel changed files search", () => {
     expect(screen.queryByText(".env")).toBeNull();
     expect(screen.getByText('No changed files match ".env"')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show hidden files" }));
+    openFileMenu();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Show hidden files" }));
 
     expect(screen.getByText(".env")).toBeInTheDocument();
   });
@@ -1569,10 +1673,7 @@ describe("FilesPanel tree (Explore) search", () => {
     // Hidden by default — the toggle starts collapsed.
     expect(screen.queryByRole("textbox", { name: "files to include" })).toBeNull();
 
-    const preferences = screen.getByRole("button", { name: "Show search filters" });
-    expect(preferences).toHaveAttribute("data-size", "icon-sm");
-    expect(preferences).not.toHaveAttribute("title");
-    fireEvent.click(preferences);
+    showFilenameFilters();
 
     // Both glob inputs become visible after the toggle is opened.
     expect(screen.getByRole("textbox", { name: "files to include" })).toBeInTheDocument();
@@ -1591,7 +1692,7 @@ describe("FilesPanel tree (Explore) search", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search all files" }), {
       target: { value: "main" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Show search filters" }));
+    showFilenameFilters();
     fireEvent.change(screen.getByRole("textbox", { name: "files to include" }), {
       target: { value: "*.py" },
     });
@@ -1621,7 +1722,7 @@ describe("FilesPanel tree (Explore) search", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search all files" }), {
       target: { value: "main" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Show search filters" }));
+    showFilenameFilters();
     fireEvent.change(screen.getByRole("textbox", { name: "files to exclude" }), {
       target: { value: "**/node_modules" },
     });
@@ -1646,7 +1747,7 @@ describe("FilesPanel tree (Explore) search", () => {
       treeSearchResults: [],
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Show search filters" }));
+    showFilenameFilters();
     fireEvent.change(screen.getByRole("textbox", { name: "files to include" }), {
       target: { value: "*.ts" },
     });
@@ -1707,29 +1808,13 @@ describe("FilesPanel tree (Explore) search", () => {
 });
 
 describe("FilesPanel sort control", () => {
-  it("renders the sort selector in the All (tree) view", () => {
-    // Sort applies to the All tree too, not just the Changed list (trigger is
-    // labeled "Sort: <active>").
-    renderPanel({
-      conversationId: "conv_all_sort",
-      files: [file("a.txt")],
-      flatView: false,
-    });
-    const sort = screen.getByRole("button", { name: /^Sort:/ });
-    expect(sort).toBeInTheDocument();
-    expect(sort).toHaveAttribute("data-size", "sm");
-    expect(sort).toHaveClass("gap-[2px]");
-    expect(sort).not.toHaveAttribute("title");
-    expect(sort).toHaveTextContent("Last edited");
-    expect(sort).not.toHaveTextContent("Sort:");
-    expect(sort.querySelector(".lucide-arrow-down-up")).not.toBeNull();
-    expect(sort.querySelector(".lucide-file-clock")).toBeNull();
-    const filter = screen.getByRole("button", { name: "Show search filters" });
-    expect(sort.compareDocumentPosition(filter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const visibility = screen.getByRole("button", { name: "Show hidden files" });
-    expect(
-      filter.compareDocumentPosition(visibility) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+  it("keeps sort and filters in overflow with the saved sort checked", () => {
+    renderPanel({ conversationId: "conv_all_sort", files: [file("a.txt")] });
+    expect(screen.queryByRole("button", { name: /^Sort:/ })).toBeNull();
+    openFileMenu();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Sort by" }), { key: "ArrowRight" });
+    expect(screen.getByRole("menuitemradio", { name: "Last edited" })).toBeChecked();
+    expect(screen.getByRole("menuitemradio", { name: "Filename" })).not.toBeChecked();
   });
 });
 
@@ -1780,8 +1865,8 @@ describe("FilesPanel scroll position persistence", () => {
       isLoading: false,
     };
     useAllFilesMock.mockReturnValue(pending as unknown as ReturnType<typeof useWorkspaceAllFiles>);
-    useGitChangesMock.mockReturnValue(
-      pending as unknown as ReturnType<typeof useWorkspaceGitChanges>,
+    useComparisonChangesMock.mockReturnValue(
+      pending as unknown as ReturnType<typeof useWorkspaceComparisonChanges>,
     );
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult(null));
@@ -1815,7 +1900,7 @@ describe("FilesPanel scroll position persistence", () => {
 
     // Files arrive: the saved position survives the clamp and is restored.
     useAllFilesMock.mockReturnValue(allFilesResult(files));
-    useGitChangesMock.mockReturnValue(changedFilesResult([]));
+    useComparisonChangesMock.mockReturnValue(changedFilesResult([]));
     view.rerender(panel());
     expect(section.scrollTop).toBe(120);
 
@@ -2074,7 +2159,7 @@ describe("FilesPanel browse location", () => {
       isError: true,
       isLoading: false,
     } as unknown as ReturnType<typeof useWorkspaceAllFiles>);
-    useGitChangesMock.mockReturnValue(changedFilesResult([]));
+    useComparisonChangesMock.mockReturnValue(changedFilesResult([]));
     useDirectoryMock.mockReturnValue(directoryResult());
     useEnvironmentMock.mockReturnValue(environmentResult("/home/user/proj", CONFINED));
     useSearchMock.mockReturnValue(searchResult(undefined, false));
@@ -2187,24 +2272,29 @@ describe("FilesPanel header copy path", () => {
       workingDir: "/home/user/proj",
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy folder path: proj" }));
+    openFileMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy folder path" }));
 
     // The header copies the ABSOLUTE path -- pasting a basename would be
     // useless, and the header is the one place the full path is on screen.
     expect(copyTextMock).toHaveBeenCalledWith("/home/user/proj");
   });
 
-  it("refreshes the current tree after the copy control", async () => {
+  it("refreshes the current tree between create and collapse controls", async () => {
     renderPanel({
       conversationId: "conv_refresh_files",
       files: [dir("src")],
       workingDir: "/home/user/proj",
     });
 
-    const copy = screen.getByRole("button", { name: "Copy folder path: proj" });
+    const create = screen.getByRole("button", { name: "New folder" });
     const refresh = screen.getByRole("button", { name: "Refresh files" });
-    expect(refresh).toHaveAttribute("data-size", "icon-sm");
-    expect(copy.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const collapse = screen.getByRole("button", { name: "Collapse all folders" });
+    expect(create.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      refresh.compareDocumentPosition(collapse) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(collapse.querySelector(".lucide-copy-minus")).not.toBeNull();
 
     fireEvent.click(refresh);
 
@@ -2231,7 +2321,8 @@ describe("FilesPanel header copy path", () => {
     fireEvent.click(screen.getByTestId("stub-picker-navigate"));
     fireEvent.click(screen.getByTestId("stub-picker-confirm"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy folder path: etc" }));
+    openFileMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy folder path" }));
 
     expect(copyTextMock).toHaveBeenCalledWith("/etc");
   });

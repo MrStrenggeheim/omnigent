@@ -117,6 +117,7 @@ import {
   useSearchParams,
 } from "@/lib/routing";
 import { SidebarHeaderActions, SidebarSettingsButton } from "./SidebarHeaderActions";
+import { SidebarToggle, mobileSidebarToggleStyle } from "./SidebarToggle";
 import omnigentWordmark from "@/assets/omnigent-wordmark.svg";
 import { Button } from "@/components/ui/button";
 import {
@@ -692,6 +693,7 @@ function SidebarImpl({
   onOpenSearch,
   peek,
 }: SidebarProps) {
+  const mobileViewport = useIsMobileViewport();
   const sidebarData = useSidebarData();
   const branding = useBranding();
   const serverInfo = useServerInfo();
@@ -1014,6 +1016,20 @@ function SidebarImpl({
           style={dragging ? { opacity: dragProgress, transition: "none" } : undefined}
         />
       )}
+      {mobileViewport &&
+        effectiveOpen &&
+        !inSettings &&
+        createPortal(
+          <SidebarToggle
+            side="left"
+            expanded
+            aria-label="Close sidebar"
+            onClick={onClose}
+            className="fixed z-[60] md:hidden"
+            style={mobileSidebarToggleStyle("left")}
+          />,
+          document.body,
+        )}
       <aside
         aria-label="Conversations"
         onAnimationEnd={(event) => {
@@ -1129,7 +1145,7 @@ function SidebarImpl({
             {/* h-14 below md matches the mobile chat header height so the
             Search bubble shares a centerline with the overflow bubble in the
             chat strip beside the open drawer. */}
-            <div className="sidebar-header-row flex h-14 shrink-0 items-center justify-between pr-3 pl-4 md:h-12">
+            <div className="sidebar-header-row flex h-14 shrink-0 items-center justify-between pr-3 pl-4 max-md:pl-16 md:h-12">
               {/* Brand mark doubles as the "home" affordance: clicking it
             returns to `/`, the new-session composer. Without this there
             is no way back to the landing composer once you're inside a

@@ -80,6 +80,10 @@ vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
   useWorkspaceChangedFiles: vi.fn(() => ({ data: undefined, isLoading: true })),
 }));
 
+vi.mock("@/hooks/useWorkspaceComparisons", () => ({
+  useWorkspaceComparisonChanges: vi.fn(() => ({ data: undefined, isLoading: true })),
+}));
+
 // AppShell reads the GitHub info to gate the rail's GitHub tab; keep it
 // loading here (tab visible, matching the Files gate's no-flash default) so
 // no network-backed query fires. Tab visibility itself is covered in

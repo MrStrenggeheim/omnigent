@@ -1,4 +1,8 @@
-import { RunnerOfflineError, type WorkspaceChangedFile } from "@/hooks/useWorkspaceChangedFiles";
+import {
+  relativizeToWorkspace,
+  RunnerOfflineError,
+  type WorkspaceChangedFile,
+} from "@/hooks/useWorkspaceChangedFiles";
 import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -100,7 +104,7 @@ function FileListItem({
           "group flex w-full min-w-0 items-center gap-2 rounded-md py-0.5 pr-1 pl-2",
           isDeleted ? "opacity-50" : "hover:bg-muted",
           explorerRowClass,
-          explorer.selected && "bg-accent",
+          (explorer.selected || explorer.active) && "bg-accent",
         )}
       >
         <button
@@ -166,6 +170,10 @@ function FileListItem({
   );
 }
 
+const NO_REPOSITORIES: string[] = [];
+
+type RepositoryChangedFile = WorkspaceChangedFile & { repository?: string };
+
 export function FlatFileList({
   files,
   isLoading,
@@ -179,8 +187,12 @@ export function FlatFileList({
   conversationId,
   runnerWentOffline = false,
   emptyMessage = "No workspace changes yet",
+  repositories = NO_REPOSITORIES,
+  workspaceRoot = null,
 }: {
-  files: WorkspaceChangedFile[] | undefined;
+  files: RepositoryChangedFile[] | undefined;
+  repositories?: string[];
+  workspaceRoot?: string | null;
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
@@ -200,21 +212,42 @@ export function FlatFileList({
   runnerWentOffline?: boolean;
   emptyMessage?: string;
 }) {
+  const groups = useMemo(() => {
+    const normalizedQuery = normalizeSearchQuery(searchQuery);
+    const roots = repositories
+      .map((repository) => ({ repository, path: relativizeToWorkspace(repository, workspaceRoot) }))
+      .sort((a, b) => b.path.length - a.path.length);
+    const byRepository = new Map<string, RepositoryChangedFile[]>();
+    for (const file of (files ?? []).filter(
+      (candidate) =>
+        !isExplorerInternalPath(candidate.path) &&
+        (showHidden || !candidate.path.split("/").some((part) => part.startsWith("."))) &&
+        (!normalizedQuery ||
+          `${candidate.name} ${candidate.path}`.toLowerCase().includes(normalizedQuery)),
+    )) {
+      const repository =
+        file.repository ??
+        roots.find(
+          (root) => !root.path || file.path === root.path || file.path.startsWith(`${root.path}/`),
+        )?.repository ??
+        "";
+      const key = repositories.length > 1 ? repository : "";
+      const group = byRepository.get(key) ?? [];
+      group.push(file);
+      byRepository.set(key, group);
+    }
+    return [...byRepository.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([repository, group]) => ({ repository, files: group.sort(compareChangedFiles(sort)) }));
+  }, [files, repositories, workspaceRoot, showHidden, searchQuery, sort]);
   const explorerEntries = useMemo(
     () => ({
-      entries: (files ?? [])
-        .filter(
-          (file) =>
-            !isExplorerInternalPath(file.path) &&
-            file.status !== "deleted" &&
-            (showHidden || !file.path.split("/").some((part) => part.startsWith("."))) &&
-            (!searchQuery.trim() ||
-              file.path.toLowerCase().includes(searchQuery.trim().toLowerCase())),
-        )
-        .sort(compareChangedFiles(sort))
+      entries: groups
+        .flatMap((group) => group.files)
+        .filter((file) => file.status !== "deleted")
         .map((file) => ({ path: file.path, directory: false })),
     }),
-    [files, showHidden, searchQuery, sort],
+    [groups],
   );
   useExplorerTree(explorerEntries);
   if (isLoading && !files) {
@@ -238,20 +271,12 @@ export function FlatFileList({
   if (!files || files.length === 0) {
     return <p className="px-2 py-1 text-muted-foreground text-sm">{emptyMessage}</p>;
   }
-  const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
-  const visibleFiles = files.filter(
-    (f) =>
-      !isExplorerInternalPath(f.path) &&
-      (showHidden || !f.path.split("/").some((seg) => seg.startsWith("."))),
+  const visibleFiles = (files ?? []).filter(
+    (file) =>
+      !isExplorerInternalPath(file.path) &&
+      (showHidden || !file.path.split("/").some((part) => part.startsWith("."))),
   );
-  const sorted = visibleFiles
-    .filter(
-      (f) =>
-        normalizedSearchQuery.length === 0 ||
-        f.name.toLowerCase().includes(normalizedSearchQuery) ||
-        f.path.toLowerCase().includes(normalizedSearchQuery),
-    )
-    .sort(compareChangedFiles(sort));
+  const sorted = groups.flatMap((group) => group.files);
   const hiddenCount = files.length - visibleFiles.length;
   if (visibleFiles.length === 0) {
     return (
@@ -289,20 +314,35 @@ export function FlatFileList({
         </p>
       )}
       <TooltipProvider>
-        <ul className="flex flex-col gap-0.5">
-          {sorted.map((file) => {
-            const isDeleted = file.status === "deleted";
-            return (
-              <FileListItem
-                key={file.path}
-                file={file}
-                isDeleted={isDeleted}
-                onFileSelect={onFileSelect}
-                conversationId={conversationId}
-              />
-            );
-          })}
-        </ul>
+        {groups.map((group) => (
+          <div
+            key={group.repository}
+            role={repositories.length > 1 ? "group" : undefined}
+            aria-label={
+              repositories.length > 1 ? group.repository || "Outside Git repositories" : undefined
+            }
+          >
+            {repositories.length > 1 && (
+              <h3
+                className="truncate px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground"
+                title={group.repository}
+              >
+                {group.repository || "Outside Git repositories"}
+              </h3>
+            )}
+            <ul className="flex flex-col gap-0.5">
+              {group.files.map((file) => (
+                <FileListItem
+                  key={file.path}
+                  file={file}
+                  isDeleted={file.status === "deleted"}
+                  onFileSelect={onFileSelect}
+                  conversationId={conversationId}
+                />
+              ))}
+            </ul>
+          </div>
+        ))}
       </TooltipProvider>
     </>
   );

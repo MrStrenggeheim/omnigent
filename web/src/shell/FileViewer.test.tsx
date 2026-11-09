@@ -14,7 +14,9 @@
 //  12. Comments are marked seen (inbox-clearing registry) only while the
 //      comments panel is open — never from merely opening the file.
 
+import type * as TerminalsModule from "@/hooks/useTerminals";
 import { useMemo } from "react";
+import userEvent from "@testing-library/user-event";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useSearchParams } from "react-router-dom";
@@ -125,6 +127,7 @@ vi.mock("./MonacoDiffViewer", () => ({
     wrapLines,
     hideWhitespace,
     searchOpen,
+    allowComments,
   }: {
     before: string | null;
     after: string | null;
@@ -132,6 +135,7 @@ vi.mock("./MonacoDiffViewer", () => ({
     wrapLines?: boolean;
     hideWhitespace?: boolean;
     searchOpen?: boolean;
+    allowComments?: boolean;
   }) => (
     <div
       data-testid="diff-viewer"
@@ -141,6 +145,7 @@ vi.mock("./MonacoDiffViewer", () => ({
       data-wrap-lines={String(!!wrapLines)}
       data-hide-whitespace={String(!!hideWhitespace)}
       data-search-open={String(!!searchOpen)}
+      data-allow-comments={String(!!allowComments)}
     />
   ),
 }));
@@ -170,12 +175,32 @@ vi.mock("@/hooks/useFileDiff", () => ({
 }));
 
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceEnvironment: vi.fn(() => ({ data: { available: true, root: "/work" } })),
   useWorkspaceGitChanges: vi.fn(() => ({
-    data: { available: true, data: changedFilesFixture, repositories: ["/work"] },
+    data: {
+      available: true,
+      data: changedFilesFixture,
+      repositories: ["/work"],
+      root_is_repository: true,
+    },
   })),
-  useWorkspaceChangedFiles: vi.fn(() => ({
-    data: { available: true, data: changedFilesFixture },
+}));
+
+vi.mock("@/hooks/useWorkspaceComparisons", () => ({
+  useAgentTurnChoices: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useWorkspaceComparisonChanges: vi.fn(() => ({
+    data: {
+      available: true,
+      data: changedFilesFixture,
+      repositories: ["/work"],
+      root_is_repository: true,
+    },
   })),
+}));
+
+vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
+  ...(await importOriginal<typeof TerminalsModule>()),
+  useTerminals: () => ({ terminals: [] }),
 }));
 
 vi.mock("@/hooks/useResizablePanel", () => ({
@@ -214,7 +239,20 @@ import { prepareDiffEditor } from "./MonacoDiffViewer";
 import { MAX_RICH_MARKDOWN_BYTES } from "./codeViewerHelpers";
 import { useFileContent } from "@/hooks/useFileContent";
 import { getSeenCommentIds } from "@/hooks/useSeenComments";
-import { useWorkspaceChangedFiles, useWorkspaceGitChanges } from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceGitChanges } from "@/hooks/useWorkspaceChangedFiles";
+import {
+  useAgentTurnChoices,
+  useWorkspaceComparisonChanges,
+} from "@/hooks/useWorkspaceComparisons";
+import {
+  DEFAULT_WORKSPACE_COMPARISON,
+  getWorkspaceComparison,
+  setWorkspaceComparison,
+  useWorkspaceComparison,
+} from "@/lib/workspaceComparison";
+import { setExplorerGitScope } from "@/lib/explorerGitScope";
+import { useWorkspaceResources } from "./useWorkspaceResources";
+import { DiffComparisonControls } from "./DiffComparisonControls";
 import { classifyAndRemapComments, FileViewer } from "./FileViewer";
 import { FileViewerContext, type FileNavigationGuard } from "./FileViewerContext";
 import { encodePdfAnchor } from "./pdfCommentHelpers";
@@ -340,19 +378,35 @@ function localDesktopContext() {
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  setWorkspaceComparison("conv_1", DEFAULT_WORKSPACE_COMPARISON);
+  setExplorerGitScope("conv_1", { path: "", directories: [] });
+  vi.mocked(useAgentTurnChoices).mockReturnValue({
+    data: undefined,
+    isLoading: false,
+  } as ReturnType<typeof useAgentTurnChoices>);
   useCommentsMock.mockReset();
   useOptionalCommentSenderMock.mockReturnValue(null);
   vi.mocked(useFileContent).mockReturnValue({
     data: { content: "", path: "file1.py" },
   } as ReturnType<typeof useFileContent>);
-  vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
-    data: { available: true, data: changedFilesFixture },
-  } as ReturnType<typeof useWorkspaceChangedFiles>);
+  vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
+    data: {
+      available: true,
+      data: changedFilesFixture,
+      repositories: ["/work"],
+      root_is_repository: true,
+    },
+  } as ReturnType<typeof useWorkspaceComparisonChanges>);
   vi.mocked(useGitFileDiff).mockReturnValue({ data: { before: "old", after: "new" } } as ReturnType<
     typeof useGitFileDiff
   >);
   vi.mocked(useWorkspaceGitChanges).mockReturnValue({
-    data: { available: true, data: changedFilesFixture, repositories: ["/work"] },
+    data: {
+      available: true,
+      data: changedFilesFixture,
+      repositories: ["/work"],
+      root_is_repository: true,
+    },
   } as ReturnType<typeof useWorkspaceGitChanges>);
   agentFileDiffMock.mockReset().mockReturnValue({
     data: { before: "turn-before", after: "turn-after", coverage: "unknown" },
@@ -365,7 +419,12 @@ beforeEach(() => {
 });
 
 async function chooseComparison(label: string) {
-  fireEvent.keyDown(screen.getByRole("combobox", { name: "Diff comparison" }), {
+  await userEvent.click(screen.getByRole("button", { name: "Diff comparison" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: new RegExp(`^${label}`) }));
+}
+
+async function chooseRevisionType(label: string) {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Revision comparison type" }), {
     key: "ArrowDown",
   });
   fireEvent.click(await screen.findByRole("option", { name: label }));
@@ -373,6 +432,245 @@ async function chooseComparison(label: string) {
 
 describe("FileViewer comparison sources", () => {
   beforeEach(() => useCommentsMock.mockReturnValue(makeCommentsQuery([])));
+
+  it("synchronizes the list comparison, changed counter, and viewer navigation in both directions", async () => {
+    const liveFiles = [
+      { ...changedFilesFixture[0], path: "a.py", name: "a.py" },
+      changedFilesFixture[0],
+      { ...changedFilesFixture[0], path: "z.py", name: "z.py" },
+    ];
+    const capturedFiles = [changedFilesFixture[0], liveFiles[2]];
+    vi.mocked(useWorkspaceComparisonChanges).mockImplementation((sessionId) => {
+      const { comparison } = useWorkspaceComparison(sessionId);
+      return {
+        data: {
+          available: true,
+          data: comparison.source === "git" ? liveFiles : capturedFiles,
+          repositories: ["/work"],
+          root_is_repository: true,
+        },
+      } as ReturnType<typeof useWorkspaceComparisonChanges>;
+    });
+    function ListComparison() {
+      const { comparison, setComparison } = useWorkspaceComparison("conv_1");
+      const resources = useWorkspaceResources({ sessionId: "conv_1", permissionLevel: 2 });
+      return (
+        <section data-testid="list-comparison">
+          <DiffComparisonControls
+            value={comparison}
+            onChange={setComparison}
+            compact
+            repositoryRoot
+          />
+          <output aria-label="Changed count">{resources.changedCount}</output>
+          <output aria-label="Live-only path changed">
+            {String(resources.isChangedPath("a.py"))}
+          </output>
+        </section>
+      );
+    }
+    const onNavigateTo = vi.fn();
+    render(
+      <MemoryRouter>
+        <ListComparison />
+        <section data-testid="viewer-comparison">
+          <FileViewer
+            open
+            syncUrl={false}
+            conversationId="conv_1"
+            path="file1.py"
+            onClose={vi.fn()}
+            onNavigateTo={onNavigateTo}
+            sort="alpha"
+          />
+        </section>
+      </MemoryRouter>,
+    );
+    const list = within(screen.getByTestId("list-comparison"));
+    const viewer = within(screen.getByTestId("viewer-comparison"));
+    await userEvent.click(viewer.getByRole("button", { name: "Show diff" }));
+    expect(await viewer.findByTestId("diff-viewer")).toHaveAttribute(
+      "data-before",
+      JSON.stringify("old"),
+    );
+    expect(list.getByLabelText("Changed count")).toHaveTextContent("3");
+    expect(viewer.getByText("2/3")).toBeInTheDocument();
+
+    await userEvent.click(list.getByRole("button", { name: "Diff comparison" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /^Chat/ }));
+    expect(viewer.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
+    expect(viewer.getByTestId("diff-viewer")).toHaveAttribute(
+      "data-before",
+      JSON.stringify("turn-before"),
+    );
+    expect(list.getByLabelText("Changed count")).toHaveTextContent("2");
+    expect(list.getByLabelText("Live-only path changed")).toHaveTextContent("false");
+    expect(viewer.getByText("1/2")).toBeInTheDocument();
+    expect(viewer.getByRole("button", { name: "Previous file" })).toBeDisabled();
+    await userEvent.click(viewer.getByRole("button", { name: "Next file" }));
+    expect(onNavigateTo).toHaveBeenCalledExactlyOnceWith("z.py");
+
+    await userEvent.click(viewer.getByRole("button", { name: "Diff comparison" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /^Git/ }));
+    expect(list.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Git");
+    expect(list.getByLabelText("Changed count")).toHaveTextContent("3");
+    expect(list.getByLabelText("Live-only path changed")).toHaveTextContent("true");
+    expect(viewer.getByText("2/3")).toBeInTheDocument();
+    expect(viewer.getByTestId("diff-viewer")).toHaveAttribute("data-after", JSON.stringify("new"));
+  });
+
+  it("loads captured turn choices for the panel root without changing the comparison until Compare", async () => {
+    setExplorerGitScope("conv_1", { path: "repo", directories: ["repo"] });
+    vi.mocked(useAgentTurnChoices).mockReturnValue({
+      data: { turns: [{ id: "turn-2", label: "Turn 2 · Fix parser", finished: true }] },
+      isLoading: false,
+    } as ReturnType<typeof useAgentTurnChoices>);
+    renderViewer({ open: true, initialSearch: "diff=1" });
+    expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
+      "data-before",
+      JSON.stringify("old"),
+    );
+    expect(useAgentTurnChoices).not.toHaveBeenCalled();
+    await chooseComparison("Turn");
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Agent turn" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Turn 2 · Fix parser" }));
+    expect(useAgentTurnChoices).toHaveBeenLastCalledWith("conv_1", "repo", true);
+    expect(getWorkspaceComparison("conv_1")).toEqual(DEFAULT_WORKSPACE_COMPARISON);
+    expect(screen.getByTestId("diff-viewer")).toHaveAttribute("data-before", JSON.stringify("old"));
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(getWorkspaceComparison("conv_1")).toEqual({
+      ...DEFAULT_WORKSPACE_COMPARISON,
+      source: "last-turn",
+      turnId: "turn-2",
+    });
+    expect(agentFileDiffMock).toHaveBeenLastCalledWith("conv_1", "file1.py", {
+      enabled: true,
+      lastTurn: true,
+      turnId: "turn-2",
+    });
+    expect(useWorkspaceComparisonChanges).toHaveBeenLastCalledWith("conv_1", {
+      path: "repo",
+      directories: ["repo"],
+    });
+    expect(screen.getByTestId("diff-viewer")).toHaveAttribute(
+      "data-after",
+      JSON.stringify("turn-after"),
+    );
+  });
+
+  it("forwards the selected repository scope for a since-commit comparison", async () => {
+    setExplorerGitScope("conv_1", { path: "repo", directories: ["repo/nested"] });
+    renderViewer({ open: true, initialSearch: "diff=1" });
+    await chooseComparison("Since");
+    fireEvent.change(screen.getByRole("textbox", { name: "Commit revision" }), {
+      target: { value: " release/v1 " },
+    });
+    expect(getWorkspaceComparison("conv_1")).toEqual(DEFAULT_WORKSPACE_COMPARISON);
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "file1.py", {
+      enabled: true,
+      base: "release/v1",
+      target: "WORKTREE",
+      scope: "repo",
+    });
+  });
+
+  it.each(["git", "agent"] as const)(
+    "gates commit modes by the panel root during a %s comparison, even with nested repositories",
+    async (source) => {
+      setWorkspaceComparison("conv_1", { ...DEFAULT_WORKSPACE_COMPARISON, source });
+      const rootContext = {
+        data: {
+          available: true,
+          data: changedFilesFixture,
+          repositories: ["nested/repo"],
+          root_is_repository: false,
+        },
+      };
+      vi.mocked(useWorkspaceComparisonChanges).mockReturnValue(
+        rootContext as ReturnType<typeof useWorkspaceComparisonChanges>,
+      );
+      vi.mocked(useWorkspaceGitChanges).mockReturnValue(
+        rootContext as ReturnType<typeof useWorkspaceGitChanges>,
+      );
+      renderViewer({ open: true, initialSearch: "diff=1" });
+      await userEvent.click(screen.getByRole("button", { name: "Diff comparison" }));
+      for (const label of ["Since", "Revisions"]) {
+        const item = screen.getByRole("menuitem", { name: new RegExp(`^${label}`) });
+        expect(item).toHaveAttribute("aria-disabled", "true");
+        expect(item).toHaveAccessibleDescription(
+          "Select a repository root as the panel folder to compare commits.",
+        );
+        fireEvent.click(item);
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      }
+      for (const label of ["Git", "Turn", "Chat"]) {
+        expect(screen.getByRole("menuitem", { name: new RegExp(`^${label}`) })).not.toHaveAttribute(
+          "aria-disabled",
+          "true",
+        );
+      }
+    },
+  );
+
+  it.each(["agent", "last-turn", "range", "commit"] as const)(
+    "closes and hides current-file comments for historical %s comparisons",
+    async (source) => {
+      useCommentsMock.mockReturnValue(makeCommentsQuery([makeComment("historical-comment")]));
+      renderViewer({ open: true, initialSearch: "diff=1" });
+      await screen.findByTestId("diff-viewer");
+      fireEvent.click(screen.getByRole("button", { name: "Show comments" }));
+      expect(screen.getByTestId("comments-panel")).toBeInTheDocument();
+      act(() =>
+        setWorkspaceComparison("conv_1", {
+          source,
+          base: "v1",
+          target: "v2",
+          ...(source === "last-turn" ? { turnId: "captured-turn" } : {}),
+        }),
+      );
+      expect(screen.queryByTestId("comments-panel")).not.toBeInTheDocument();
+      expect(screen.getByTestId("diff-viewer")).toHaveAttribute("data-allow-comments", "false");
+      expect(
+        screen.queryByRole("button", { name: /^(Show|Hide) comments$/ }),
+      ).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Exit diff view" }));
+      expect(screen.getByTestId("code-viewer")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Show comments" }));
+      expect(
+        screen.getByRole("button", { name: "comment historical-comment" }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("keeps current-file comments available for since-commit comparisons", async () => {
+    setWorkspaceComparison("conv_1", { source: "since", base: "v1", target: "WORKTREE" });
+    useCommentsMock.mockReturnValue(makeCommentsQuery([makeComment("current-comment")]));
+    renderViewer({ open: true, initialSearch: "diff=1" });
+    await screen.findByTestId("diff-viewer");
+    expect(screen.getByTestId("diff-viewer")).toHaveAttribute("data-allow-comments", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Show comments" }));
+    expect(screen.getByRole("button", { name: "comment current-comment" })).toBeInTheDocument();
+  });
+
+  it("shows captured coverage warnings alongside a usable agent diff", async () => {
+    setWorkspaceComparison("conv_1", { ...DEFAULT_WORKSPACE_COMPARISON, source: "last-turn" });
+    agentFileDiffMock.mockReturnValue({
+      data: {
+        before: "turn-before",
+        after: "turn-after",
+        coverage: "partial",
+        warning: "Some edits were not captured.",
+      },
+    } as ReturnType<typeof agentFileDiffMock>);
+    renderViewer({ open: true, initialSearch: "diff=1" });
+    expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
+      "data-after",
+      JSON.stringify("turn-after"),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Some edits were not captured.");
+    expect(screen.queryByText(/Failed to load/)).not.toBeInTheDocument();
+  });
 
   it("opens comparison for an unchanged text file and forwards commit and range revisions", async () => {
     vi.mocked(useWorkspaceGitChanges).mockReturnValue({
@@ -388,8 +686,10 @@ describe("FileViewer comparison sources", () => {
       enabled: true,
       base: "HEAD",
       target: "WORKTREE",
+      scope: undefined,
     });
-    await chooseComparison("Commit");
+    await chooseComparison("Revisions");
+    await chooseRevisionType("Single commit");
     fireEvent.change(screen.getByRole("textbox", { name: "Commit revision" }), {
       target: { value: "abc123" },
     });
@@ -398,8 +698,10 @@ describe("FileViewer comparison sources", () => {
       enabled: true,
       base: "abc123^",
       target: "abc123",
+      scope: "",
     });
-    await chooseComparison("Commit range");
+    await chooseComparison("Revisions");
+    await chooseRevisionType("Two revisions");
     fireEvent.change(screen.getByRole("textbox", { name: "Base revision" }), {
       target: { value: "v1.0" },
     });
@@ -411,10 +713,11 @@ describe("FileViewer comparison sources", () => {
       enabled: true,
       base: "v1.0",
       target: "v2.0",
+      scope: "",
     });
   });
 
-  it.each(["Agent changes · session", "Last agent turn"])(
+  it.each(["Chat", "Turn"])(
     "selects %s with the Explorer agent overlay disabled and switches back to Git",
     async (label) => {
       writeFilesPanelPreferences({ showAgentChanges: false });
@@ -423,6 +726,7 @@ describe("FileViewer comparison sources", () => {
       expect(git).toHaveAttribute("data-before", JSON.stringify("old"));
       expect(git).toHaveAttribute("data-after", JSON.stringify("new"));
       await chooseComparison(label);
+      if (label === "Turn") fireEvent.click(screen.getByRole("button", { name: "Compare" }));
       const agent = await screen.findByTestId("diff-viewer");
       expect(agent).toHaveAttribute("data-before", JSON.stringify("turn-before"));
       expect(agent).toHaveAttribute("data-after", JSON.stringify("turn-after"));
@@ -433,7 +737,7 @@ describe("FileViewer comparison sources", () => {
         "file1.py",
         expect.objectContaining({ enabled: false }),
       );
-      await chooseComparison("Git working tree");
+      await chooseComparison("Git");
       expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
         "data-before",
         JSON.stringify("old"),
@@ -448,17 +752,24 @@ describe("FileViewer comparison sources", () => {
       isError: true,
       error: new Error("No agent baseline is available for this file"),
     } as unknown as ReturnType<typeof agentFileDiffMock>);
-    vi.mocked(useWorkspaceChangedFiles).mockReturnValue({
+    vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
       data: { available: true, data: [] },
-    } as unknown as ReturnType<typeof useWorkspaceChangedFiles>);
+    } as unknown as ReturnType<typeof useWorkspaceComparisonChanges>);
     renderViewer({ open: true, initialSearch: "diff=1" });
-    await chooseComparison("Agent changes · session");
+    await chooseComparison("Chat");
     expect(
       screen.getByText(/Failed to load: No agent baseline is available for this file/),
     ).toBeInTheDocument();
     expect(screen.queryByText("Loading diff…")).not.toBeInTheDocument();
     expect(screen.queryByTestId("diff-viewer")).not.toBeInTheDocument();
-    await chooseComparison("Git working tree");
+    await chooseComparison("Git");
+    expect(getWorkspaceComparison("conv_1")).toEqual(DEFAULT_WORKSPACE_COMPARISON);
+    expect(useGitFileDiff).toHaveBeenLastCalledWith("conv_1", "file1.py", {
+      enabled: true,
+      base: "HEAD",
+      target: "WORKTREE",
+      scope: undefined,
+    });
     expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
       "data-after",
       JSON.stringify("new"),
@@ -475,7 +786,7 @@ describe("FileViewer comparison sources", () => {
         renderViewer({ open: true, path: "payload.txt", initialSearch: "diff=1" });
         await act(async () => {});
         expect(screen.queryByRole("button", { name: "Show diff" })).not.toBeInTheDocument();
-        expect(screen.queryByRole("combobox", { name: "Diff comparison" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Diff comparison" })).not.toBeInTheDocument();
         expect(screen.queryByTestId("diff-viewer")).not.toBeInTheDocument();
         expect(useGitFileDiff).toHaveBeenLastCalledWith(
           "conv_1",
@@ -487,14 +798,15 @@ describe("FileViewer comparison sources", () => {
   });
 
   it("returns to the current file after an agent comparison contains an old deletion", async () => {
-    await vi.mocked(useWorkspaceChangedFiles).withImplementation(
+    await vi.mocked(useWorkspaceComparisonChanges).withImplementation(
       () =>
         ({
           data: { available: true, data: [{ ...changedFilesFixture[0], status: "deleted" }] },
-        }) as ReturnType<typeof useWorkspaceChangedFiles>,
+        }) as ReturnType<typeof useWorkspaceComparisonChanges>,
       async () => {
         renderViewer({ open: true, initialSearch: "diff=1" });
-        await chooseComparison("Last agent turn");
+        await chooseComparison("Turn");
+        fireEvent.click(screen.getByRole("button", { name: "Compare" }));
         fireEvent.click(screen.getByRole("button", { name: "Exit diff view" }));
         expect(screen.getByTestId("code-viewer")).toBeInTheDocument();
         expect(screen.queryByText("This file has been deleted.")).not.toBeInTheDocument();
@@ -776,9 +1088,9 @@ describe("FileViewer prev/next navigation order", () => {
     { sort: "recent" as const, expected: "1/3" },
   ])("renders the index per the $sort sort prop", ({ sort, expected }) => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
+    vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
       data: { available: true, data: changedFiles },
-    } as ReturnType<typeof useWorkspaceGitChanges>);
+    } as ReturnType<typeof useWorkspaceComparisonChanges>);
     try {
       renderViewer({ open: true, path: "b.py", sort, onNavigateTo: vi.fn() });
 
@@ -790,7 +1102,7 @@ describe("FileViewer prev/next navigation order", () => {
       expect(indexSpan?.textContent).toBe(expected);
     } finally {
       // Restore the default single-file mock for later tests.
-      vi.mocked(useWorkspaceGitChanges).mockReturnValue({
+      vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
         data: {
           available: true,
           data: [
@@ -803,7 +1115,7 @@ describe("FileViewer prev/next navigation order", () => {
             },
           ],
         },
-      } as ReturnType<typeof useWorkspaceGitChanges>);
+      } as ReturnType<typeof useWorkspaceComparisonChanges>);
     }
   });
 });
@@ -816,11 +1128,11 @@ describe("FileViewer URL sync — diff param", () => {
   )(
     "only the active viewer writes the $path URL through resizing (mobile=$isMobile)",
     async ({ isMobile, path }) => {
-      await vi.mocked(useWorkspaceGitChanges).withImplementation(
+      await vi.mocked(useWorkspaceComparisonChanges).withImplementation(
         () =>
           ({
             data: { available: true, data: [{ path, name: path, status: "modified", bytes: 10 }] },
-          }) as ReturnType<typeof useWorkspaceGitChanges>,
+          }) as ReturnType<typeof useWorkspaceComparisonChanges>,
         async () => {
           vi.mocked(useIsMobileViewport).mockReturnValue(isMobile);
           useCommentsMock.mockReturnValue(makeCommentsQuery([]));
@@ -906,7 +1218,7 @@ describe("FileViewer URL sync — diff param", () => {
   });
 
   it("initializes diff view when URL contains ?diff=1 and the file is in the changed list", async () => {
-    // file1.py is returned by the useWorkspaceGitChanges mock → isDiffAvailable=true.
+    // file1.py is returned by the useWorkspaceComparisonChanges mock → isDiffAvailable=true.
     // Starting with ?diff=1 means diffActive is initialized to true, so viewMode="diff".
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
     renderViewer({ open: true, path: "file1.py", initialSearch: "diff=1" });
@@ -919,8 +1231,8 @@ describe("FileViewer URL sync — diff param", () => {
 
   it("prepares a linked Git diff during discovery and follows the active text file", async () => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    await vi.mocked(useWorkspaceGitChanges).withImplementation(
-      () => ({ data: undefined }) as ReturnType<typeof useWorkspaceGitChanges>,
+    await vi.mocked(useWorkspaceComparisonChanges).withImplementation(
+      () => ({ data: undefined }) as ReturnType<typeof useWorkspaceComparisonChanges>,
       async () => {
         const { rerender } = render(viewerTree({ open: true, initialSearch: "diff=1" }));
         await waitFor(() => expect(prepareDiffEditor).toHaveBeenCalledWith("python"));
@@ -928,6 +1240,7 @@ describe("FileViewer URL sync — diff param", () => {
           enabled: true,
           base: "HEAD",
           target: "WORKTREE",
+          scope: undefined,
         });
         expect(await screen.findByTestId("diff-viewer")).toBeInTheDocument();
 
@@ -936,6 +1249,7 @@ describe("FileViewer URL sync — diff param", () => {
           enabled: true,
           base: "HEAD",
           target: "WORKTREE",
+          scope: undefined,
         });
       },
     );
@@ -943,8 +1257,9 @@ describe("FileViewer URL sync — diff param", () => {
 
   it("allows Git comparison when changed-file discovery has failed", async () => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    await vi.mocked(useWorkspaceGitChanges).withImplementation(
-      () => ({ data: undefined, isError: true }) as ReturnType<typeof useWorkspaceGitChanges>,
+    await vi.mocked(useWorkspaceComparisonChanges).withImplementation(
+      () =>
+        ({ data: undefined, isError: true }) as ReturnType<typeof useWorkspaceComparisonChanges>,
       async () => {
         renderViewer({ open: true, initialSearch: "diff=1" });
         expect(await screen.findByTestId("diff-viewer")).toBeInTheDocument();
@@ -953,6 +1268,7 @@ describe("FileViewer URL sync — diff param", () => {
           enabled: true,
           base: "HEAD",
           target: "WORKTREE",
+          scope: undefined,
         });
       },
     );
@@ -969,9 +1285,10 @@ describe("FileViewer URL sync — diff param", () => {
         enabled: false,
         base: "HEAD",
         target: "WORKTREE",
+        scope: undefined,
       });
       expect(screen.queryByRole("button", { name: "Show diff" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("combobox", { name: "Diff comparison" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Diff comparison" })).not.toBeInTheDocument();
     },
   );
 
@@ -2052,20 +2369,20 @@ describe("FileViewer keyboard shortcut — Alt+← / Alt+→", () => {
 
   beforeEach(() => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
-    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
+    vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
       data: { available: true, data: multipleFiles },
-    } as ReturnType<typeof useWorkspaceGitChanges>);
+    } as ReturnType<typeof useWorkspaceComparisonChanges>);
   });
 
   afterEach(() => {
-    vi.mocked(useWorkspaceGitChanges).mockReturnValue({
+    vi.mocked(useWorkspaceComparisonChanges).mockReturnValue({
       data: {
         available: true,
         data: [
           { path: "file1.py", bytes: 10, modified_at: null, name: "file1.py", status: "modified" },
         ],
       },
-    } as ReturnType<typeof useWorkspaceGitChanges>);
+    } as ReturnType<typeof useWorkspaceComparisonChanges>);
   });
 
   it("navigates to the previous file on Alt+← when focus is not in a text field", () => {
@@ -2373,6 +2690,7 @@ describe("FileViewer video files", () => {
       enabled: false,
       base: "HEAD",
       target: "WORKTREE",
+      scope: undefined,
     });
     expect(screen.queryByRole("button", { name: "Show diff" })).toBeNull();
   });

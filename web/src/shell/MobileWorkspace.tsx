@@ -8,8 +8,8 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { PanelRightIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { createPortal } from "react-dom";
+import { SidebarToggle, mobileSidebarToggleStyle } from "./SidebarToggle";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TAB_BADGE_BASE } from "./railTabs";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
@@ -27,6 +27,8 @@ const WorkspaceContext = createContext<{
   active: string | null;
   select: (id: string) => void;
   open: () => void;
+  close: () => void;
+  overlay: boolean;
   focusTab: { current: boolean };
 } | null>(null);
 
@@ -35,11 +37,16 @@ export function MobileWorkspaceProvider({
   sessionId,
   tabs,
   active,
+  onClose,
+  overlayToggle = true,
   children,
 }: {
   sessionId?: string;
   tabs: MobileWorkspaceTab[];
   active: string | null;
+  onClose?: () => void;
+  /** FileViewer renders its own control through its unsaved-change guard. */
+  overlayToggle?: boolean;
   children: ReactNode;
 }) {
   const remembered = useRef<{ sessionId?: string; tab: string } | null>(null);
@@ -62,34 +69,74 @@ export function MobileWorkspaceProvider({
     const tab = tabs.find((item) => item.id === previous) ?? tabs[0];
     if (tab) select(tab.id);
   }, [sessionId, tabs, select]);
+  const close = useCallback(() => onClose?.(), [onClose]);
   const value = useMemo(
-    () => ({ tabs, active, select, open, focusTab }),
-    [tabs, active, select, open],
+    () => ({ tabs, active, select, open, close, focusTab, overlay: !!onClose }),
+    [tabs, active, select, open, close, onClose],
   );
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+  return (
+    <WorkspaceContext.Provider value={value}>
+      {children}
+      {onClose && overlayToggle && <MobileWorkspaceOverlayButton />}
+    </WorkspaceContext.Provider>
+  );
 }
 
 export function MobileWorkspaceButton() {
   const workspace = useContext(WorkspaceContext);
   if (!workspace?.tabs.length) return null;
+  const expanded = workspace.active !== null;
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label="Open workspace"
-      aria-expanded={workspace.active !== null}
-      onClick={workspace.open}
-      className="size-11 shrink-0 text-muted-foreground hover:text-foreground md:hidden"
-    >
-      <PanelRightIcon className="size-5" />
-    </Button>
+    <SidebarToggle
+      side="right"
+      expanded={expanded}
+      aria-label={expanded ? "Close workspace" : "Open workspace"}
+      onClick={expanded ? workspace.close : workspace.open}
+      className={workspace.overlay ? "invisible md:hidden" : "md:hidden"}
+      aria-hidden={workspace.overlay || undefined}
+      tabIndex={workspace.overlay ? -1 : undefined}
+    />
+  );
+}
+
+/** Render outside transformed drawers so scrolling and slides cannot move it. */
+export function MobileWorkspaceOverlayButton({
+  onClose,
+  beforeClose,
+}: {
+  onClose?: () => void;
+  beforeClose?: (close: () => void) => void;
+} = {}) {
+  const workspace = useContext(WorkspaceContext);
+  const isMobile = useIsMobileViewport();
+  if (!isMobile || !workspace?.tabs.length) return null;
+  const expanded = workspace.active !== null;
+  return createPortal(
+    <SidebarToggle
+      side="right"
+      expanded={expanded}
+      aria-label={expanded ? "Close workspace" : "Open workspace"}
+      onClick={() => {
+        if (!expanded) {
+          workspace.open();
+          return;
+        }
+        const close = onClose ?? workspace.close;
+        if (beforeClose) beforeClose(close);
+        else close();
+      }}
+      className="fixed z-[60] bg-card md:hidden"
+      style={mobileSidebarToggleStyle("right")}
+      data-workspace-overlay-toggle
+    />,
+    document.body,
   );
 }
 
 export function MobileWorkspaceTabs({
   beforeNavigate,
-}: { beforeNavigate?: (navigate: () => void) => void } = {}) {
+  onClose,
+}: { beforeNavigate?: (navigate: () => void) => void; onClose?: () => void } = {}) {
   const isMobile = useIsMobileViewport();
   const workspace = useContext(WorkspaceContext);
   const selected = useRef<HTMLButtonElement>(null);
@@ -111,34 +158,52 @@ export function MobileWorkspaceTabs({
     });
     return () => cancelAnimationFrame(frame);
   }, [workspace?.active, workspace?.focusTab]);
+  if (!workspace && onClose)
+    return (
+      <div className="relative h-14 shrink-0 md:hidden">
+        <SidebarToggle
+          side="right"
+          expanded
+          aria-label="Close"
+          onClick={onClose}
+          className="absolute right-2 top-1.5"
+        />
+      </div>
+    );
   if (!isMobile || !workspace?.tabs.length || !workspace.active) return null;
   return (
-    <Tabs
-      value={workspace.active}
-      onValueChange={(id) => {
-        const navigate = () => workspace.select(id);
-        if (beforeNavigate) beforeNavigate(navigate);
-        else navigate();
-      }}
-      className="shrink-0 gap-0 border-b border-border md:hidden"
-    >
-      <div ref={scroller} className="overflow-x-auto overscroll-x-contain px-2 py-1">
-        <TabsList aria-label="Workspace" variant="pill">
-          {workspace.tabs.map((tab) => (
-            <TabsTrigger
-              key={tab.id}
-              value={tab.id}
-              ref={tab.id === workspace.active ? selected : undefined}
-              className="min-h-11 shrink-0 gap-1.5 px-3"
-              aria-label={tab.label}
-            >
-              {tab.icon}
-              {tab.label}
-              {tab.badge !== undefined && <span className={TAB_BADGE_BASE}>{tab.badge}</span>}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </div>
-    </Tabs>
+    <>
+      {beforeNavigate && workspace.overlay && (
+        <MobileWorkspaceOverlayButton beforeClose={beforeNavigate} />
+      )}
+      <Tabs
+        value={workspace.active}
+        onValueChange={(id) => {
+          const navigate = () => workspace.select(id);
+          if (beforeNavigate) beforeNavigate(navigate);
+          else navigate();
+        }}
+        className="h-14 shrink-0 gap-0 border-b border-border px-14 md:hidden"
+        data-mobile-workspace-tabs
+      >
+        <div ref={scroller} className="overflow-x-auto overscroll-x-contain px-2 py-1">
+          <TabsList aria-label="Workspace" variant="pill">
+            {workspace.tabs.map((tab) => (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                ref={tab.id === workspace.active ? selected : undefined}
+                className="min-h-11 shrink-0 gap-1.5 px-3"
+                aria-label={tab.label}
+              >
+                {tab.icon}
+                {tab.label}
+                {tab.badge !== undefined && <span className={TAB_BADGE_BASE}>{tab.badge}</span>}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+      </Tabs>
+    </>
   );
 }

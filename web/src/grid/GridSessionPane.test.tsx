@@ -58,6 +58,13 @@ vi.mock("@/hooks/useSessionLiveness", () => ({
   useSessionLiveness: () => ({ kind: "online" }),
 }));
 vi.mock("@/hooks/useChildSessions", () => ({ useChildSessions: () => ({ children: [] }) }));
+vi.mock("@/hooks/useWorkspaceComparisons", () => ({
+  useAgentTurnChoices: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useWorkspaceComparisonChanges: vi.fn(() => ({
+    data: { available: true, data: [], repositories: [], root_is_repository: false },
+    isLoading: false,
+  })),
+}));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
   useWorkspaceGitChanges: () => ({ data: { data: [] } }),
   useWorkspaceEnvironment: () => ({ data: { available: true, root: "/workspace" } }),

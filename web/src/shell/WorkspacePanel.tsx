@@ -88,6 +88,7 @@ import { FilesPanel, readBrowseLocation } from "./FilesPanel";
 import { ContentSearchPanel } from "./ContentSearchPanel";
 import { FileViewer } from "./FileViewer";
 import { ResponsiveViewerSlot } from "./ResponsiveViewerSlot";
+import { AdaptiveFileWorkspace } from "./AdaptiveFileWorkspace";
 import { PullRequestPanel } from "./PullRequestPanel";
 import type { ChangedSort } from "./FlatFileList";
 import { SubagentsPanel } from "./SubagentsPanel";
@@ -864,6 +865,8 @@ function WorkspacePanelImpl({
   mobileSideChatsOpen = false,
   onMobileSideChatsOpenChange,
 }: WorkspacePanelProps) {
+  const [tabsOverflow, setTabsOverflow] = useState(false);
+  const overflowControlRef = useRef<HTMLDivElement>(null);
   const terminalShown = selectedTerminalKey !== null && openTerminals.includes(selectedTerminalKey);
   const contentSearchInputRef = useRef<HTMLInputElement>(null);
   const [contentSearchFocusSession, setContentSearchFocusSession] = useState<string | null>(null);
@@ -1474,8 +1477,7 @@ function WorkspacePanelImpl({
             )}
           />
         )}
-        {/* The default nav tab comes first; the remaining tabs keep their relative order. */}
-        {/* Narrow rails use the picker for fixed panels, leaving room for open tabs. */}
+        {/* All existing tabs share the measured scroll viewport. */}
         <div
           ref={tabListRef}
           role="toolbar"
@@ -1484,43 +1486,45 @@ function WorkspacePanelImpl({
           onKeyDown={handlePermanentTabNumber}
           className="workspace-tab-strip shrink-0 flex items-center overflow-x-hidden border-b border-border px-2 py-3"
         >
-          {visiblePermanentTabs.length > 0 && (
-            <Tabs
-              className={cn("shrink-0", showOpenTabs && "@max-[400px]/rail:hidden")}
-              // Soft tabs own their highlight. A vanished shell falls back to a
-              // fixed page, so only live shell selections suppress its highlight.
-              value={
-                pending
-                  ? "__pending__"
-                  : selectedFilePath !== null ||
-                      browserSelected ||
-                      sideChatSelected ||
-                      terminalShown
-                    ? "__tab__"
-                    : (rightRailTab ?? "__empty__")
-              }
-              onValueChange={(value) => selectPermanentTab(value as RightRailTab)}
-              componentId="chat.right_rail.tabs"
-            >
-              <TabsList variant="pill" className="gap-1">
-                {visiblePermanentTabs.map((tab) => tabTriggers[tab])}
-              </TabsList>
-            </Tabs>
-          )}
-          {/* The divider follows the fixed panel icons' visibility. */}
-          {visiblePermanentTabs.length > 0 && (
-            <div
-              aria-hidden
-              className={cn(
-                "mx-2 h-[14px] w-px shrink-0 self-center bg-border-strong",
-                showOpenTabs && "@max-[400px]/rail:hidden",
-              )}
-            />
-          )}
-          {showOpenTabs && (
-            <>
-              {/* Open tabs fill the space before the pinned trailing controls. */}
-              <WorkspaceTabsScroller>
+          <WorkspaceTabsScroller
+            grow={showOpenTabs}
+            onOverflowChange={setTabsOverflow}
+            overflowControlRef={overflowControlRef}
+          >
+            {visiblePermanentTabs.length > 0 && (
+              <Tabs
+                className="shrink-0"
+                // Soft tabs own their highlight. A vanished shell falls back to a
+                // fixed page, so only live shell selections suppress its highlight.
+                value={
+                  pending
+                    ? "__pending__"
+                    : selectedFilePath !== null ||
+                        browserSelected ||
+                        sideChatSelected ||
+                        terminalShown
+                      ? "__tab__"
+                      : (rightRailTab ?? "__empty__")
+                }
+                onValueChange={(value) => selectPermanentTab(value as RightRailTab)}
+                componentId="chat.right_rail.tabs"
+              >
+                <TabsList variant="pill" className="gap-1">
+                  {visiblePermanentTabs.map((tab) => tabTriggers[tab])}
+                </TabsList>
+              </Tabs>
+            )}
+            {/* Separate fixed panel icons from open tabs. */}
+            {visiblePermanentTabs.length > 0 && (
+              <div
+                aria-hidden
+                className={cn("mx-2 h-[14px] w-px shrink-0 self-center bg-border-strong")}
+              />
+            )}
+            {showOpenTabs && (
+              <>
+                {/* Open tabs fill the space before the pinned trailing controls. */}
+
                 {visibleOpenPanels.map((tab) => {
                   const { label, icon: Icon } = workspacePanels[tab];
                   const active =
@@ -1666,66 +1670,68 @@ function WorkspacePanelImpl({
                     </div>
                   );
                 })}
-              </WorkspaceTabsScroller>
-            </>
-          )}
+              </>
+            )}
+          </WorkspaceTabsScroller>
           {/* With no open tabs, "+" sits right after the nav tabs. */}
           {!pending && !showOpenTabs && newTabMenu("start")}
           {/* The picker and fullscreen toggle form the trailing control group,
             pinned right outside the scrolling viewport; "+" joins it once tabs exist. */}
-          <div className="ml-auto flex shrink-0 items-center gap-1 pl-1">
+          <div className="ml-auto flex shrink-0 items-center pl-1">
             {showOpenTabs && newTabMenu("end")}
-            {panelOptions.length > 0 && (
-              <DropdownMenu
-                onOpenChange={(isOpen) => {
-                  if (isOpen) markPickerKeyboard();
-                }}
-              >
-                <WorkspaceTabTooltip label="Select panel">
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="size-6 shrink-0"
-                      aria-label="Select panel"
-                      disabled={pending}
-                    >
-                      <ChevronDownIcon className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </WorkspaceTabTooltip>
-                <DropdownMenuContent
-                  align="end"
-                  className="max-w-[min(32rem,calc(100vw-2rem))]"
-                  onPointerDown={markPickerPointer}
-                  // A press that began on the trigger selects on release, with no
-                  // pointerdown inside the menu.
-                  onPointerUp={markPickerPointer}
-                  onPointerDownOutside={markPickerPointer}
-                  onKeyDown={markPickerKeyboard}
-                  // Restoring focus after a mouse pick reopens the trigger's tooltip and
-                  // leaves it hanging; keyboard picks keep Radix's focus restore.
-                  onCloseAutoFocus={(event) => {
-                    if (pickerInputRef.current === "pointer") event.preventDefault();
+            {tabsOverflow && panelOptions.length > 0 && (
+              <div ref={overflowControlRef} className="flex w-7 shrink-0 items-center justify-end">
+                <DropdownMenu
+                  onOpenChange={(isOpen) => {
+                    if (isOpen) markPickerKeyboard();
                   }}
                 >
-                  <SuppressBrowserView />
-                  <DropdownMenuLabel>Panels</DropdownMenuLabel>
-                  {panelOptions.map((option) => (
-                    <DropdownMenuItem
-                      key={option.key}
-                      onSelect={option.select}
-                      disabled={option.disabled}
-                      title={option.label}
-                      aria-current={option.active ? "true" : undefined}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                      {option.active && <CheckIcon className="size-4" aria-hidden />}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  <WorkspaceTabTooltip label="Select panel">
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="size-6 shrink-0"
+                        aria-label="Select panel"
+                        disabled={pending}
+                      >
+                        <ChevronDownIcon className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </WorkspaceTabTooltip>
+                  <DropdownMenuContent
+                    align="end"
+                    className="max-w-[min(32rem,calc(100vw-2rem))]"
+                    onPointerDown={markPickerPointer}
+                    // A press that began on the trigger selects on release, with no
+                    // pointerdown inside the menu.
+                    onPointerUp={markPickerPointer}
+                    onPointerDownOutside={markPickerPointer}
+                    onKeyDown={markPickerKeyboard}
+                    // Restoring focus after a mouse pick reopens the trigger's tooltip and
+                    // leaves it hanging; keyboard picks keep Radix's focus restore.
+                    onCloseAutoFocus={(event) => {
+                      if (pickerInputRef.current === "pointer") event.preventDefault();
+                    }}
+                  >
+                    <SuppressBrowserView />
+                    <DropdownMenuLabel>Panels</DropdownMenuLabel>
+                    {panelOptions.map((option) => (
+                      <DropdownMenuItem
+                        key={option.key}
+                        onSelect={option.select}
+                        disabled={option.disabled}
+                        title={option.label}
+                        aria-current={option.active ? "true" : undefined}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                        {option.active && <CheckIcon className="size-4" aria-hidden />}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
             <WorkspaceTabTooltip label={maximized ? "Exit full screen" : "Full screen"}>
               <Button
@@ -1789,25 +1795,44 @@ function WorkspacePanelImpl({
               autoFocus={autoFocusSelectedTerminal}
             />
           ) : selectedFilePath !== null ? (
-            <ResponsiveViewerSlot mobile={isMobile} mobileTarget={mobileFileTarget}>
-              <FileViewer
-                syncUrl={!contained}
-                agentId={agentId}
-                mobileOverlay={isMobile}
-                frameless
-                open
-                mediaActive={isMobile ? mobileFileTarget != null : open}
-                conversationId={conversationId}
-                path={selectedFilePath}
-                position={filePosition}
-                onClose={isMobile && onMobileFileClose ? onMobileFileClose : onShowScopeView}
-                onCloseTab={isMobile && onMobileFileClose ? onMobileFileClose : handleCloseTab}
-                onNavigateTo={openFileViewer}
-                permissionLevel={permissionLevel}
-                onCommentsOpenChange={onCommentsOpenChange}
-                sort={filesPanelSort}
-              />
-            </ResponsiveViewerSlot>
+            <AdaptiveFileWorkspace
+              width={width}
+              isMobile={isMobile}
+              explorer={
+                showFilesPanel ? (
+                  <FilesPanel
+                    conversationId={contained ? conversationId : undefined}
+                    frameless
+                    onFileSelect={openFileViewer}
+                    flatView={rightRailTab === "changes"}
+                    showHidden={filesPanelShowHidden}
+                    onShowHiddenChange={onShowHiddenChange}
+                    sort={filesPanelSort}
+                    onSortChange={onSortChange}
+                  />
+                ) : null
+              }
+            >
+              <ResponsiveViewerSlot mobile={isMobile} mobileTarget={mobileFileTarget}>
+                <FileViewer
+                  syncUrl={!contained}
+                  agentId={agentId}
+                  mobileOverlay={isMobile}
+                  frameless
+                  open
+                  mediaActive={isMobile ? mobileFileTarget != null : open}
+                  conversationId={conversationId}
+                  path={selectedFilePath}
+                  position={filePosition}
+                  onClose={isMobile && onMobileFileClose ? onMobileFileClose : onShowScopeView}
+                  onCloseTab={isMobile && onMobileFileClose ? onMobileFileClose : handleCloseTab}
+                  onNavigateTo={openFileViewer}
+                  permissionLevel={permissionLevel}
+                  onCommentsOpenChange={onCommentsOpenChange}
+                  sort={filesPanelSort}
+                />
+              </ResponsiveViewerSlot>
+            </AdaptiveFileWorkspace>
           ) : sideChatSelected && !isMobile ? (
             // A side chat: a forked child conversation streamed here in its own
             // scoped surface, beside the still-active main chat. Phones show it

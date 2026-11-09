@@ -2550,6 +2550,20 @@ function AppShellImpl() {
       sessionId={conversationId}
       tabs={mobileWorkspaceTabs}
       active={mobileWorkspaceActive}
+      overlayToggle={!fileViewerOpen}
+      onClose={() => {
+        setSelectedFilePath(null);
+        setFileViewerCommentsOpen(false);
+        clearFileViewerUrl();
+        setMobileSearch(null);
+        setFilesPanelOpen(false);
+        setSubagentsPanelOpen(false);
+        setShellsPanelOpen(false);
+        setGithubPanelOpen(false);
+        setSideChatsPanelOpen(false);
+        setExecutionLogsKey(null);
+        if (!terminalFirst) setPanelInitialKey(null);
+      }}
     >
       <NotificationLayoutProvider
         width={

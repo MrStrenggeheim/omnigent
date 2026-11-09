@@ -1,16 +1,14 @@
 import {
-  ArrowDownAZIcon,
-  ArrowDownUpIcon,
-  ArrowDownWideNarrowIcon,
   EyeIcon,
   EyeOffIcon,
-  FileClockIcon,
-  FileTypeIcon,
   FilterIcon,
   MoonIcon,
-  RefreshCwIcon,
   SearchIcon,
   XIcon,
+  ArrowDownAZIcon,
+  FileClockIcon,
+  ArrowDownWideNarrowIcon,
+  FileTypeIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -21,39 +19,37 @@ import { useSessionHostOnline, useSessionRunnerOnline } from "@/hooks/RunnerHeal
 import { useChatStore } from "@/store/chatStore";
 import {
   PathUnreachableError,
-  type WorkspaceChangedFile,
   joinBrowseLocation,
   relativizeToWorkspace,
-  useWorkspaceChangedFiles,
-  useWorkspaceGitChanges,
   useWorkspaceAllFiles,
   useWorkspaceAsleep,
   useWorkspaceEnvironment,
   useWorkspaceFileSearch,
 } from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceComparisonChanges } from "@/hooks/useWorkspaceComparisons";
+import {
+  DEFAULT_WORKSPACE_COMPARISON,
+  isRevisionComparison,
+  useWorkspaceComparison,
+} from "@/lib/workspaceComparison";
 import { cn } from "@/lib/utils";
-import {
-  readFilesPanelPreferences,
-  subscribeFilesPanelPreferences,
-  writeFilesPanelPreferences,
-} from "@/lib/filesPanelPreferences";
 import { BrowseLocationBar } from "./BrowseLocationBar";
-import { CopyPathButton } from "./CopyPathButton";
+import { DiffComparisonControls } from "./DiffComparisonControls";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { type ChangedSort, FlatFileList } from "./FlatFileList";
 import { FolderTree } from "./FolderTree";
 import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { useScrollRestore } from "./useScrollRestore";
 import { ExplorerActionsProvider, ExplorerToolbar } from "./ExplorerActions";
-import { NotificationBell } from "@/components/NotificationCenter";
 import { setExplorerGitScope } from "@/lib/explorerGitScope";
 
 interface FilesPanelProps {
@@ -93,105 +89,12 @@ interface FilesPanelProps {
   frameless?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// HiddenFilesToggle
-// ---------------------------------------------------------------------------
-
-function HiddenFilesToggle({
-  showHidden,
-  onToggle,
-  hiddenCount,
-}: {
-  showHidden: boolean;
-  onToggle: () => void;
-  hiddenCount: number;
-}) {
-  const hasHidden = hiddenCount > 0 && !showHidden;
-  const ariaLabel = showHidden ? "Hide hidden files" : "Show hidden files";
-  const tooltipLabel = showHidden
-    ? "Hide hidden files"
-    : hasHidden
-      ? `${hiddenCount} file${hiddenCount === 1 ? "" : "s"} in hidden directories. Click to show.`
-      : "Show hidden files";
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={ariaLabel}
-            className={cn(
-              hasHidden
-                ? "text-warning hover:text-warning/80"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={onToggle}
-          >
-            {/* The icon previews the action: slash to hide, eye to reveal. */}
-            {showHidden ? <EyeOffIcon /> : <EyeIcon />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{tooltipLabel}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// SortSelector
-// ---------------------------------------------------------------------------
-
 const SORT_OPTIONS: { value: ChangedSort; label: string; Icon: typeof ArrowDownAZIcon }[] = [
   { value: "alpha", label: "Filename", Icon: ArrowDownAZIcon },
   { value: "recent", label: "Last edited", Icon: FileClockIcon },
   { value: "size", label: "Size", Icon: ArrowDownWideNarrowIcon },
   { value: "type", label: "Type", Icon: FileTypeIcon },
 ];
-
-function SortSelector({
-  sort,
-  onChange,
-}: {
-  sort: ChangedSort;
-  onChange: (next: ChangedSort) => void;
-}) {
-  const active = SORT_OPTIONS.find((o) => o.value === sort) ?? SORT_OPTIONS[0];
-  return (
-    <TooltipProvider>
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label={`Sort: ${active.label}`}
-                className="shrink-0 gap-[2px] text-muted-foreground hover:text-foreground"
-              >
-                <ArrowDownUpIcon />
-                <span>{active.label}</span>
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Sort files</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuRadioGroup value={sort} onValueChange={(v) => onChange(v as ChangedSort)}>
-            {SORT_OPTIONS.map(({ value, label, Icon }) => (
-              <DropdownMenuRadioItem key={value} value={value}>
-                <Icon className="size-3.5" />
-                {label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </TooltipProvider>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // SearchFilterInput — labeled glob input for "files to include" / "exclude"
@@ -239,6 +142,13 @@ function SearchFilterInput({
  * on that session's own last location (or its root), never another's.
  */
 const browseLocationCache = new Map<string, string>();
+const browseLocationListeners = new Set<() => void>();
+function subscribeBrowseLocation(onChange: () => void) {
+  browseLocationListeners.add(onChange);
+  return () => {
+    browseLocationListeners.delete(onChange);
+  };
+}
 const ROOT_DIRECTORIES = [""];
 const visitedDirectoriesCache = new Map<string, string[]>();
 const directoryListeners = new Set<() => void>();
@@ -246,14 +156,6 @@ const directoryListeners = new Set<() => void>();
 function subscribeDirectories(onChange: () => void) {
   directoryListeners.add(onChange);
   return () => directoryListeners.delete(onChange);
-}
-
-function readShowAgentChanges() {
-  return readFilesPanelPreferences().showAgentChanges;
-}
-
-function setShowAgentChanges(showAgentChanges: boolean) {
-  writeFilesPanelPreferences({ showAgentChanges });
 }
 
 export function readBrowseLocation(
@@ -325,15 +227,7 @@ export function FilesPanel({
   // rounded card chrome; only the standalone card caps content at max-h.
   const isDrawer = onClose !== undefined;
   const fillHeight = isDrawer || frameless === true;
-  const showAgentChanges = useSyncExternalStore(
-    subscribeFilesPanelPreferences,
-    readShowAgentChanges,
-    () => false,
-  );
-  const agentQuery = useWorkspaceChangedFiles(conversationId, {
-    enabled: showAgentChanges,
-    source: "agent",
-  });
+  const { comparison, setComparison } = useWorkspaceComparison(conversationId);
   const envQuery = useWorkspaceEnvironment(conversationId, {
     enabled: true,
   });
@@ -344,22 +238,14 @@ export function FilesPanel({
   // Absolute path currently browsed. Null tracks the workspace root. Seeded
   // from the per-conversation cache so the location survives the panel
   // unmounting while a file is open in the viewer.
-  const [browseLocation, setBrowseLocation] = useState<string | null>(
+  const browseLocation = useSyncExternalStore(
+    subscribeBrowseLocation,
     () => (conversationId && browseLocationCache.get(conversationId)) || null,
+    () => null,
   );
   const [browseError, setBrowseError] = useState<string | null>(null);
   const [revealPath, setRevealPath] = useState<string | null>(null);
   const [revealToken, setRevealToken] = useState(0);
-  // On an in-place conversation switch (no remount), land on the NEW
-  // session's own cached location or its root — never the previous
-  // session's directory. The ref keeps mount itself from wiping the seed.
-  const browseForRef = useRef(conversationId);
-  useEffect(() => {
-    if (browseForRef.current === conversationId) return;
-    browseForRef.current = conversationId;
-    setBrowseLocation((conversationId && browseLocationCache.get(conversationId)) || null);
-    setBrowseError(null);
-  }, [conversationId]);
   const workingDir = browseLocation ?? workspaceRoot;
   // The wire form: "" means the workspace root (the historical relative
   // contract). A location INSIDE the workspace is sent relative to it, and
@@ -395,48 +281,55 @@ export function FilesPanel({
   useEffect(() => {
     setExplorerGitScope(conversationId, { path: locationParam, directories: gitDirectories });
   }, [conversationId, locationParam, gitDirectories]);
-  const gitQuery = useWorkspaceGitChanges(conversationId, {
+  const comparisonQuery = useWorkspaceComparisonChanges(conversationId, {
     path: locationParam,
     directories: gitDirectories,
     enabled: true,
   });
-  const changedFiles = useMemo(() => {
-    const byPath = new Map<string, WorkspaceChangedFile>();
-    for (const file of [
-      ...(showAgentChanges ? (agentQuery.data?.data ?? []) : []),
-      ...(gitQuery.data?.data ?? []),
-    ]) {
-      const path = relativizeToWorkspace(file.path, workspaceRoot);
-      byPath.set(path, { ...file, path });
-    }
-    return Array.from(byPath.values());
-  }, [agentQuery.data, gitQuery.data, showAgentChanges, workspaceRoot]);
+  const changedFiles = useMemo(
+    () =>
+      (comparisonQuery.data?.data ?? [])
+        .map((file) => ({ ...file, path: relativizeToWorkspace(file.path, workspaceRoot) }))
+        .filter((file) => {
+          if (!locationParam) return !file.path.startsWith("/");
+          const scopedPath =
+            locationParam.startsWith("/") && !file.path.startsWith("/") && workspaceRoot
+              ? joinBrowseLocation(workspaceRoot, file.path)
+              : file.path;
+          return (
+            scopedPath === locationParam ||
+            scopedPath.startsWith(`${locationParam.replace(/\/$/, "")}/`)
+          );
+        }),
+    [comparisonQuery.data, workspaceRoot, locationParam],
+  );
   const changedQuery = {
+    ...comparisonQuery,
     data:
-      gitQuery.data !== undefined || (showAgentChanges && agentQuery.data !== undefined)
-        ? { data: changedFiles }
-        : undefined,
-    isLoading: gitQuery.isLoading || (showAgentChanges && agentQuery.isLoading),
-    isError: gitQuery.isError || (showAgentChanges && agentQuery.isError),
-    error: gitQuery.error ?? (showAgentChanges ? agentQuery.error : null),
+      comparisonQuery.data === undefined
+        ? undefined
+        : { ...comparisonQuery.data, data: changedFiles },
   };
 
   const navigateTo = useCallback(
     (absolutePath: string) => {
+      if (absolutePath === workingDir) return;
+      // Revision hashes belong to the selected repository and cannot follow a new folder.
+      if (isRevisionComparison(comparison)) setComparison(DEFAULT_WORKSPACE_COMPARISON);
       setBrowseError(null);
       const next = absolutePath === workspaceRoot ? null : absolutePath;
       if (conversationId) {
         if (next === null) browseLocationCache.delete(conversationId);
         else browseLocationCache.set(conversationId, next);
       }
-      setBrowseLocation(next);
+      for (const listener of browseLocationListeners) listener();
       window.dispatchEvent(
         new CustomEvent("omnigent:browse-location-changed", {
           detail: { conversationId, location: relativizeToWorkspace(next, workspaceRoot) },
         }),
       );
     },
-    [workspaceRoot, conversationId],
+    [workspaceRoot, conversationId, workingDir, comparison, setComparison],
   );
 
   const navigateToChild = useCallback(
@@ -476,9 +369,6 @@ export function FilesPanel({
         ? `${unreachable.message}. Reachable: ${unreachable.reachableRoots.join(", ")}`
         : unreachable.message
       : null);
-  const hiddenFilesCount = changedFiles.filter((f) =>
-    f.path.split("/").some((seg) => seg.startsWith(".")),
-  ).length;
 
   useEffect(() => {
     if (!flatView) setChangedSearch("");
@@ -546,10 +436,7 @@ export function FilesPanel({
       refreshInFlight.current = true;
       if (!background) setRefreshingFiles(true);
       try {
-        const changeRefreshes = [
-          gitQuery.refetch(),
-          ...(showAgentChanges ? [agentQuery.refetch()] : []),
-        ];
+        const changeRefreshes = [comparisonQuery.refetch()];
         const refreshes = flatView
           ? changeRefreshes
           : [
@@ -571,9 +458,7 @@ export function FilesPanel({
     },
     [
       allFilesQuery,
-      gitQuery,
-      agentQuery,
-      showAgentChanges,
+      comparisonQuery,
       debouncedTreeSearch,
       flatView,
       queryClient,
@@ -622,7 +507,8 @@ export function FilesPanel({
     <ExplorerActionsProvider
       key={`${conversationId}:${flatView}:${locationParam}`}
       conversationId={conversationId}
-      base={flatView ? "" : locationParam}
+      base={locationParam}
+      entryBase={flatView ? "" : locationParam}
       workspaceRoot={workspaceRoot}
       hostId={session?.hostId ?? null}
       writable={
@@ -649,10 +535,9 @@ export function FilesPanel({
           fillHeight ? "flex h-full min-h-0 flex-col" : "flex min-h-0 flex-col",
         )}
       >
-        {/* Header — single row: [workingDir] [copy] [close?] */}
+        {/* Shared folder scope and actions for Files and Changes. */}
         <div className="flex h-11 shrink-0 items-center gap-[2px] px-2">
-          {flatView && <h2 className="shrink-0 pl-1 font-medium text-ui">Changes</h2>}
-          {!flatView && workingDir && workspaceRoot && (
+          {workingDir && workspaceRoot && (
             <BrowseLocationBar
               current={workingDir}
               workspace={workspaceRoot}
@@ -682,32 +567,58 @@ export function FilesPanel({
             </TooltipProvider>
           )}
           <div className="ml-auto flex items-center gap-[2px]">
-            {onClose && <NotificationBell />}
-            {!flatView && workingDir && (
-              // Its own provider: the header has no TooltipProvider ancestor
-              // (each control here brings one), unlike the file rows.
-              <TooltipProvider>
-                <CopyPathButton path={workingDir} label="Copy folder path" />
-              </TooltipProvider>
-            )}
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Refresh files"
-                    disabled={refreshingFiles}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                    onClick={() => void refreshFiles()}
+            <DiffComparisonControls
+              value={comparison}
+              sessionId={conversationId}
+              scopePath={locationParam}
+              onChange={setComparison}
+              repositoryRoot={comparisonQuery.data?.root_is_repository ?? false}
+              turns={comparisonQuery.data?.turns}
+              compact
+            />
+            <ExplorerToolbar
+              inline
+              onRefresh={() => void refreshFiles()}
+              refreshing={refreshingFiles}
+              viewOptions={
+                <>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <ArrowDownAZIcon />
+                      Sort by
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      <DropdownMenuRadioGroup
+                        value={changedSort}
+                        onValueChange={(value) => onSortChange(value as ChangedSort)}
+                      >
+                        {SORT_OPTIONS.map(({ value, label, Icon }) => (
+                          <DropdownMenuRadioItem key={value} value={value}>
+                            <Icon />
+                            {label}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuCheckboxItem
+                    checked={showHidden}
+                    onCheckedChange={onShowHiddenChange}
                   >
-                    <RefreshCwIcon className={cn(refreshingFiles && "animate-spin")} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Refresh files</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                    {showHidden ? <EyeOffIcon /> : <EyeIcon />}Show hidden files
+                  </DropdownMenuCheckboxItem>
+                  {!flatView && (
+                    <DropdownMenuItem onSelect={() => setShowSearchFilters((value) => !value)}>
+                      <FilterIcon />
+                      {showSearchFilters
+                        ? "Hide filename filters"
+                        : "Filename include/exclude filters"}
+                      {treeFiltersActive ? " •" : ""}
+                    </DropdownMenuItem>
+                  )}
+                </>
+              }
+            />
             {onClose && (
               <button
                 type="button"
@@ -725,17 +636,19 @@ export function FilesPanel({
             Could not refresh files. Showing the last loaded listing.
           </p>
         )}
-        {!flatView && gitQuery.isError && (
+        {!flatView && comparisonQuery.isError && (
           <p className="px-2 py-1 text-sm text-destructive" role="status">
-            Git status unavailable:{" "}
-            {gitQuery.error instanceof Error ? gitQuery.error.message : String(gitQuery.error)}
+            Comparison unavailable:{" "}
+            {comparisonQuery.error instanceof Error
+              ? comparisonQuery.error.message
+              : String(comparisonQuery.error)}
           </p>
         )}
-        {/* Content */}
-        <ExplorerToolbar
-          showAgentChanges={showAgentChanges}
-          onShowAgentChangesChange={setShowAgentChanges}
-        />
+        {comparisonQuery.data?.warning && (
+          <p role="status" className="px-3 py-1 text-xs text-muted-foreground">
+            {comparisonQuery.data.warning}
+          </p>
+        )}
         <div className="shrink-0 border-t border-border" />
         {/* Search toolbar — the Changed | All scope switch leads, then the
               search field, then the per-view trailing control (Sort for the
@@ -758,12 +671,6 @@ export function FilesPanel({
                   value={changedSearch}
                 />
               </div>
-              <SortSelector sort={changedSort} onChange={onSortChange} />
-              <HiddenFilesToggle
-                showHidden={showHidden}
-                onToggle={() => onShowHiddenChange(!showHidden)}
-                hiddenCount={hiddenFilesCount}
-              />
             </div>
           </div>
         )}
@@ -782,43 +689,6 @@ export function FilesPanel({
                     value={treeSearch}
                   />
                 </div>
-                <SortSelector sort={changedSort} onChange={onSortChange} />
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={
-                          showSearchFilters ? "Hide search filters" : "Show search filters"
-                        }
-                        aria-expanded={showSearchFilters}
-                        className={cn(
-                          "shrink-0",
-                          showSearchFilters || treeFiltersActive
-                            ? "text-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        onClick={() => setShowSearchFilters((v) => !v)}
-                      >
-                        <FilterIcon />
-                        {treeFiltersActive && !showSearchFilters && (
-                          <span
-                            className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-primary"
-                            aria-hidden
-                          />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Files to include / exclude</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <HiddenFilesToggle
-                  showHidden={showHidden}
-                  onToggle={() => onShowHiddenChange(!showHidden)}
-                  hiddenCount={hiddenFilesCount}
-                />
               </div>
             </div>
             {showSearchFilters && (
@@ -855,6 +725,8 @@ export function FilesPanel({
           {!showAsleepHint && flatView && (
             <FlatFileList
               files={changedQuery.data?.data}
+              repositories={comparisonQuery.data?.repositories}
+              workspaceRoot={workspaceRoot}
               isLoading={changedQuery.isLoading}
               isError={changedQuery.isError}
               error={changedQuery.error}
@@ -866,11 +738,9 @@ export function FilesPanel({
               conversationId={conversationId}
               runnerWentOffline={runnerWentOffline}
               emptyMessage={
-                showAgentChanges
-                  ? "No Git or observed agent changes"
-                  : gitQuery.data?.repositories?.length
-                    ? "No Git changes in the browsed folders"
-                    : "Expand a Git repository in Files to view its changes"
+                comparison.source === "git"
+                  ? "No Git changes in the selected folder"
+                  : "No changes in this comparison for the selected folder"
               }
             />
           )}
@@ -885,7 +755,7 @@ export function FilesPanel({
               showHidden={showHidden}
               onShowHidden={() => onShowHiddenChange(true)}
               changedFiles={changedFiles}
-              includeMissingChanges={showAgentChanges}
+              includeMissingChanges={false}
               sort={changedSort}
               runnerWentOffline={runnerWentOffline}
               searchQuery={debouncedTreeSearch}

@@ -299,7 +299,15 @@ async def test_git_inspection_status_discovery_scope_and_read_only_host_parity(
         return body
 
     empty = await inspect_changes()
-    assert empty == {"object": "list", "data": [], "has_more": False, "repositories": []}
+    assert empty == {
+        "object": "list",
+        "data": [],
+        "has_more": False,
+        "repositories": [],
+        "root_is_repository": False,
+        "base": "HEAD",
+        "target": "WORKTREE",
+    }
     listing = await client.get(url.removesuffix("/git") + "/filesystem")
     assert listing.status_code == 200, listing.text
     assert "hello.txt" in {entry["name"] for entry in listing.json()["data"]}
@@ -505,12 +513,12 @@ async def test_git_inspection_authorizes_scope_and_every_discovered_directory(
 
 
 @pytest.mark.asyncio
-async def test_agent_diff_keeps_last_turn_snapshot_and_reads_current_session_content(
+async def test_agent_diff_keeps_turn_and_session_snapshots_frozen(
     registry: SessionResourceRegistry,
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The API keeps a completed turn's after-image while session diffs read current disk."""
+    """Both comparison baselines ignore subsequent external disk edits."""
     tracking = AgentEditFilesystemRegistry(workspace)
     with monkeypatch.context() as setup:
         setup.setattr(
@@ -547,6 +555,10 @@ async def test_agent_diff_keeps_last_turn_snapshot_and_reads_current_session_con
                 "after": "agent after\n",
                 "coverage": "observed_tools",
                 "turn_id": "t",
+                "source": "agent",
+                "baseline": "last_turn",
+                "finished": True,
+                "warning": "Captured tool mutations only; unobserved edits and gaps are unknown.",
             }
             changes = await client.get(
                 url.replace("agent-diff", "changes"), params={"source": "agent"}
@@ -562,11 +574,11 @@ async def test_agent_diff_keeps_last_turn_snapshot_and_reads_current_session_con
             assert frozen.json() == captured
             session = await client.get(url, params={**params, "baseline": "session"})
             assert session.status_code == 200, session.text
-            assert session.json() == {**captured, "after": "later external edit\n"}
+            assert session.json() == {**captured, "baseline": "session"}
             file.write_bytes(b"x" * (10 * 1024 * 1024 + 1))
             oversized = await client.get(url, params={**params, "baseline": "session"})
-            assert oversized.status_code == 400, oversized.text
-            assert oversized.json()["error"]["code"] == "file_too_large"
+            assert oversized.status_code == 200, oversized.text
+            assert oversized.json() == {**captured, "baseline": "session"}
             assert (await client.get(url, params=params)).json() == captured
             unknown = await client.get(
                 url, params={"path": "src/main.py", "baseline": "last_turn"}
@@ -4067,3 +4079,103 @@ async def test_content_replace_regex_anchors_match_later_lines(
     assert response.status_code == 200, response.text
     assert response.json()["errors"] == []
     assert target.read_text() == "keep\none beta\ntwo beta\n"
+
+
+@pytest.mark.asyncio
+async def test_agent_choices_without_capture_are_explicit_and_scoped_paths_are_authorized(
+    client: httpx.AsyncClient,
+    registry: SessionResourceRegistry,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "/v1/sessions/conv_test/resources/environments/default/changes"
+    response = await client.get(
+        url, params={"source": "agent", "baseline": "last_turn", "path": "src"}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source"] == "agent" and body["data"] == body["turns"] == []
+    assert body["warning"] and body["root_is_repository"] is False
+    environment = registry._primary_envs["conv_test"]
+    monkeypatch.setattr(
+        environment,
+        "sandbox",
+        SandboxPolicy(
+            backend_type="linux_bwrap",
+            active=True,
+            read_roots=[],
+            write_roots=[],
+            write_files=[],
+            allow_network=False,
+        ),
+    )
+    for path in [str(workspace.parent / "outside"), "../outside"]:
+        denied = await client.get(url, params={"source": "agent", "path": path})
+        assert denied.status_code in (400, 403), denied.text
+    diff = await client.get(url.replace("changes", "agent-diff"), params={"path": "hello.txt"})
+    assert diff.status_code == 404 and diff.json()["error"]["code"] == "baseline_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_git_historical_scope_is_authorized_before_nested_file_lookup(
+    client: httpx.AsyncClient,
+    registry: SessionResourceRegistry,
+    git_inspection_repos: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "/v1/sessions/conv_test/resources/environments/default/git"
+    external = git_inspection_repos["external"]
+    environment = registry._primary_envs["conv_test"]
+    monkeypatch.setattr(
+        environment,
+        "sandbox",
+        SandboxPolicy(
+            backend_type="linux_bwrap",
+            active=True,
+            read_roots=[],
+            write_roots=[],
+            write_files=[],
+            allow_network=False,
+        ),
+    )
+    denied = await client.get(
+        url,
+        params={
+            "operation": "diff",
+            "path": "projects/repo/tracked.txt",
+            "target": "HEAD",
+            "scope": str(external),
+        },
+    )
+    assert denied.status_code == 403 and denied.json()["error"]["code"] == "path_unreachable"
+    mismatch = await client.get(
+        url,
+        params={
+            "operation": "diff",
+            "path": "projects/repo/nested/tracked.txt",
+            "target": "HEAD",
+            "scope": "projects/repo",
+        },
+    )
+    assert (
+        mismatch.status_code == 400 and mismatch.json()["error"]["code"] == "repository_mismatch"
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_listing_reports_failed_repository_metadata_without_hiding_capture_warning(
+    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failed_metadata(*_args, **_kwargs):
+        return {"status": 500, "error": {"code": "git_failed", "message": "metadata denied"}}
+
+    monkeypatch.setattr("omnigent.runner.workspace_git.inspect_git", failed_metadata)
+    response = await client.get(
+        "/v1/sessions/conv_test/resources/environments/default/changes",
+        params={"source": "agent", "baseline": "last_turn"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["repository_warning"] == "metadata denied"
+    assert "No captured" in response.json()["warning"]
+    assert "metadata denied" in response.json()["warning"]

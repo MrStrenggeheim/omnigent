@@ -304,13 +304,14 @@ describe("ChatHeader — open-sidebar toggle visibility", () => {
     expect(toggle.querySelector("svg")).toHaveClass("lucide-panel-left");
   });
 
-  it("uses the menu icon for the mobile sidebar toggle", () => {
+  it("uses the left panel outline for the mobile sidebar toggle", () => {
     isMobileMock.mockReturnValue(true);
     renderHeader({ sidebarOpen: false });
 
-    expect(screen.getByRole("button", { name: "Open sidebar" }).querySelector("svg")).toHaveClass(
-      "lucide-menu",
-    );
+    const button = screen.getByRole("button", { name: "Open sidebar" });
+    expect(button.querySelector("svg")).toHaveAttribute("data-panel-side", "left");
+    expect(button.querySelector("svg")).toHaveAttribute("data-panel-filled", "false");
+    expect(button).toHaveAttribute("aria-expanded", "false");
   });
 
   it("uses a back arrow and faded header surface for the mobile settings menu", () => {
@@ -650,6 +651,59 @@ describe("ChatHeader — Chat/Terminal switcher wiring", () => {
 });
 
 describe("ChatHeader — floating mobile controls", () => {
+  it.each([false, true])(
+    "shares compact visible geometry across all mobile header actions (owner menu=%s)",
+    (owner) => {
+      isMobileMock.mockReturnValue(true);
+      renderHeader({
+        sidebarOpen: false,
+        conversationId: "conv-1",
+        conversationTitle: "Greeting",
+        showFilesPanel: true,
+        hasRailContent: true,
+        hasHeaderMenu: true,
+        actionConversation: owner
+          ? {
+              id: "conv-1",
+              object: "conversation",
+              title: "Greeting",
+              created_at: 1,
+              updated_at: 2,
+              labels: {},
+              permission_level: 3,
+            }
+          : undefined,
+      });
+      const labels = [
+        "Open sidebar",
+        owner ? "Conversation actions" : "Session actions",
+        "Notifications",
+        "Open workspace",
+      ];
+      for (const label of labels) {
+        const button = screen.getByRole("button", { name: label });
+        expect(button).toHaveAttribute("data-header-action-button");
+        expect(button).toHaveClass(
+          "size-6",
+          "max-md:size-11",
+          "p-0",
+          "bg-transparent",
+          "hover:bg-transparent",
+          "focus-visible:ring-0",
+        );
+        const surface = button.querySelector("[data-header-action-surface]")!;
+        expect(surface).toHaveClass(
+          "size-6",
+          "pointer-events-none",
+          "group-hover/button:bg-muted",
+          "group-focus-visible/button:ring-3",
+        );
+        expect(surface.querySelector("svg")).toHaveClass("size-4");
+        expect(surface.querySelector("svg")).not.toHaveClass("size-5");
+      }
+    },
+  );
+
   it("keeps the mobile control clusters free of circular glass containers", () => {
     isMobileMock.mockReturnValue(true);
     renderHeader({ sidebarOpen: false, conversationId: "conv-1", canShare: true });
@@ -689,7 +743,7 @@ describe("ChatHeader — floating mobile controls", () => {
     const toggle = screen.getByRole("button", { name: "Open sidebar" });
     const trigger = screen.getByRole("button", { name: "Conversation actions" });
     expect(trigger.parentElement).not.toHaveClass("max-md:px-1", "max-md:py-1");
-    expect(trigger).toHaveClass("size-10");
+    expect(trigger).toHaveClass("size-6", "max-md:size-11");
     expect(toggle).toHaveClass("size-6", "max-md:size-11");
   });
 
@@ -817,8 +871,8 @@ describe("ChatHeader — title-adjacent conversation actions", () => {
     // header's own control cluster to stay reachable.
     const trigger = screen.getByRole("button", { name: "Conversation actions" });
     expect(trigger.closest("nav.conversation-breadcrumb")).toBeNull();
-    // Rightmost control in the header's action cluster.
-    expect(trigger.parentElement?.lastElementChild).toBe(trigger);
+    const bell = screen.getByRole("button", { name: "Notifications" });
+    expect(trigger.compareDocumentPosition(bell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText(conversation.title as string)).toBeInTheDocument();
   });
 
@@ -953,9 +1007,12 @@ describe("ChatHeader — title-adjacent conversation actions", () => {
 
     const workspace = screen.getByRole("button", { name: "Open workspace" });
     const actions = screen.getByRole("button", { name: "Conversation actions" });
-    expect(workspace).toHaveClass("size-11", "md:hidden");
+    expect(workspace).toHaveClass("size-6", "max-md:size-11", "md:hidden");
     expect(workspace.parentElement).toBe(actions.parentElement);
-    expect(actions.parentElement?.lastElementChild).toBe(actions);
+    const bell = screen.getByRole("button", { name: "Notifications" });
+    expect(actions.compareDocumentPosition(bell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bell.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions.parentElement?.lastElementChild).toBe(workspace);
     fireEvent.pointerDown(actions, { button: 0 });
 
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
@@ -1052,7 +1109,7 @@ describe("ChatHeader — title-adjacent conversation actions", () => {
       mobileMenu: { ...mobileMenu, filesPanelOpen: true },
     });
 
-    expect(screen.getByRole("button", { name: "Open workspace" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Close workspace" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );

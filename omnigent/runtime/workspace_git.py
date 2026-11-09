@@ -78,12 +78,14 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
             fail(400, "invalid_path", f"{field} must not contain '..'")
         return value
 
-    def requested_path(value: str) -> Path:
+    def requested_path(value: str, *, directory: bool = False) -> Path:
         entry = Path(value)
         absolute = entry.is_absolute()
         entry = entry if absolute else workspace / entry
         # Keep a final file symlink as an entry; resolve all directory components.
-        resolved = entry.resolve() if entry.is_dir() else entry.parent.resolve() / entry.name
+        resolved = (
+            entry.resolve() if directory or entry.is_dir() else entry.parent.resolve() / entry.name
+        )
         if not absolute and not resolved.is_relative_to(workspace):
             fail(400, "invalid_path", "A relative path escapes the workspace through a symlink")
         return resolved
@@ -207,8 +209,38 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
         )
         return content.decode("utf-8", errors="replace")
 
-    def numstat_counts(repository: Path) -> dict[str, tuple[int | None, int | None]]:
-        commit = resolve_revision(repository, "HEAD", unborn=True)
+    def comparison_commits(repository: Path, base: str, target: str):
+        after = None if target == "WORKTREE" else resolve_revision(repository, target)
+        if after is not None and base == target + "^":
+            _, parents = run_git(
+                repository,
+                "--shallow-file",
+                os.devnull,
+                "rev-list",
+                "--parents",
+                "--max-count=1",
+                after,
+                "--",
+            )
+            before = (
+                None
+                if parents.split() == [after.encode("ascii")]
+                else resolve_revision(repository, after + "^")
+            )
+        else:
+            before = resolve_revision(repository, base, unborn=base == "HEAD")
+        return before, after
+
+    def diff_arguments(repository: Path, before: str | None, after: str | None) -> list[str]:
+        # Git's empty tree is read-only; hash-object without -w stores nothing.
+        if before is None and after is not None:
+            _, empty = run_git(repository, "hash-object", "-t", "tree", "--stdin")
+            return [empty.decode("ascii").strip(), after]
+        return (["--cached"] if before is None else [before]) + ([after] if after else [])
+
+    def numstat_counts(
+        repository: Path, arguments: list[str]
+    ) -> dict[str, tuple[int | None, int | None]]:
         _, output = run_git(
             repository,
             "diff",
@@ -216,7 +248,8 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
             "-z",
             "--no-ext-diff",
             "--no-textconv",
-            *(["--cached"] if commit is None else [commit]),
+            "--find-renames",
+            *arguments,
             "--",
         )
         counts: dict[str, tuple[int | None, int | None]] = {}
@@ -276,21 +309,40 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
             fail(404, "not_found", "The workspace directory does not exist")
         if not isinstance(params, dict):
             fail(400, "invalid_params", "params must be an object")
-        if set(params) - {"operation", "path", "directories", "base", "target"}:
+        if set(params) - {"operation", "path", "directories", "base", "target", "scope"}:
             fail(400, "invalid_params", "Unknown Git inspection parameters")
         operation = params.get("operation")
-        if operation not in ("changes", "diff"):
-            fail(400, "unsupported_operation", "operation must be 'changes' or 'diff'")
+        if operation not in ("changes", "diff", "repository"):
+            fail(
+                400, "unsupported_operation", "operation must be 'changes', 'diff' or 'repository'"
+            )
         scope = requested_path(path_value(params.get("path", ""), "path"))
         directories = params.get("directories", [])
         if not isinstance(directories, list) or len(directories) > 128:
             fail(400, "invalid_params", "directories must be a list of at most 128 paths")
-        browsed = [requested_path(path_value(value, "directories")) for value in directories]
+        browsed = [
+            requested_path(path_value(value, "directories"), directory=True)
+            for value in directories
+        ]
+        existing_browsed = []
         for directory in browsed:
-            if not directory.is_dir():
-                fail(400, "invalid_path", f"Browsed directory does not exist: {directory}")
+            try:
+                metadata = directory.stat()
+            except FileNotFoundError:
+                # Expanded directories can disappear between background refreshes.
+                continue
+            if not stat.S_ISDIR(metadata.st_mode):
+                fail(400, "invalid_path", f"Browsed path is not a directory: {directory}")
+            existing_browsed.append(directory)
+        browsed = existing_browsed
         env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1")
+        if operation == "repository":
+            repository = nearest_repository(scope)
+            return {
+                "root_is_repository": repository == scope,
+                "repositories": [str(repository)] if repository else [],
+            }
 
         if operation == "diff":
             if not params.get("path") or scope.is_dir() or ".git" in scope.parts:
@@ -300,33 +352,53 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
             repository = nearest_repository(scope)
             if repository is None:
                 fail(404, "not_a_repository", f"No Git repository contains {scope}")
+            if "scope" in params:
+                panel = requested_path(path_value(params["scope"], "scope"))
+                if base != "HEAD" or target != "WORKTREE":
+                    if nearest_repository(panel) != panel or not panel.is_dir():
+                        fail(
+                            400,
+                            "invalid_repository_root",
+                            "Historical diff scope must be exactly a repository root",
+                        )
+                    if repository != panel or not scope.is_relative_to(panel):
+                        fail(
+                            400,
+                            "repository_mismatch",
+                            "File belongs to a different repository than the comparison scope",
+                        )
             relative = scope.relative_to(repository).as_posix()
-            after_commit = None if target == "WORKTREE" else resolve_revision(repository, target)
-            if after_commit is not None and base == target + "^":
-                # Ignore shallow boundaries so only an actual root gets an empty baseline.
-                _, parents = run_git(
-                    repository,
-                    "--shallow-file",
-                    os.devnull,
-                    "rev-list",
-                    "--parents",
-                    "--max-count=1",
-                    after_commit,
-                    "--",
-                )
-                before_commit = (
-                    None
-                    if parents.split() == [after_commit.encode("ascii")]
-                    else resolve_revision(repository, after_commit + "^")
-                )
-            else:
-                before_commit = resolve_revision(repository, base, unborn=base == "HEAD")
+            before_commit, after_commit = comparison_commits(repository, base, target)
             before = committed_content(repository, before_commit, relative)
             after = (
                 worktree_content(scope)
                 if target == "WORKTREE"
                 else committed_content(repository, after_commit, relative)
             )
+            if before is None and after is not None and before_commit is not None:
+                _, renamed = run_git(
+                    repository,
+                    "diff",
+                    "--name-status",
+                    "-z",
+                    "--find-renames",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    *diff_arguments(repository, before_commit, after_commit),
+                    "--",
+                )
+                fields = iter(renamed.split(b"\0"))
+                for status in fields:
+                    if not status:
+                        continue
+                    source = next(fields, b"")
+                    if status.startswith((b"R", b"C")):
+                        destination = next(fields, b"")
+                        if os.fsdecode(destination) == relative:
+                            before = committed_content(
+                                repository, before_commit, os.fsdecode(source)
+                            )
+                            break
             if before is None and after is None:
                 fail(404, "not_found", f"File {relative!r} is absent from both revisions")
             check_deadline()
@@ -340,40 +412,94 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
                 "target": target,
             }
 
-        if params.get("base", "HEAD") != "HEAD" or params.get("target", "WORKTREE") != "WORKTREE":
-            fail(400, "invalid_params", "Revision parameters are supported only for diff")
+        base = revision(params.get("base", "HEAD"), "base")
+        target = revision(params.get("target", "WORKTREE"), "target")
+        historical = base != "HEAD" or target != "WORKTREE"
+        root_repository = nearest_repository(scope)
+        if historical and (root_repository != scope or not scope.is_dir()):
+            fail(
+                400,
+                "invalid_repository_root",
+                "Historical changes require path to be exactly a repository root",
+            )
         repositories = set()
         for entry in [scope, *browsed]:
             repository = nearest_repository(entry)
             if repository is not None:
+                if historical and repository != scope:
+                    fail(
+                        400,
+                        "invalid_repository_root",
+                        "Historical changes cannot compare multiple repositories",
+                    )
                 repositories.add(repository)
         data = []
         record_count = 0
         for repository in sorted(repositories):
-            _, output = run_git(
-                repository,
-                "status",
-                "--porcelain=v1",
-                "-z",
-                "--untracked-files=all",
-                "--ignore-submodules=none",
-            )
-            counts = numstat_counts(repository)
-            fields = iter(output.split(b"\0"))
-            for field in fields:
-                check_deadline()
-                if not field:
-                    continue
-                if len(field) < 4 or field[2:3] != b" ":
-                    fail(500, "git_failed", "Malformed Git status output")
-                status = field[:2]
-                if b"R" in status or b"C" in status:
-                    if not next(fields, b""):
+            before_commit, after_commit = comparison_commits(repository, base, target)
+            arguments = diff_arguments(repository, before_commit, after_commit)
+            if historical:
+                _, output = run_git(
+                    repository,
+                    "diff",
+                    "--name-status",
+                    "-z",
+                    "--find-renames",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    *arguments,
+                    "--",
+                )
+                names = iter(output.split(b"\0"))
+                records = []
+                for status in names:
+                    if not status:
+                        continue
+                    name = next(names, b"")
+                    if status.startswith((b"R", b"C")):
+                        source, name = name, next(names, b"")
+                    else:
+                        source = None
+                    if not name:
+                        fail(500, "git_failed", "Malformed Git name-status output")
+                    records.append((status[:1] + b" ", name, source))
+                if target == "WORKTREE":
+                    _, untracked = run_git(
+                        repository, "ls-files", "--others", "--exclude-standard", "-z"
+                    )
+                    by_name = {name: (status, name, source) for status, name, source in records}
+                    for name in untracked.split(b"\0"):
+                        if name:
+                            by_name[name] = (b"M " if name in by_name else b"??", name, None)
+                    records = list(by_name.values())
+            else:
+                _, output = run_git(
+                    repository,
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=all",
+                    "--ignore-submodules=none",
+                )
+                fields = iter(output.split(b"\0"))
+                records = []
+                for field in fields:
+                    if not field:
+                        continue
+                    if len(field) < 4 or field[2:3] != b" ":
+                        fail(500, "git_failed", "Malformed Git status output")
+                    status = field[:2]
+                    source = next(fields, b"") if b"R" in status or b"C" in status else None
+                    if source == b"":
                         fail(500, "git_failed", "Missing source path in Git status output")
+                    records.append((status, field[3:], source))
+            counts = numstat_counts(repository, arguments)
+            for status, name, source in records:
+                check_deadline()
                 record_count += 1
                 if record_count > max_records:
                     fail(400, "limit_exceeded", "Git inspection exceeds the 10000 record limit")
-                relative = Path(os.fsdecode(field[3:]).rstrip("/"))
+                relative = Path(os.fsdecode(name).rstrip("/"))
                 if relative.is_absolute() or ".." in relative.parts:
                     fail(500, "git_failed", "Git returned a path outside its repository")
                 entry = repository / relative
@@ -390,7 +516,7 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
                     else ("created" if status == b"??" or status[:1] == b"A" else "modified")
                 )
                 size = modified_at = None
-                if change != "deleted":
+                if change != "deleted" and target == "WORKTREE":
                     try:
                         metadata = entry.lstat()
                     except FileNotFoundError:
@@ -412,6 +538,11 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
                         "lines_added": added,
                         "lines_removed": removed,
                         "repository": str(repository),
+                        **(
+                            {"previous_path": display_path(repository / os.fsdecode(source))}
+                            if source
+                            else {}
+                        ),
                     }
                 )
         return {
@@ -419,6 +550,9 @@ def inspect_workspace_git(root: str, params: dict) -> dict:
             "data": sorted(data, key=lambda record: record["path"]),
             "has_more": False,
             "repositories": [str(repository) for repository in sorted(repositories)],
+            "root_is_repository": root_repository == scope,
+            "base": base,
+            "target": target,
         }
     except InspectionError as exc:
         return {"error": {"code": exc.code, "message": str(exc)}, "status": exc.status}

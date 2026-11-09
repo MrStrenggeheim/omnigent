@@ -13,10 +13,8 @@ import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // content there — so even if `open` is left true across a viewport resize it
 // can't collide with the rail.
 
-import { XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
 import { useIOSNativeKeyboardInset } from "@/hooks/useIOSNativeKeyboardInset";
 import { cn } from "@/lib/utils";
 
@@ -88,12 +86,9 @@ export function MobilePanelDrawer({
       data-collapsed={!open || undefined}
       inert={!open}
     >
-      {open && <MobileWorkspaceTabs />}
-      <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-2">
+      {open && <MobileWorkspaceTabs onClose={onClose} />}
+      <header className="sr-only">
         <h2 className="font-medium text-ui">{title}</h2>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
-          <XIcon className="size-4" />
-        </Button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {(open || keepMounted) && children}

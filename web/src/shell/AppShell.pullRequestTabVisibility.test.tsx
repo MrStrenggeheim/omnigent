@@ -18,6 +18,9 @@ import { readSessionWorkspaceState, writeSessionWorkspaceState } from "@/lib/ses
 import { writeWorkspacePanelDefault } from "@/lib/workspacePanelPreferences";
 import { writePinnedWorkspaceTabs } from "@/lib/workspaceTabPreferences";
 
+vi.mock("@/hooks/useIsMobileViewport", () => ({
+  useIsMobileViewport: () => isMobileViewport(),
+}));
 vi.mock("@/hooks/useConversations", async (importOriginal) => ({
   ...(await importOriginal<typeof UseConversationsModule>()),
   useConversations: vi.fn(),
@@ -28,6 +31,13 @@ vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
   // network-backed hook is replaced.
   ...(await importOriginal<typeof UseTerminalsModule>()),
   useTerminals: vi.fn(() => ({ terminals: [], isLoading: false, error: null })),
+}));
+vi.mock("@/hooks/useWorkspaceComparisons", () => ({
+  useAgentTurnChoices: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useWorkspaceComparisonChanges: vi.fn(() => ({
+    data: { available: true, data: [], repositories: [], root_is_repository: false },
+    isLoading: false,
+  })),
 }));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
   useWorkspaceGitChanges: vi.fn(() => ({ data: { data: [] }, isLoading: false })),
@@ -232,7 +242,7 @@ describe("opening Pull Requests from the composer", () => {
     expect(readSessionWorkspaceState("conv_ws").open).toBe(false);
     expect(screen.getAllByTestId("github-panel")).toHaveLength(1);
 
-    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close workspace" }));
 
     expect(drawer).toHaveAttribute("data-state", "closed");
     expect(within(drawer).queryByTestId("github-panel")).not.toBeInTheDocument();

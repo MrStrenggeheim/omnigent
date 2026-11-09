@@ -45,12 +45,24 @@ vi.mock("./FilesPanel", () => ({
   readBrowseLocation: () => "",
   // Echo the fixed scope so tests can prove the Files tab renders the tree
   // (flatView=false) and the Changes tab the changed-only list (flatView=true).
-  FilesPanel: ({ flatView, conversationId }: { flatView: boolean; conversationId: string }) => (
+  FilesPanel: ({
+    flatView,
+    conversationId,
+    onFileSelect,
+  }: {
+    flatView: boolean;
+    conversationId: string;
+    onFileSelect: (path: string) => void;
+  }) => (
     <div
       data-testid="files-panel-stub"
       data-session={conversationId}
       data-flat-view={String(flatView)}
-    />
+    >
+      <button type="button" onClick={() => onFileSelect("src/next.ts")}>
+        Open next Explorer file
+      </button>
+    </div>
   ),
 }));
 vi.mock("./SubagentsPanel", () => ({
@@ -114,6 +126,16 @@ const useSessionAgentMock = vi.mocked(useSessionAgent);
 
 beforeEach(() => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.hasAttribute("data-workspace-tabs-viewport") ? 100 : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.hasAttribute("data-workspace-tabs-content") ? 500 : 0;
+  });
 });
 
 afterEach(() => {
@@ -142,6 +164,7 @@ afterEach(() => {
 function renderWorkspace(
   initialOverrides: {
     conversationId?: string;
+    width?: number;
     contained?: boolean;
     rightRailTab?: RightRailTab | null;
     openPanels?: DefaultWorkspaceTab[];
@@ -179,7 +202,7 @@ function renderWorkspace(
       <WorkspacePanel
         conversationId={overrides.conversationId ?? "conv_ws"}
         contained={overrides.contained}
-        width={360}
+        width={overrides.width ?? 360}
         open={overrides.open}
         animateVisibility={overrides.animateVisibility}
         resizing={overrides.resizing}
@@ -248,6 +271,26 @@ function renderWorkspace(
 }
 
 describe("WorkspacePanel surface presentation", () => {
+  it("hides the picker when existing panel and file tabs fit and updates on resize", () => {
+    let availableWidth = 600;
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.hasAttribute("data-workspace-tabs-viewport") ? availableWidth : 0;
+    });
+    const { rerender } = renderWorkspace({ openFiles: ["src/App.tsx"] });
+    expect(screen.queryByRole("button", { name: "Select panel" })).toBeNull();
+    availableWidth = 300;
+    fireEvent(window, new Event("resize"));
+    expect(screen.getByRole("button", { name: "Select panel" })).toBeInTheDocument();
+    availableWidth = 600;
+    fireEvent(window, new Event("resize"));
+    expect(screen.queryByRole("button", { name: "Select panel" })).toBeNull();
+    availableWidth = 300;
+    rerender({ openFiles: ["src/App.tsx", "README.md"] });
+    expect(screen.getByRole("button", { name: "Select panel" })).toBeInTheDocument();
+  });
+
   it("offers unpinned pages in + without requiring shell or browser support", () => {
     writePinnedWorkspaceTabs(["files", "subagents"]);
     const { onRightRailTabChange } = renderWorkspace({ showGithubTab: true });
@@ -680,6 +723,49 @@ describe("WorkspacePanel content area", () => {
     // must not also mount. The stub echoes the path it received.
     expect(screen.getByTestId("file-viewer-stub")).toHaveTextContent("src/App.tsx");
     expect(screen.queryByTestId("files-panel-stub")).toBeNull();
+  });
+
+  it.each(["files", "changes"] as const)(
+    "keeps the %s Explorer beside a wide viewer and routes file selection through its guard",
+    (rightRailTab) => {
+      const { openFileViewer, rerender } = renderWorkspace({
+        width: 900,
+        contained: true,
+        rightRailTab,
+        selectedFilePath: "src/current.ts",
+        openFiles: ["src/current.ts"],
+      });
+      const viewer = screen.getByTestId("file-viewer-stub");
+      const explorer = screen.getByRole("region", { name: "File explorer" });
+      expect(explorer).toContainElement(screen.getByTestId("files-panel-stub"));
+      expect(screen.getByTestId("files-panel-stub")).toHaveAttribute(
+        "data-flat-view",
+        String(rightRailTab === "changes"),
+      );
+      expect(screen.getByTestId("files-panel-stub")).toHaveAttribute("data-session", "conv_ws");
+      expect(screen.getAllByRole("tablist")).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: "Open next Explorer file" }));
+      expect(openFileViewer).toHaveBeenCalledWith("src/next.ts");
+      rerender({ width: 500 });
+      expect(screen.queryByRole("region", { name: "File explorer" })).toBeNull();
+      expect(screen.getByTestId("file-viewer-stub")).toBe(viewer);
+      rerender({ width: 900 });
+      expect(screen.getByTestId("file-viewer-stub")).toBe(viewer);
+      rerender({ selectedFilePath: null });
+      expect(screen.getByTestId("files-panel-stub")).toBeInTheDocument();
+      expect(screen.queryByTestId("file-viewer-stub")).toBeNull();
+    },
+  );
+
+  it("keeps the phone viewer single-column even with a wide fallback", () => {
+    isMobileMock.mockReturnValue(true);
+    renderWorkspace({
+      width: 1000,
+      selectedFilePath: "src/current.ts",
+      openFiles: ["src/current.ts"],
+    });
+    expect(screen.queryByRole("region", { name: "File explorer", hidden: true })).toBeNull();
+    expect(screen.getByTestId("file-viewer-stub")).toBeInTheDocument();
   });
 
   it("renders the FilesPanel tree scope when no file is active on the Files tab", () => {

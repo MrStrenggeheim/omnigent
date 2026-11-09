@@ -618,14 +618,20 @@ class FilesystemRegistry(ABC):
         return
 
     def list_agent_changed_files(
-        self, session_id: str, *, limit: int = 10_000
+        self,
+        session_id: str,
+        *,
+        limit: int = 10_000,
+        baseline: str = "session",
+        turn_id: str | None = None,
+        scope: str = "",
     ) -> list[dict[str, Any]]:
         """Return only recorded agent history, including when Git status is clean."""
         if limit <= 0:
             return []
         return [
             row
-            for row in self.turn_history.list_files(session_id)
+            for row in self.turn_history.list_files(session_id, baseline, turn_id, scope)
             if not _is_ephemeral(row["path"]) and not _is_harness_plumbing(row["path"])
         ][:limit]
 
@@ -838,12 +844,26 @@ class AgentEditFilesystemRegistry(FilesystemRegistry):
         ]
 
     def list_agent_changed_files(
-        self, session_id: str, *, limit: int = 10_000
+        self,
+        session_id: str,
+        *,
+        limit: int = 10_000,
+        baseline: str = "session",
+        turn_id: str | None = None,
+        scope: str = "",
     ) -> list[dict[str, Any]]:
         """Merge legacy observations with prospective agent history, with new status winning."""
         if limit <= 0:
             return []
-        fresh = super().list_agent_changed_files(session_id)
+        fresh = super().list_agent_changed_files(
+            session_id,
+            limit=limit,
+            baseline=baseline,
+            turn_id=turn_id,
+            scope=scope,
+        )
+        if baseline != "session" or turn_id is not None:
+            return fresh
         # At most 1,024 session paths can replace or suppress legacy rows.
         legacy = self.list_changed_files(session_id, limit=limit + 1024)
         by_path = {
@@ -851,9 +871,15 @@ class AgentEditFilesystemRegistry(FilesystemRegistry):
                 "name": Path(row["path"]).name,
                 "lines_added": None,
                 "lines_removed": None,
+                "coverage": "legacy_unknown",
+                "before_known": False,
+                "after_known": False,
                 **row,
             }
             for row in legacy
+            if (self._cwd / row["path"]).is_relative_to(
+                Path(scope) if Path(scope).is_absolute() else self._cwd / scope
+            )
         }
         fresh_paths = {row["path"] for row in fresh}
         for path in list(by_path):

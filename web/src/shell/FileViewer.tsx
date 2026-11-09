@@ -30,6 +30,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import {
@@ -84,11 +85,7 @@ import { downloadWorkspaceFile, useFileContent } from "@/hooks/useFileContent";
 import { isVideoFile } from "@/lib/video";
 import { useAgentFileDiff, useGitFileDiff } from "@/hooks/useFileDiff";
 import { CodeBlock } from "@/components/ai-elements/code-block";
-import {
-  DiffComparisonControls,
-  DEFAULT_DIFF_COMPARISON,
-  type DiffComparison,
-} from "./DiffComparisonControls";
+import { DiffComparisonControls } from "./DiffComparisonControls";
 import {
   type Comment,
   useAddComment,
@@ -101,7 +98,10 @@ import { markCommentsSeen } from "@/hooks/useSeenComments";
 import { useChatStore } from "@/store/chatStore";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useIOSNativeKeyboardInset } from "@/hooks/useIOSNativeKeyboardInset";
-import { useWorkspaceChangedFiles, useWorkspaceGitChanges } from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceGitChanges } from "@/hooks/useWorkspaceChangedFiles";
+import { useWorkspaceComparisonChanges } from "@/hooks/useWorkspaceComparisons";
+import { useWorkspaceComparison } from "@/lib/workspaceComparison";
+import { getExplorerGitScope, subscribeExplorerGitScopes } from "@/lib/explorerGitScope";
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
 import { absoluteWorkspacePath } from "@/lib/composerContext";
@@ -444,13 +444,16 @@ function FileViewerBody({
   const keyboardInset = useIOSNativeKeyboardInset((!frameless || mobileOverlay) && open);
   // Video playback reads the complete binary on demand, never the capped JSON preview.
   const fileQuery = useFileContent(conversationId, isVideoFile(path) ? null : path);
-  const [diffComparison, setDiffComparison] = useState<DiffComparison>(DEFAULT_DIFF_COMPARISON);
+  const { comparison: diffComparison, setComparison: setDiffComparison } =
+    useWorkspaceComparison(conversationId);
+  const comparisonScope = useSyncExternalStore(
+    subscribeExplorerGitScopes,
+    () => getExplorerGitScope(conversationId),
+    () => getExplorerGitScope(undefined),
+  );
   const agentComparison =
     diffComparison.source === "agent" || diffComparison.source === "last-turn";
-  const sessionChanges = useWorkspaceChangedFiles(conversationId, {
-    enabled: agentComparison,
-    source: "agent",
-  });
+  const changedFiles = useWorkspaceComparisonChanges(conversationId, comparisonScope);
   const gitChanges = useWorkspaceGitChanges(conversationId, {
     path:
       path?.startsWith("/") &&
@@ -459,7 +462,6 @@ function FileViewerBody({
         : "",
     directories: path?.includes("/") ? [path.slice(0, path.lastIndexOf("/")) || "/"] : [],
   });
-  const changedFiles = agentComparison ? sessionChanges : gitChanges;
 
   // Build the navigable file list from all changed files (including deleted),
   // sorted the same way FilesPanel sorts its flat view so the "X/N" index
@@ -846,11 +848,13 @@ function FileViewerBody({
   const sessionDiffQuery = useAgentFileDiff(conversationId, isVideo ? null : path, {
     enabled: requestedDiff && agentComparison,
     lastTurn: diffComparison.source === "last-turn",
+    turnId: diffComparison.turnId,
   });
   const gitDiffQuery = useGitFileDiff(conversationId, isVideo ? null : path, {
     enabled: requestedDiff && !agentComparison,
     base: diffComparison.base,
     target: diffComparison.target,
+    scope: diffComparison.source === "git" ? undefined : comparisonScope.path,
   });
   const diffQuery = agentComparison ? sessionDiffQuery : gitDiffQuery;
   const prepareDiff =
@@ -945,7 +949,7 @@ function FileViewerBody({
     diffActive && isDiffAvailable ? "diff" : filePosition ? "source" : fileViewMode;
   const diffViewActive = viewMode === "diff";
   const currentFileComparison =
-    diffComparison.source === "git" || diffComparison.source === "agent";
+    diffComparison.source === "git" || diffComparison.source === "since";
   const commentsSupported = !diffViewActive || currentFileComparison;
   useEffect(() => {
     if (!commentsSupported) setCommentsOpen(false);
@@ -1770,7 +1774,24 @@ function FileViewerBody({
       </div>
 
       {diffViewActive && (
-        <DiffComparisonControls value={diffComparison} onChange={setDiffComparison} />
+        <DiffComparisonControls
+          value={diffComparison}
+          onChange={setDiffComparison}
+          repositoryRoot={changedFiles.data?.root_is_repository === true}
+          turns={changedFiles.data?.turns}
+          sessionId={conversationId}
+          scopePath={comparisonScope.path}
+        />
+      )}
+      {diffViewActive && agentComparison && (
+        <p
+          role="status"
+          className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          {sessionDiffQuery.data?.warning ??
+            changedFiles.data?.warning ??
+            "Captured agent edits only. Unobserved changes and unavailable snapshots are not reconstructed."}
+        </p>
       )}
       <div className="min-h-0 flex-1 flex flex-col md:flex-row overflow-hidden">
         <div

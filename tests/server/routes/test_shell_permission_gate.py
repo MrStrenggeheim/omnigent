@@ -1320,3 +1320,26 @@ async def test_content_replace_does_not_retry_dispatched_transport_failure(
     assert response.status_code == 502
     assert post.await_count == 1
     assert "unavailable" in response.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "changes?source=agent&path=src&baseline=last_turn",
+        "changes?source=agent&path=/etc&baseline=session",
+        "agent-diff?path=/etc/passwd&turn_id=old",
+        "git?operation=diff&path=src/app.py&target=HEAD&scope=/etc",
+    ],
+)
+async def test_comparison_scope_permissions_precede_runner_or_persisted_reads(
+    client: httpx.AsyncClient,
+    runner_client: _RecordingRunnerClient,
+    path: str,
+) -> None:
+    session = "conv_open" if "=/etc" in path else "conv_share"
+    response = await client.get(
+        f"/v1/sessions/{session}/resources/environments/default/{path}",
+        headers={"X-Forwarded-Email": "viewer@example.com"},
+    )
+    assert response.status_code == 403, response.text
+    assert runner_client.gets == []

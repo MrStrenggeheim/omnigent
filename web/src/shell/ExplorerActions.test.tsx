@@ -115,7 +115,7 @@ describe("Explorer actions", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select b.txt" }));
     expect(screen.getByText("2 selected")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to trash…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move selected items to trash…" }));
     fireEvent.click(screen.getByRole("button", { name: "Move to trash" }));
     await waitFor(() =>
       expect(operation).toHaveBeenCalledWith("test", {
@@ -124,6 +124,28 @@ describe("Explorer actions", () => {
         paths: ["src/a.txt", "src/b.txt"],
       }),
     );
+  });
+
+  it("keeps header navigation and folder downloads scoped to the current folder", async () => {
+    const search = vi.fn();
+    window.addEventListener("omnigent:open-content-search", search);
+    setup();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select folder" }));
+    await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
+    expect(screen.getByRole("menuitem", { name: "Download selection as ZIP" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Rename…" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Search folder contents…" }));
+    expect((search.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      conversationId: "test",
+      location: "src",
+    });
+    await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear selection" }));
+    await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
+    expect(
+      screen.getByRole("menuitem", { name: "Download this folder as ZIP" }),
+    ).toBeInTheDocument();
+    window.removeEventListener("omnigent:open-content-search", search);
   });
 
   it("handles Shift range selection and keyboard rename", async () => {

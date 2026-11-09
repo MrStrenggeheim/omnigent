@@ -1,10 +1,12 @@
 # Mobile workspace navigation
 
-On mobile, a separate **Open workspace** panel icon opens the current session's tools while the **Conversation actions** kebab contains chat actions.
+On mobile, the header orders the left sidebar toggle, title, chat actions, Notifications and right sidebar toggle; opening either sidebar leaves its close toggle at the same viewport position with the narrow icon segment filled.
 Workspace drawers and the phone's full-screen file viewer share horizontally scrolling tabs, reuse existing panel contents and lifecycles, and reopen the last selected available workspace page in the current session.
 
 ## Sub-features
 
+- `compact-controls`: header icons share a compact 24px visible surface and 16px glyph with separate 44px mobile touch targets.
+- `stable-toggles`: left and right outline-panel controls retain their viewport positions and fill the respective narrow segment while open.
 - `header-split`: separate the workspace panel icon from the chat-actions kebab; workspace navigation remains reachable when no chat actions are available.
 - `tabs`: scroll horizontally through Files, Changes, Search, Shells, Agents, Pull Requests, Side chats and Logs when available for the session.
 - `capabilities`: omit unavailable pages and omit the workspace button when no pages are available, while a session is pending or on the landing composer.
@@ -17,7 +19,7 @@ Workspace drawers and the phone's full-screen file viewer share horizontally scr
 
 ## How to get to it (user POV)
 
-- Mobile conversation header: tap the **Open workspace** panel icon beside the **Conversation actions** kebab to open the remembered available workspace page.
+- Mobile conversation header: tap the rightmost **Open workspace** panel icon after Notifications to open the remembered available workspace page.
 - Mobile conversation header: open **Conversation actions** for chat management such as Rename or Archive; workspace pages are reached through the separate panel icon.
 - Workspace drawers: swipe the tab strip horizontally and select **Files**, **Changes**, **Search**, **Shells**, **Agents**, **Pull Requests**, **Side chats** or **Logs** as available; close the drawer and tap **Open workspace** to reopen the selected page.
 - Files or Changes drawer: select a file to open the phone's full-screen file viewer, then use the same workspace tabs to reach another page.

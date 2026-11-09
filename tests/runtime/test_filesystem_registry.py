@@ -363,8 +363,8 @@ def test_turn_recording_distinguishes_created_from_missing_preimage(
     reg.record_change("new", "created", "session")
     reg.record_change("edited", "modified", "session")
     reg.seed_snapshot("edited", "later content", session_id="session")
-    assert reg.turn_history.lookup("session", "new", True)["known"] is True
-    assert reg.turn_history.lookup("session", "edited", True)["known"] is False
+    assert reg.turn_history.lookup("session", "new", True, "current")["known"] is True
+    assert reg.turn_history.lookup("session", "edited", True, "current")["known"] is False
 
 
 def test_git_agent_listing_survives_commit_and_excludes_unattributed_changes(

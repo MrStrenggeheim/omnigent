@@ -176,20 +176,28 @@ export function TerminalsPanel({
         />
       )}
 
-      {open && <MobileWorkspaceTabs />}
-      <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-2">
-        <h2 className="font-medium text-ui">Shells</h2>
-        <div className="flex items-center gap-1">
-          {/* Renders only when the agent's spec declares terminals. */}
-          <NewTerminalButton
-            conversationId={conversationId}
-            onCreated={(key) => setActiveKey(key)}
-          />
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
-            <XIcon className="size-4" />
-          </Button>
-        </div>
-      </header>
+      {open && <MobileWorkspaceTabs onClose={onClose} />}
+      {isDesktop && (
+        <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-2">
+          <h2 className="font-medium text-ui">Shells</h2>
+          <div className="flex items-center gap-1">
+            {/* Renders only when the agent's spec declares terminals. */}
+            <NewTerminalButton
+              conversationId={conversationId}
+              onCreated={(key) => setActiveKey(key)}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close"
+              onClick={onClose}
+            >
+              <XIcon className="size-4" />
+            </Button>
+          </div>
+        </header>
+      )}
 
       {/* Split content.
           Mobile: flex-col — list on top, xterm below.

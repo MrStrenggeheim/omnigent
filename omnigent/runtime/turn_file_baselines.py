@@ -1,7 +1,7 @@
 """Bounded, prospective baselines for observed file tools, independent of Git.
 
 Use the resolved registry's ``turn_history`` for both lifecycle and lookup.
-``last_turn=True`` selects the latest started turn, including an active one;
+``last_turn=True`` selects the latest completed turn unless an ID is supplied;
 ``False`` selects the first observed mutation during this store's session lifetime.
 Neither view is a complete filesystem snapshot, and neither survives a restart.
 """
@@ -34,6 +34,8 @@ class _File:
     after: _Baseline = field(default_factory=lambda: _Baseline(None, False))
     bytes: int | None = None
     modified_at: float | None = None
+    partial: bool = False
+    pending_gap: bool = False
 
 
 @dataclass
@@ -41,6 +43,7 @@ class _Turn:
     turn_id: str
     finished: bool = False
     files: dict[str, _File] = field(default_factory=dict)
+    created_at: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -54,6 +57,7 @@ class _Session:
         for turn in self.turns:
             baselines.update((id(f.baseline), f.baseline) for f in turn.files.values())
             baselines.update((id(f.after), f.after) for f in turn.files.values())
+        baselines.update((id(f.after), f.after) for f in self.files.values())
         return sum(b.size for b in baselines.values())
 
 
@@ -74,14 +78,16 @@ class TurnFileBaselines:
         max_session_bytes: int = 32 * 1024 * 1024,
         max_sessions: int = 100,
         max_paths: int = 1024,
+        max_turns: int = 20,
     ) -> None:
-        if min(max_file_bytes, max_session_bytes, max_sessions, max_paths) <= 0:
+        if min(max_file_bytes, max_session_bytes, max_sessions, max_paths, max_turns) <= 0:
             raise ValueError("Baseline limits must be positive")
         self.workspace_root = workspace_root.resolve()
         self._max_file_bytes = max_file_bytes
         self._max_session_bytes = max_session_bytes
         self._max_sessions = max_sessions
         self._max_paths = max_paths
+        self._max_turns = max_turns
         self._sessions: OrderedDict[str, _Session] = OrderedDict()
         self._lock = threading.Lock()
 
@@ -161,7 +167,7 @@ class TurnFileBaselines:
                 return
             self._finish(session)
             session.turns.append(_Turn(turn_id))
-            del session.turns[:-2]
+            del session.turns[: -self._max_turns]
             while len(self._sessions) > self._max_sessions:
                 self._sessions.popitem(last=False)
 
@@ -187,6 +193,9 @@ class TurnFileBaselines:
             turn = session.turns[-1]
             previous = turn.files.get(norm)
             if previous is not None and previous.operation is not None:
+                previous.pending_gap = not (
+                    previous.after.known and known and previous.after.before == before
+                )
                 return
             if previous is None and len(turn.files) >= self._max_paths:
                 return
@@ -221,31 +230,145 @@ class TurnFileBaselines:
                 known = operation == "created"
                 baseline = _Baseline(None, known, reason=None if known else "preimage_unavailable")
                 entry = turn.files[norm] = _File(baseline, turn.turn_id)
+            first = session.files.get(norm)
+            session_gap = False
+            if entry.operation is None and first is not None:
+                session_gap = not (
+                    first.after.known
+                    and entry.baseline.known
+                    and first.after.before == entry.baseline.before
+                )
+            entry.partial = entry.partial or entry.pending_gap or not entry.baseline.known
+            entry.pending_gap = False
             entry.operation = operation
             entry.after = _Baseline(None, False)
+            if first is not None:
+                first.after = _Baseline(None, False)
             after = self._read_after(path, norm)
             if session.content_bytes() + after.size > self._max_session_bytes:
                 after = _Baseline(None, False, reason="after_session_limit")
             entry.after = after
+            entry.partial = entry.partial or not after.known
             entry.bytes = after.size if after.known and after.before is not None else None
             entry.modified_at = time.time()
-            first = session.files.get(norm)
             if first is None and len(session.files) < self._max_paths:
                 first = session.files[norm] = _File(entry.baseline, turn.turn_id, operation)
             elif first is not None:
                 first.operation = operation
             if first is not None:
+                first.after = entry.after
+                first.partial = first.partial or entry.partial or session_gap
                 first.bytes = entry.bytes
                 first.modified_at = entry.modified_at
 
-    def list_files(self, session_id: str) -> list[dict[str, Any]]:
+    @staticmethod
+    def _selected_turn(session: _Session, turn_id: str | None) -> _Turn | None:
+        if turn_id == "current":
+            return session.turns[-1] if session.turns else None
+        return next(
+            (
+                turn
+                for turn in reversed(session.turns)
+                if (
+                    turn.turn_id == turn_id
+                    if turn_id
+                    else turn.finished
+                    and any(f.operation is not None for f in turn.files.values())
+                )
+            ),
+            None,
+        )
+
+    def _entries(self, session: _Session, baseline: str, turn_id: str | None):
+        turn = self._selected_turn(session, turn_id)
+        if baseline == "last_turn":
+            return (turn.files if turn else {}), turn
+        if turn_id is None:
+            return session.files, turn
+        entries = {}
+        if turn is not None:
+            for candidate in session.turns:
+                for path, entry in candidate.files.items():
+                    if entry.operation is not None:
+                        entries[path] = _File(
+                            session.files.get(path, entry).baseline,
+                            entry.turn_id,
+                            entry.operation,
+                            entry.after,
+                            entry.bytes,
+                            entry.modified_at,
+                            session.files.get(path, entry).partial,
+                        )
+                if candidate is turn:
+                    break
+        return entries, turn
+
+    def comparison_metadata(
+        self,
+        session_id: str,
+        baseline: str = "session",
+        turn_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Describe bounded captures without claiming complete attribution."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            turns = (
+                [
+                    turn
+                    for turn in session.turns
+                    if not turn.finished
+                    or any(f.operation is not None for f in turn.files.values())
+                ]
+                if session
+                else []
+            )
+            selected = self._selected_turn(session, turn_id) if session else None
+            partial = session and any(f.partial for f in session.files.values())
+            return {
+                "source": "agent",
+                "turns": [
+                    {
+                        "id": t.turn_id,
+                        "label": f"Captured tool turn {t.turn_id}",
+                        "finished": t.finished,
+                        "created_at": t.created_at,
+                    }
+                    for t in reversed(turns)
+                ],
+                "turn_id": selected.turn_id if selected else None,
+                "coverage": "partial" if partial else "observed_tools" if turns else "unavailable",
+                "warning": (
+                    "Only captured tool mutations are included. Shell effects, external edits "
+                    "and uncaptured content are unknown. Recent turns are bounded. "
+                    + (
+                        "Capture continuity is incomplete or external edits were interleaved. "
+                        if partial
+                        else ""
+                    )
+                    if turns
+                    else "No captured agent history is available for this session."
+                ),
+            }
+
+    def list_files(
+        self,
+        session_id: str,
+        baseline: str = "session",
+        turn_id: str | None = None,
+        scope: str = "",
+    ) -> list[dict[str, Any]]:
         """List recorded agent mutations, independent of Git or current disk status."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
                 return []
             records = []
-            for path, entry in session.files.items():
+            entries, _turn = self._entries(session, baseline, turn_id)
+            scope_path = Path(scope) if Path(scope).is_absolute() else self.workspace_root / scope
+            scope_path = Path(os.path.abspath(scope_path))
+            for path, entry in entries.items():
+                if not (self.workspace_root / path).is_relative_to(scope_path):
+                    continue
                 status = entry.operation
                 if status is None:
                     continue
@@ -265,18 +388,27 @@ class TurnFileBaselines:
                         "modified_at": entry.modified_at,
                         "lines_added": None,
                         "lines_removed": None,
+                        "coverage": "partial" if entry.partial else "observed_tools",
+                        "before_known": entry.baseline.known,
+                        "after_known": entry.after.known,
                     }
                 )
             return sorted(
                 records, key=lambda row: (row["modified_at"] or 0, row["path"]), reverse=True
             )
 
-    def lookup(self, session_id: str, path: str, last_turn: bool) -> dict[str, Any] | None:
+    def lookup(
+        self,
+        session_id: str,
+        path: str,
+        last_turn: bool,
+        turn_id: str | None = None,
+    ) -> dict[str, Any] | None:
         """Return a baseline only for recorded mutations, never a Git fallback.
 
         ``turn_id`` identifies the turn that supplied this baseline.
         Last-turn after-images are captured on record, never read during lookup.
-        Session comparison callers read current contents separately.
+        Session comparisons use the latest captured postimage as well.
         """
         norm = self._path(path)
         if norm is None:
@@ -285,8 +417,10 @@ class TurnFileBaselines:
             session = self._sessions.get(session_id)
             if session is None or not session.turns:
                 return None
-            turn = session.turns[-1]
-            entry = (turn.files if last_turn else session.files).get(norm)
+            entries, turn = self._entries(
+                session, "last_turn" if last_turn else "session", turn_id
+            )
+            entry = entries.get(norm)
             if entry is None or entry.operation is None:
                 return None
             return {
@@ -295,13 +429,19 @@ class TurnFileBaselines:
                 "before": entry.baseline.before,
                 "known": entry.baseline.known,
                 "reason": entry.baseline.reason,
-                "after": entry.after.before if last_turn else None,
-                "after_known": entry.after.known if last_turn else False,
-                "after_reason": entry.after.reason if last_turn else "current_contents_required",
+                "after": entry.after.before,
+                "after_known": entry.after.known,
+                "after_reason": entry.after.reason,
                 "turn_id": entry.turn_id,
-                "coverage": "observed_tools",
+                "coverage": "partial" if entry.partial else "observed_tools",
+                "warning": (
+                    "Capture continuity is incomplete or external edits were interleaved; "
+                    "these file images cannot be attributed exclusively to the agent."
+                    if entry.partial
+                    else "Captured tool mutations only; unobserved edits and gaps are unknown."
+                ),
                 "baseline": "last_turn" if last_turn else "session",
-                "finished": turn.finished,
+                "finished": turn.finished if turn else False,
                 "operation": entry.operation,
             }
 

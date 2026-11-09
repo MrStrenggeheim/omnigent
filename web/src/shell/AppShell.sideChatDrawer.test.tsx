@@ -28,6 +28,13 @@ vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
   ...(await importOriginal<typeof UseTerminalsModule>()),
   useTerminals: vi.fn(() => ({ terminals: [], isLoading: false, error: null })),
 }));
+vi.mock("@/hooks/useWorkspaceComparisons", () => ({
+  useAgentTurnChoices: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useWorkspaceComparisonChanges: vi.fn(() => ({
+    data: { available: true, data: [], repositories: [], root_is_repository: false },
+    isLoading: false,
+  })),
+}));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
   useWorkspaceGitChanges: vi.fn(() => ({ data: { data: [] }, isLoading: false })),
   useWorkspaceEnvironment: vi.fn(() => ({

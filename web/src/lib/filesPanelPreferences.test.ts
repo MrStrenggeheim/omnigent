@@ -15,14 +15,17 @@ afterEach(() => {
 describe("filesPanelPreferences", () => {
   it("defaults the sort order when nothing is stored", () => {
     expect(readFilesPanelPreferences()).toEqual(DEFAULT_FILES_PANEL_PREFERENCES);
-    expect(DEFAULT_FILES_PANEL_PREFERENCES.sort).toBe("recent");
+    expect(DEFAULT_FILES_PANEL_PREFERENCES.sort).toBe("alpha");
     expect(DEFAULT_FILES_PANEL_PREFERENCES.showAgentChanges).toBe(false);
   });
 
-  it("round-trips a written preference", () => {
-    writeFilesPanelPreferences({ sort: "alpha" });
-    expect(readFilesPanelPreferences()).toEqual({ sort: "alpha", showAgentChanges: false });
-  });
+  it.each(["recent", "size", "type", "alpha"] as const)(
+    "retains an explicitly saved sort: %s",
+    (sort) => {
+      writeFilesPanelPreferences({ sort });
+      expect(readFilesPanelPreferences()).toEqual({ sort, showAgentChanges: false });
+    },
+  );
 
   it("falls back to defaults on malformed JSON", () => {
     // A non-JSON string must not throw; read swallows the parse error so a
@@ -39,7 +42,7 @@ describe("filesPanelPreferences", () => {
 
   it("defaults sort when the stored value is invalid", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ sort: "bogus" }));
-    expect(readFilesPanelPreferences()).toEqual({ sort: "recent", showAgentChanges: false });
+    expect(readFilesPanelPreferences()).toEqual({ sort: "alpha", showAgentChanges: false });
   });
 
   it("preserves the toggle when an older caller writes only sort", () => {

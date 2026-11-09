@@ -162,10 +162,18 @@ def test_mobile_workspace_keeps_chat_actions_separate(
     workspace = page.get_by_role("button", name="Open workspace", exact=True)
     expect(chat).to_be_visible()
     expect(workspace).to_be_visible()
-    assert (
-        chat.bounding_box()["x"]
-        >= workspace.bounding_box()["x"] + workspace.bounding_box()["width"]
+    bell = page.get_by_role("button", name="Notifications", exact=True)
+    assert chat.bounding_box()["x"] < bell.bounding_box()["x"] < workspace.bounding_box()["x"]
+    left = page.get_by_role("button", name="Open sidebar", exact=True)
+    left_bounds = left.bounding_box()
+    left.click()
+    close_left = page.get_by_role("button", name="Close sidebar", exact=True).filter(
+        has=page.locator('[data-panel-side="left"]')
     )
+    expect(close_left).to_be_visible()
+    assert abs(close_left.bounding_box()["x"] - left_bounds["x"]) < 2
+    assert abs(close_left.bounding_box()["y"] - left_bounds["y"]) < 2
+    close_left.click()
     chat.click()
     expect(page.get_by_role("menuitem", name="Rename", exact=True)).to_be_visible()
     expect(
@@ -176,7 +184,12 @@ def test_mobile_workspace_keeps_chat_actions_separate(
     page.keyboard.press("Escape")
     output = Path(request.config.getoption("output"))
     page.screenshot(path=str(output / f"mobile-header-{width}.png"), animations="disabled")
+    workspace_bounds = workspace.bounding_box()
     workspace.click()
+    close_workspace = page.get_by_role("button", name="Close workspace", exact=True)
+    expect(close_workspace).to_be_visible()
+    assert abs(close_workspace.bounding_box()["x"] - workspace_bounds["x"]) < 2
+    assert abs(close_workspace.bounding_box()["y"] - workspace_bounds["y"]) < 2
     tabs = page.get_by_role("tablist", name="Workspace", exact=True)
     expect(tabs.get_by_role("tab", name="Files", exact=True)).to_have_attribute(
         "aria-selected", "true"
@@ -184,9 +197,7 @@ def test_mobile_workspace_keeps_chat_actions_separate(
     expect(tabs.get_by_role("tab", name="Shells", exact=True)).to_have_count(0)
     tabs.get_by_role("tab", name="Changes", exact=True).click()
     expect(
-        page.get_by_test_id("files-panel-drawer").get_by_role(
-            "heading", name="Changes", exact=True
-        )
+        page.get_by_test_id("files-panel-drawer").get_by_role("tree", name="Changed files")
     ).to_be_visible()
     tabs.get_by_role("tab", name="Search", exact=True).click()
     expect(page.get_by_test_id("content-search-panel-drawer")).to_have_attribute(
@@ -200,7 +211,7 @@ def test_mobile_workspace_keeps_chat_actions_separate(
     )
     expect(tabs.get_by_role("tab", name="Agents", exact=True)).to_be_focused()
     page.screenshot(path=str(output / f"mobile-workspace-{width}.png"), animations="disabled")
-    agents.get_by_role("button", name="Close", exact=True).click()
+    page.get_by_role("button", name="Close workspace", exact=True).click()
     workspace.click()
     expect(agents).to_have_attribute("data-state", "open")
     expect(tabs.get_by_role("tab", name="Agents", exact=True)).to_have_attribute(

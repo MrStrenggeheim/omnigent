@@ -131,7 +131,15 @@ def test_discovery_is_explicit_deduplicated_and_scoped(tmp_path: Path) -> None:
     (first / "tracked.txt").write_text("one\n")
     (second / "tracked.txt").write_text("two\n")
     undiscovered = inspect_workspace_git(str(tmp_path), {"operation": "changes"})
-    assert undiscovered == {"object": "list", "data": [], "has_more": False, "repositories": []}
+    assert undiscovered == {
+        "object": "list",
+        "data": [],
+        "has_more": False,
+        "repositories": [],
+        "root_is_repository": False,
+        "base": "HEAD",
+        "target": "WORKTREE",
+    }
     result = inspect_workspace_git(
         str(tmp_path),
         {
@@ -359,7 +367,6 @@ def test_invalid_revisions_fail_explicitly(repo: Path, revision) -> None:
         {"operation": "changes", "directories": "folder"},
         {"operation": "changes", "directories": [None]},
         {"operation": "changes", "directories": [""] * 129},
-        {"operation": "changes", "base": "main"},
         {"operation": "diff", "path": "../escape"},
         {"operation": "diff", "path": "\0bad"},
         {"operation": "diff", "path": ""},
@@ -548,3 +555,164 @@ def test_exported_source_executes_without_package_imports(repo: Path) -> None:
             text=True,
         )
         assert json.loads(output) == inspect_workspace_git(str(repo), params)
+
+
+def test_historical_changes_include_renames_deletions_counts_and_ignore_disk(repo: Path) -> None:
+    (repo / "deleted.txt").write_text("deleted\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "before")
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "mv", "tracked.txt", "renamed.txt")
+    (repo / "deleted.txt").unlink()
+    (repo / "added.txt").write_text("added\nsecond\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "after")
+    (repo / "added.txt").unlink()
+    (repo / "manual.txt").write_text("manual\n")
+    result = inspect_workspace_git(
+        str(repo.parent),
+        {
+            "operation": "changes",
+            "path": str(repo),
+            "base": base,
+            "target": "HEAD",
+        },
+    )
+    assert result["root_is_repository"] is True
+    assert result["repositories"] == [str(repo)]
+    rows = {row["name"]: row for row in result["data"]}
+    assert set(rows) == {"added.txt", "deleted.txt", "renamed.txt"}
+    assert [
+        (rows[name]["status"], rows[name]["lines_added"], rows[name]["lines_removed"])
+        for name in ["added.txt", "deleted.txt", "renamed.txt"]
+    ] == [
+        ("created", 2, 0),
+        ("deleted", 0, 1),
+        ("modified", 0, 0),
+    ]
+    assert rows["renamed.txt"]["previous_path"] == "repository/tracked.txt"
+    assert all(row["bytes"] is None for row in rows.values())
+    diff = inspect_workspace_git(
+        str(repo.parent),
+        {
+            "operation": "diff",
+            "scope": str(repo),
+            "path": str(repo / "renamed.txt"),
+            "base": base,
+            "target": "HEAD",
+        },
+    )
+    assert (diff["before"], diff["after"]) == ("original\n", "original\n")
+    disk = inspect_workspace_git(
+        str(repo),
+        {
+            "operation": "changes",
+            "base": base,
+            "target": "WORKTREE",
+        },
+    )
+    assert {row["path"]: row["status"] for row in disk["data"]} == {
+        "deleted.txt": "deleted",
+        "manual.txt": "created",
+        "renamed.txt": "modified",
+    }
+
+
+def test_historical_changes_reject_mixed_scopes_and_diff_repo_mismatch(repo: Path) -> None:
+    child = init_repo(repo / "child")
+    (repo / "folder").mkdir()
+    params = {"operation": "changes", "base": "HEAD", "target": "HEAD"}
+    for path in [repo.parent, repo / "folder", repo / "missing", repo / "tracked.txt"]:
+        result = inspect_workspace_git(str(repo), {**params, "path": str(path)})
+        assert (result["status"], result["error"]["code"]) == (400, "invalid_repository_root")
+    mixed = inspect_workspace_git(str(repo), {**params, "directories": [str(child)]})
+    assert mixed["error"]["code"] == "invalid_repository_root"
+    mismatch = inspect_workspace_git(
+        str(repo),
+        {
+            "operation": "diff",
+            "scope": str(repo),
+            "path": "child/tracked.txt",
+            "target": "HEAD",
+        },
+    )
+    assert mismatch["error"]["code"] == "repository_mismatch"
+    working = inspect_workspace_git(str(repo), {"operation": "diff", "path": "child/tracked.txt"})
+    assert working["repository"] == str(child)
+    child_comparison = inspect_workspace_git(str(repo), {**params, "path": "child"})
+    assert child_comparison["root_is_repository"] is True
+    assert child_comparison["repositories"] == [str(child)]
+
+
+def test_historical_gitfile_worktree_root_and_config_unchanged(repo: Path) -> None:
+    linked = repo.parent / "linked"
+    git(repo, "worktree", "add", "-b", "linked", str(linked))
+    (linked / "tracked.txt").write_text("changed\n")
+    git(linked, "add", ".")
+    git(linked, "commit", "-m", "worktree commit")
+    metadata = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in (repo / ".git").rglob("*")
+        if path.is_file()
+    }
+    for target in ["WORKTREE", "HEAD"]:
+        result = inspect_workspace_git(
+            str(repo.parent),
+            {
+                "operation": "changes",
+                "path": str(linked),
+                "base": "HEAD^",
+                "target": target,
+            },
+        )
+        assert result["root_is_repository"] is True
+        assert result["data"][0]["path"] == "linked/tracked.txt"
+        assert result["data"][0]["repository"] == str(linked)
+    assert metadata == {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata}
+    assert inspect_workspace_git(str(linked), {"operation": "repository"}) == {
+        "root_is_repository": True,
+        "repositories": [str(linked)],
+    }
+
+
+def test_deleted_discovered_directories_do_not_break_background_refresh(repo: Path) -> None:
+    transient = repo / "transient"
+    transient.mkdir()
+    (transient / "new.txt").write_text("untracked\n")
+    params = {"operation": "changes", "directories": [str(repo), str(transient)]}
+    before = inspect_workspace_git(str(repo.parent), params)
+    assert [row["path"] for row in before["data"]] == ["repository/transient/new.txt"]
+    (transient / "new.txt").unlink()
+    transient.rmdir()
+    after = inspect_workspace_git(str(repo.parent), params)
+    assert after["data"] == [] and after["repositories"] == [str(repo)]
+    (repo / "transient").write_text("replaced with a file")
+    replaced = inspect_workspace_git(str(repo.parent), params)
+    assert replaced["error"]["code"] == "invalid_path"
+
+
+def test_stale_discovery_retains_permission_and_symlink_policy_errors(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = repo / "denied"
+    directory.mkdir()
+    original = Path.stat
+
+    def denied(path, *args, **kwargs):
+        if path == directory:
+            raise PermissionError("discovery denied")
+        return original(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", denied)
+        result = inspect_workspace_git(
+            str(repo), {"operation": "changes", "directories": ["denied"]}
+        )
+    assert result["error"]["code"] == "git_failed"
+    assert "discovery denied" in result["error"]["message"]
+    (repo / "escape").symlink_to(repo.parent, target_is_directory=True)
+    escaped = inspect_workspace_git(
+        str(repo), {"operation": "changes", "directories": ["escape/missing"]}
+    )
+    assert escaped["error"]["code"] == "invalid_path"

@@ -69,7 +69,7 @@ def _seed_repositories(base: str, session_id: str, metadata: Path) -> tuple[str,
 
 
 @pytest.mark.parametrize("mobile", [False, True], ids=["desktop", "phone"])
-def test_git_tracking_ignores_agent_ghosts_and_persists_toggle(
+def test_shared_comparison_keeps_files_live_and_gates_mixed_revisions(
     page: Page,
     seeded_session: tuple[str, str],
     tmp_path: Path,
@@ -137,43 +137,41 @@ def test_git_tracking_ignores_agent_ghosts_and_persists_toggle(
         expect(
             _entry(panel, f"{prefix}/nested/inner.txt").get_by_title("Modified", exact=True)
         ).to_be_visible(timeout=30_000)
-        panel.get_by_role("button", name="More file actions", exact=True).click()
-        toggle = page.get_by_role("menuitemcheckbox", name="Show agent changes", exact=True)
-        expect(toggle).not_to_be_checked()
-        toggle.click()
-        expect(toggle).not_to_be_visible()
-        expect(_entry(panel, "vanished")).to_be_visible(timeout=15_000)
-        panel.get_by_role("button", name="More file actions", exact=True).click()
-        page.get_by_role("menuitemcheckbox", name="Show agent changes", exact=True).click()
-        expect(toggle).not_to_be_visible()
+        expect(panel.get_by_role("button", name="Reveal active file")).to_have_count(0)
+        expect(
+            panel.get_by_role("button", name="Search folder contents", exact=True)
+        ).to_have_count(0)
+        comparison = panel.get_by_role("button", name="Diff comparison", exact=True)
+        comparison.click()
+        since = page.get_by_role("menuitem", name=re.compile("^Since"))
+        expect(since).to_have_attribute("aria-disabled", "true")
+        since.hover()
+        expect(page.get_by_role("tooltip")).to_contain_text("Select a repository root")
+        page.get_by_role("menuitem", name=re.compile("^Chat")).click()
+        expect(comparison).to_contain_text("Chat")
         expect(_entry(panel, "vanished")).to_have_count(0)
-        if not mobile:
-            changes = panel.get_by_role("tab", name=re.compile("^Changes"))
-            expect(changes).to_have_accessible_name("Changes 3 changed")
-            changes.click()
-            expect(
-                panel.get_by_role("button", name=f"deleted.txt {prefix}", exact=True)
-            ).to_be_visible(timeout=15_000)
-            panel.get_by_role("tab", name="Files", exact=True).click()
+        tabs = panel.get_by_role("tablist", name="Workspace") if mobile else panel
+        tabs.get_by_role("tab", name=re.compile("^Changes")).click()
+        expect(panel.get_by_text("dead.txt", exact=True)).to_be_visible(timeout=15_000)
+        comparison.click()
+        page.get_by_role("menuitem", name=re.compile("^Git")).click()
+        expect(panel.get_by_text("dead.txt", exact=True)).to_have_count(0)
+        expect(panel.get_by_text("deleted.txt", exact=True)).to_be_visible(timeout=15_000)
+        tabs.get_by_role("tab", name="Files", exact=True).click()
+        expect(_entry(panel, "vanished")).to_have_count(0)
+        expect(_entry(panel, f"{prefix}/deleted.txt")).to_have_count(0)
         page.screenshot(
             path=str(
                 Path(request.config.getoption("output"))
-                / f"git-explorer-{'phone' if mobile else 'desktop'}.png"
+                / f"shared-comparison-{'phone' if mobile else 'desktop'}.png"
             ),
             animations="disabled",
         )
-        page.reload()
-        if mobile:
-            page.get_by_role("button", name="Open workspace").click()
-        panel.get_by_role("button", name="More file actions", exact=True).click()
-        expect(
-            page.get_by_role("menuitemcheckbox", name="Show agent changes", exact=True)
-        ).not_to_be_checked()
     finally:
         shutil.rmtree(repository)
 
 
-def test_diff_compares_explicit_commits_with_agent_tracking_off(
+def test_shared_comparison_selects_repository_revisions(
     page: Page,
     seeded_session: tuple[str, str],
     tmp_path: Path,
@@ -186,8 +184,21 @@ def test_diff_compares_explicit_commits_with_agent_tracking_off(
         page.goto(f"{base}/c/{session_id}?view=explore")
         panel = page.get_by_role("complementary", name="Workspace")
         expect(_entry(panel, prefix)).to_be_visible(timeout=30_000)
-        _entry(panel, prefix).locator("button[aria-expanded]").click()
-        _entry(panel, f"{prefix}/keep.txt").locator("button").first.click()
+        _entry(panel, prefix).locator("button[aria-expanded]").dblclick()
+        comparison = panel.get_by_role("button", name="Diff comparison", exact=True)
+        comparison.click()
+        since = page.get_by_role("menuitem", name=re.compile("^Since"))
+        expect(since).not_to_have_attribute("aria-disabled", "true")
+        since.click()
+        dialog = page.get_by_role("dialog")
+        dialog.get_by_role("textbox", name="Commit revision", exact=True).fill(first)
+        dialog.get_by_role("button", name="Compare", exact=True).click()
+        expect(comparison).to_contain_text("Since")
+        # The same selected scope and baseline survives switching to Changes.
+        panel.get_by_role("tab", name=re.compile("^Changes")).click()
+        expect(panel.get_by_text("deleted.txt", exact=True)).to_be_visible(timeout=20_000)
+        expect(comparison).to_contain_text("Since")
+        panel.get_by_text("keep.txt", exact=True).click()
         viewer = page.get_by_test_id("file-viewer")
         expect(viewer).to_be_visible()
         diff_button = viewer.get_by_role("button", name="Show diff", exact=True)
@@ -196,28 +207,88 @@ def test_diff_compares_explicit_commits_with_agent_tracking_off(
         else:
             viewer.get_by_role("button", name="More actions", exact=True).click()
             page.get_by_role("menuitem", name="Show diff", exact=True).click()
-        comparison = viewer.get_by_role("combobox", name="Diff comparison")
-        comparison.click()
-        page.get_by_role("option", name="Commit range", exact=True).click()
-        viewer.get_by_role("textbox", name="Base revision", exact=True).fill(first)
-        viewer.get_by_role("textbox", name="Target revision", exact=True).fill(second)
+        selector = viewer.get_by_role("button", name="Diff comparison", exact=True)
+        expect(selector).to_contain_text("Since")
+        selector.click()
+        page.get_by_role("menuitem", name=re.compile("^Revisions")).click()
+        dialog = page.get_by_role("dialog")
+        dialog.get_by_role("textbox", name="Base revision", exact=True).fill(first)
+        dialog.get_by_role("textbox", name="Target revision", exact=True).fill(second)
         with page.expect_response(
-            lambda response: "/git?" in response.url and f"base={first}" in response.url
+            lambda response: (
+                "/git?" in response.url
+                and f"base={first}" in response.url
+                and "operation=diff" in response.url
+            )
         ) as compared:
-            viewer.get_by_role("button", name="Compare", exact=True).click()
+            dialog.get_by_role("button", name="Compare", exact=True).click()
         result = compared.value.json()
         assert compared.value.ok, result
         assert result["before"] == "alpha committed\n"
         assert result["after"] == "beta committed\n"
-        comparison.click()
-        page.get_by_role("option", name="Commit", exact=True).click()
-        viewer.get_by_role("textbox", name="Commit revision", exact=True).fill(first)
-        with page.expect_response(
-            lambda response: "/git?" in response.url and f"target={first}" in response.url
-        ) as initial:
-            viewer.get_by_role("button", name="Compare", exact=True).click()
-        assert initial.value.ok, initial.value.text()
-        assert initial.value.json()["before"] is None
-        assert initial.value.json()["after"] == "alpha committed\n"
+        # Return to the list: it must use the same committed range, not live dirt.
+        panel.get_by_role("tab", name=re.compile("^Changes")).click()
+        expect(panel.get_by_role("button", name="Diff comparison", exact=True)).to_contain_text(
+            "Revisions"
+        )
+        expect(panel.get_by_text("deleted.txt", exact=True)).to_have_count(0)
+    finally:
+        shutil.rmtree(repository)
+
+
+def test_wide_workspace_keeps_explorer_beside_stable_file_viewer(
+    page: Page,
+    seeded_session: tuple[str, str],
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+) -> None:
+    base, session_id = seeded_session
+    _, _, prefix, repository = _seed_repositories(base, session_id, tmp_path / "nested-git")
+    extra = ["long_component_reference_one.txt", "long_component_reference_two.txt"]
+    for name in extra:
+        _seed_file(base, session_id, f"{prefix}/{name}", "Workspace overflow fixture\n")
+    try:
+        page.set_viewport_size({"width": 1440, "height": 960})
+        page.goto(f"{base}/c/{session_id}?view=explore&file={prefix}/keep.txt")
+        panel = page.get_by_role("complementary", name="Workspace")
+        viewer = page.get_by_test_id("file-viewer")
+        expect(viewer).to_be_visible(timeout=30_000)
+        expect(viewer).to_contain_text("gamma working tree", timeout=30_000)
+        expect(page.get_by_role("region", name="File explorer", exact=True)).to_have_count(0)
+        # Keep an identity marker on the real viewer DOM across the split threshold.
+        viewer.evaluate("element => element.dataset.resizeIdentity = 'same-viewer'")
+        panel.get_by_role("button", name="Full screen", exact=True).click()
+        explorer = page.get_by_role("region", name="File explorer", exact=True)
+        expect(explorer).to_be_visible(timeout=15_000)
+        expect(viewer).to_have_attribute("data-resize-identity", "same-viewer")
+        assert (
+            explorer.bounding_box()["x"] + explorer.bounding_box()["width"]
+            <= viewer.bounding_box()["x"] + 1
+        )
+        folder = _entry(explorer, prefix)
+        expect(folder).to_be_visible(timeout=15_000)
+        if folder.locator("button[aria-expanded]").get_attribute("aria-expanded") != "true":
+            folder.locator("button[aria-expanded]").click()
+        nested = _entry(explorer, f"{prefix}/nested").locator("button[aria-expanded]")
+        if nested.get_attribute("aria-expanded") != "true":
+            nested.click()
+        _entry(explorer, f"{prefix}/nested/inner.txt").locator("button").first.click()
+        expect(viewer).to_contain_text("inner.txt")
+        expect(viewer).to_contain_text("inner working tree", timeout=30_000)
+        expect(explorer).to_be_visible()
+        for name in extra:
+            _entry(explorer, f"{prefix}/{name}").locator("button").first.click()
+        expect(panel.get_by_role("button", name="Select panel", exact=True)).to_have_count(0)
+        expect(viewer).to_contain_text("Workspace overflow fixture", timeout=30_000)
+        page.mouse.move(800, 800)
+        output = Path(request.config.getoption("output"))
+        page.screenshot(path=str(output / "wide-explorer-file-split.png"), animations="disabled")
+        panel.get_by_role("button", name="Exit full screen", exact=True).click()
+        expect(explorer).to_have_count(0)
+        expect(viewer).to_be_visible()
+        expect(viewer).to_have_attribute("data-resize-identity", "same-viewer")
+        expect(panel.get_by_role("button", name="Select panel", exact=True)).to_be_visible()
+        panel.get_by_role("button", name="Full screen", exact=True).click()
+        expect(panel.get_by_role("button", name="Select panel", exact=True)).to_have_count(0)
     finally:
         shutil.rmtree(repository)

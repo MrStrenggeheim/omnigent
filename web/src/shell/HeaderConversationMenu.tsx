@@ -24,6 +24,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { toast } from "@/lib/notifications";
+import { HeaderActionButton } from "@/components/HeaderActionButton";
 import { Button } from "@/components/ui/button";
 import { SessionActionMenuItem } from "@/components/SessionActionMenuItem";
 import { PresenceAvatars } from "@/components/PresenceAvatars";
@@ -395,16 +396,16 @@ export function HeaderConversationMenu({
         }}
       >
         <DropdownMenuTrigger asChild>
-          <Button
+          <HeaderActionButton
             type="button"
             variant="ghost"
-            size={isMobile ? "icon" : "icon-xs"}
+            size="icon-xs"
             aria-label="Conversation actions"
             data-testid="header-conversation-actions"
             className="shrink-0 border-none text-muted-foreground hover:text-foreground max-md:size-11"
           >
-            <EllipsisIcon className={isMobile ? "size-5" : "size-3.5"} />
-          </Button>
+            <EllipsisIcon className="size-4" />
+          </HeaderActionButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align={isMobile ? "end" : "start"}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { copyTextMock } = vi.hoisted(() => ({ copyTextMock: vi.fn(() => Promise.resolve()) }));
@@ -7,27 +7,46 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { RunnerOfflineError } from "@/hooks/useWorkspaceChangedFiles";
 import { ROW_STATUS_SLOT_CLASS } from "./fileStatusUtils";
 import { FlatFileList } from "./FlatFileList";
+import { FileViewerContext } from "./FileViewerContext";
 
 afterEach(cleanup);
 beforeEach(() => copyTextMock.mockClear());
 
 /** Render FlatFileList with sensible defaults, overriding only what a test needs. */
-function renderList(props: Partial<Parameters<typeof FlatFileList>[0]> = {}) {
+function renderList(
+  props: Partial<Parameters<typeof FlatFileList>[0]> = {},
+  activeFilePath?: string,
+) {
+  const viewerContext =
+    activeFilePath === undefined
+      ? null
+      : {
+          activeFilePath,
+          workspaceRoot: "/work",
+          workspaceHome: null,
+          conversationId: "conv_abc",
+          openFile: vi.fn(),
+          openGithubTab: vi.fn(),
+          isChangedPath: () => false,
+        };
   return render(
     <TooltipProvider>
-      <FlatFileList
-        files={undefined}
-        isLoading={false}
-        isError={false}
-        error={null}
-        onFileSelect={vi.fn()}
-        showHidden={false}
-        onShowHidden={vi.fn()}
-        searchQuery=""
-        sort="alpha"
-        conversationId="conv_abc"
-        {...props}
-      />
+      {/* eslint-disable-next-line react/jsx-no-constructed-context-values -- Each fixture mounts once with a fixed context. */}
+      <FileViewerContext.Provider value={viewerContext}>
+        <FlatFileList
+          files={undefined}
+          isLoading={false}
+          isError={false}
+          error={null}
+          onFileSelect={vi.fn()}
+          showHidden={false}
+          onShowHidden={vi.fn()}
+          searchQuery=""
+          sort="alpha"
+          conversationId="conv_abc"
+          {...props}
+        />
+      </FileViewerContext.Provider>
     </TooltipProvider>,
   );
 }
@@ -220,5 +239,98 @@ describe("FlatFileList copy path", () => {
     fireEvent.click(button);
 
     expect(copyTextMock).toHaveBeenCalledWith("src/deep/app.ts");
+  });
+});
+
+it("marks the active comparison file, including a deletion, without selecting other paths", () => {
+  renderList(
+    {
+      files: [
+        {
+          path: "src/gone.ts",
+          name: "gone.ts",
+          status: "deleted",
+          bytes: null,
+          modified_at: null,
+          lines_added: null,
+          lines_removed: null,
+        },
+      ],
+    },
+    "/work/src/gone.ts",
+  );
+  expect(
+    screen.getByText("gone.ts").closest("li")?.querySelector("[aria-current=true]"),
+  ).toHaveClass("bg-accent");
+});
+
+describe("FlatFileList repository grouping", () => {
+  const changed = (
+    path: string,
+    status: "created" | "modified" | "deleted" = "modified",
+    repository?: string,
+  ) => ({
+    path,
+    name: path.split("/").at(-1)!,
+    status,
+    repository,
+    bytes: 10,
+    modified_at: null,
+    lines_added: null,
+    lines_removed: null,
+  });
+
+  it("groups by repository, sorts each group, and opens Git deletions by their original path", () => {
+    const onFileSelect = vi.fn();
+    renderList({
+      repositories: ["/work/second", "/work/first"],
+      workspaceRoot: "/work",
+      onFileSelect,
+      files: [
+        changed("second/z.ts", "modified", "/work/second"),
+        changed("first/deleted.ts", "deleted", "/work/first"),
+        changed("second/a.ts", "created", "/work/second"),
+      ],
+    });
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+      "/work/first",
+      "/work/second",
+    ]);
+    const first = within(screen.getByRole("group", { name: "/work/first" }));
+    expect(first.getByText("deleted.ts")).toHaveClass("line-through");
+    expect(first.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(first.getByText("deleted.ts"));
+    expect(onFileSelect).toHaveBeenCalledWith("first/deleted.ts");
+    const second = within(screen.getByRole("group", { name: "/work/second" }));
+    expect(
+      second.getAllByRole("listitem").map((item) => item.querySelector("button")?.textContent),
+    ).toEqual(["a.tssecond", "z.tssecond"]);
+  });
+
+  it("infers the nearest nested repository for older rows and filters empty groups", () => {
+    renderList({
+      repositories: ["/work", "/work/nested"],
+      workspaceRoot: "/work",
+      searchQuery: "nested/",
+      files: [changed("root.ts"), changed("nested/live.ts"), changed("nested/.hidden.ts")],
+    });
+    expect(screen.queryByRole("group", { name: "/work" })).toBeNull();
+    expect(
+      within(screen.getByRole("group", { name: "/work/nested" })).getByText("live.ts"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(".hidden.ts")).toBeNull();
+  });
+
+  it("keeps the single-repository list flat while retaining cached deletions after a refresh error", () => {
+    renderList({
+      repositories: ["/work"],
+      workspaceRoot: "/work",
+      files: [changed("gone.ts", "deleted", "/work")],
+      isError: true,
+      error: new Error("refresh failed"),
+    });
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(screen.getByText("gone.ts")).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load/)).toBeNull();
   });
 });

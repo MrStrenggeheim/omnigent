@@ -14,7 +14,19 @@ import { createPortal } from "react-dom";
 import {
   FilePlusIcon,
   FolderPlusIcon,
-  ListCollapseIcon,
+  CopyMinusIcon,
+  CopyIcon,
+  ScissorsIcon,
+  ClipboardPasteIcon,
+  DownloadIcon,
+  FolderOpenIcon,
+  FolderInputIcon,
+  PencilIcon,
+  Trash2Icon,
+  Undo2Icon,
+  RefreshCwIcon,
+  SquareCheckIcon,
+  SquareIcon,
   MoreHorizontalIcon,
   XIcon,
   SearchIcon,
@@ -42,6 +54,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -95,6 +108,7 @@ interface TreeControls {
 interface ExplorerContextValue {
   conversationId: string | undefined;
   base: string;
+  entryBase: string;
   writable: boolean;
   selected: Map<string, ExplorerEntry>;
   focused: string | null;
@@ -110,6 +124,7 @@ interface ExplorerContextValue {
   collapse: () => void;
   reveal: () => void;
   menu: (target: ExplorerEntry) => ReactNode;
+  toolbarMenu: (viewOptions?: ReactNode) => ReactNode;
   feedback: ReactNode;
   chooseUpload: (directory: boolean, path?: string) => void;
   busy: boolean;
@@ -121,6 +136,7 @@ function RevealFileMenuItem({ entry }: { entry: ExplorerEntry }) {
   const target = useRevealTarget(entry.path);
   return target ? (
     <DropdownMenuItem onSelect={() => revealInFileManager(target)}>
+      <FolderOpenIcon />
       {revealLabel(entry.directory)}
     </DropdownMenuItem>
   ) : null;
@@ -133,8 +149,15 @@ export function useExplorerTree(controls: TreeControls): void {
 
 export function useExplorerRow(path: string, directory: boolean, deleted = false) {
   const ctx = useContext(ExplorerContext);
+  const viewer = useContext(FileViewerContext);
   const revealBase = useContext(RevealBaseContext);
-  const canonical = joinBrowseLocation(ctx?.base ?? revealBase, path);
+  const canonical = joinBrowseLocation(ctx?.entryBase ?? revealBase, path);
+  const active =
+    !directory &&
+    !!viewer?.activeFilePath &&
+    relativizeToWorkspace(viewer.activeFilePath, viewer.workspaceRoot) ===
+      relativizeToWorkspace(canonical, viewer.workspaceRoot);
+  const currentProps = { "aria-current": active ? ("true" as const) : undefined };
   const entry = { path: canonical, directory };
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
@@ -145,11 +168,17 @@ export function useExplorerRow(path: string, directory: boolean, deleted = false
     }
   }, [ctx?.isDragActive]);
   if (!ctx || deleted)
-    return { selected: false, props: {} as HTMLAttributes<HTMLDivElement>, path: canonical };
+    return {
+      selected: false,
+      active,
+      props: currentProps as HTMLAttributes<HTMLDivElement>,
+      path: canonical,
+    };
   const props: HTMLAttributes<HTMLDivElement> & {
     "data-explorer-entry": string;
     "data-directory": string;
   } = {
+    ...currentProps,
     "data-explorer-entry": canonical,
     "data-directory": String(directory),
     role: "treeitem",
@@ -213,7 +242,7 @@ export function useExplorerRow(path: string, directory: boolean, deleted = false
       timer.current = null;
     },
   };
-  return { selected: ctx.selected.has(canonical), props, path: canonical };
+  return { selected: ctx.selected.has(canonical), active, props, path: canonical };
 }
 
 interface ActionDialog {
@@ -231,6 +260,7 @@ export function ExplorerActionsProvider({
   children,
   conversationId,
   base,
+  entryBase = base,
   workspaceRoot,
   hostId,
   writable,
@@ -240,6 +270,8 @@ export function ExplorerActionsProvider({
   children: ReactNode;
   conversationId: string | undefined;
   base: string;
+  /** Row paths use the workspace root in Changes, independently of the operation folder. */
+  entryBase?: string;
   workspaceRoot: string | null;
   hostId: string | null;
   writable: boolean;
@@ -286,14 +318,14 @@ export function ExplorerActionsProvider({
         ...controls,
         entries: controls.entries.map((entry) => ({
           ...entry,
-          path: joinBrowseLocation(base, entry.path),
+          path: joinBrowseLocation(entryBase, entry.path),
         })),
       };
       return () => {
         if (tree.current.navigate === controls.navigate) tree.current = { entries: [] };
       };
     },
-    [base],
+    [entryBase],
   );
   useEffect(() => {
     setSelected(new Map());
@@ -316,6 +348,7 @@ export function ExplorerActionsProvider({
           "workspace-dir-listing",
           "workspace-all-files",
           "workspace-changed-files",
+          "workspace-comparison-changes",
           "workspace-file-search",
           "file-content",
           "file-diff",
@@ -545,6 +578,142 @@ export function ExplorerActionsProvider({
     );
   };
 
+  const toolbarMenu = (viewOptions?: ReactNode) => {
+    const entries = distinctRoots([...selected.values()]);
+    const hasSelection = entries.length > 0;
+    const folder = { path: base, directory: true };
+    return (
+      <>
+        <DropdownMenuLabel>Transfers</DropdownMenuLabel>
+        <DropdownMenuItem disabled={!writable || busy} onSelect={() => chooseUpload(false, base)}>
+          <UploadIcon />
+          Upload files into this folder…
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!writable || busy} onSelect={() => chooseUpload(true, base)}>
+          <FolderPlusIcon />
+          Upload folder into this folder…
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={busy}
+          onSelect={() => void run(() => download(hasSelection ? entries : [folder]))}
+        >
+          <DownloadIcon />
+          {hasSelection ? "Download selection as ZIP" : "Download this folder as ZIP"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Navigation and search · current folder</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => search(base)}>
+          <SearchIcon />
+          Search folder contents…
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() =>
+            void run(() =>
+              copyText(
+                workspaceRoot
+                  ? base
+                    ? absoluteExplorerPath(workspaceRoot, base)
+                    : workspaceRoot
+                  : base,
+              ),
+            )
+          }
+        >
+          <CopyIcon />
+          Copy folder path
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void run(() => copyText(base))}>
+          <CopyIcon />
+          Copy relative folder path
+        </DropdownMenuItem>
+        <RevealFileMenuItem entry={folder} />
+        {viewOptions && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>View options</DropdownMenuLabel>
+            {viewOptions}
+          </>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>
+          {hasSelection ? `Selection · ${entries.length} selected` : "Selection"}
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          disabled={tree.current.entries.length === 0}
+          onSelect={() =>
+            setSelected(new Map(tree.current.entries.map((entry) => [entry.path, entry])))
+          }
+        >
+          <SquareCheckIcon />
+          Select all visible files
+        </DropdownMenuItem>
+        {hasSelection && (
+          <>
+            <DropdownMenuItem onSelect={() => setSelected(new Map())}>
+              <SquareIcon />
+              Clear selection
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!writable || busy}
+              onSelect={() => void run(() => setClipboard(entries, true))}
+            >
+              <ScissorsIcon />
+              Cut selected items
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={busy}
+              onSelect={() => void run(() => setClipboard(entries, false))}
+            >
+              <CopyIcon />
+              Copy selected items
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!writable || busy || entries.length !== 1}
+              onSelect={() => openDialog("rename", entries)}
+            >
+              <PencilIcon />
+              Rename selected item…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!writable || busy}
+              onSelect={() => openDialog("move", entries, base)}
+            >
+              <FolderInputIcon />
+              Move selected items to…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!writable || busy || entries.length !== 1}
+              onSelect={() => openDialog("duplicate", entries)}
+            >
+              <CopyIcon />
+              Duplicate selected item…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!writable || busy}
+              onSelect={() => openDialog("trash", entries)}
+            >
+              <Trash2Icon />
+              Move selected items to trash…
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuItem
+          disabled={!writable || busy || !clipboard}
+          onSelect={() => void run(() => paste(base))}
+        >
+          <ClipboardPasteIcon />
+          Paste into this folder
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Recovery · current folder</DropdownMenuLabel>
+        <DropdownMenuItem disabled={!writable || busy} onSelect={() => void run(loadTrash)}>
+          <Undo2Icon />
+          Restore deleted files…
+        </DropdownMenuItem>
+      </>
+    );
+  };
+
   const select = (entry: ExplorerEntry, additive: boolean, range: boolean) => {
     setFocused(entry.path);
     setSelected((previous) => {
@@ -626,6 +795,7 @@ export function ExplorerActionsProvider({
   const context: ExplorerContextValue = {
     conversationId,
     base,
+    entryBase,
     writable,
     selected,
     focused,
@@ -647,6 +817,7 @@ export function ExplorerActionsProvider({
       }
     },
     menu,
+    toolbarMenu,
     chooseUpload,
     busy,
     isDragActive,
@@ -808,6 +979,7 @@ export function ExplorerActionsProvider({
         }}
       >
         {children}
+        {context.feedback}
         {isDragActive && dropTarget && (
           <FileDropOverlay container={dropTarget} label="Drop files into this folder" />
         )}
@@ -1062,103 +1234,93 @@ export function ExplorerActionsProvider({
 export function ExplorerToolbar({
   showAgentChanges,
   onShowAgentChangesChange,
+  inline = false,
+  onRefresh,
+  refreshing = false,
+  viewOptions,
 }: {
   showAgentChanges?: boolean;
   onShowAgentChangesChange?: (show: boolean) => void;
+  inline?: boolean;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  viewOptions?: ReactNode;
 } = {}) {
   const ctx = useContext(ExplorerContext);
   if (!ctx) return null;
-  const first = ctx.selected.values().next().value as ExplorerEntry | undefined;
-  const target = first ?? { path: ctx.base, directory: true };
   return (
-    <>
-      <div
-        className="flex shrink-0 flex-wrap items-center gap-1 border-t border-border px-2 py-1"
-        aria-label="File actions"
+    <div
+      className={cn("flex shrink-0 items-center gap-[2px]", !inline && "px-2 py-1")}
+      aria-label="File actions"
+    >
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        title="New file"
+        aria-label="New file"
+        disabled={!ctx.writable || ctx.busy}
+        onClick={() => ctx.newItem(false)}
       >
+        <FilePlusIcon />
+      </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        title="New folder"
+        aria-label="New folder"
+        disabled={!ctx.writable || ctx.busy}
+        onClick={() => ctx.newItem(true)}
+      >
+        <FolderPlusIcon />
+      </Button>
+      {onRefresh && (
         <Button
           size="icon-sm"
           variant="ghost"
-          title="New file"
-          aria-label="New file"
-          disabled={!ctx.writable || ctx.busy}
-          onClick={() => ctx.newItem(false)}
+          title="Refresh files"
+          aria-label="Refresh files"
+          disabled={refreshing}
+          onClick={onRefresh}
         >
-          <FilePlusIcon />
+          <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
         </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          title="New folder"
-          aria-label="New folder"
-          disabled={!ctx.writable || ctx.busy}
-          onClick={() => ctx.newItem(true)}
-        >
-          <FolderPlusIcon />
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          title="Upload files"
-          aria-label="Choose files to upload"
-          disabled={!ctx.writable || ctx.busy}
-          onClick={() => ctx.chooseUpload(false)}
-        >
-          <UploadIcon />
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          title="Search file contents"
-          aria-label="Search folder contents"
-          onClick={() => ctx.search(ctx.base)}
-        >
-          <SearchIcon />
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          title="Collapse all folders"
-          aria-label="Collapse all folders"
-          onClick={ctx.collapse}
-        >
-          <ListCollapseIcon />
-        </Button>
-        <Button size="sm" variant="ghost" title="Reveal active file" onClick={ctx.reveal}>
-          Reveal active file
-        </Button>
-        {ctx.selected.size > 0 && (
-          <span className="text-xs text-muted-foreground">{ctx.selected.size} selected</span>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              className="ml-auto"
-              aria-label="More file actions"
-            >
-              <MoreHorizontalIcon />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {onShowAgentChangesChange && (
-              <>
-                <DropdownMenuCheckboxItem
-                  checked={showAgentChanges ?? false}
-                  onCheckedChange={onShowAgentChangesChange}
-                >
-                  Show agent changes
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            {ctx.menu(target)}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      {ctx.feedback}
-    </>
+      )}
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        title="Collapse all folders"
+        aria-label="Collapse all folders"
+        onClick={ctx.collapse}
+      >
+        <CopyMinusIcon />
+      </Button>
+      {ctx.selected.size > 0 && (
+        <span className={cn("text-xs text-muted-foreground", inline && "sr-only")}>
+          {ctx.selected.size} selected
+        </span>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="icon-sm" variant="ghost" aria-label="More file actions">
+            <MoreHorizontalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {!inline && onShowAgentChangesChange && (
+            <>
+              <DropdownMenuCheckboxItem
+                checked={showAgentChanges ?? false}
+                onCheckedChange={onShowAgentChangesChange}
+              >
+                Show agent changes
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          {ctx.toolbarMenu(viewOptions)}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 
@@ -1178,7 +1340,7 @@ export function ExplorerRowActions({
 }) {
   const ctx = useContext(ExplorerContext);
   const revealBase = useContext(RevealBaseContext);
-  const entry = { path: joinBrowseLocation(ctx?.base ?? revealBase, path), directory };
+  const entry = { path: joinBrowseLocation(ctx?.entryBase ?? revealBase, path), directory };
   const sessionId = conversationId ?? ctx?.conversationId;
   const selecting = !deleted && (ctx?.selected.size ?? 0) > 0;
   return (

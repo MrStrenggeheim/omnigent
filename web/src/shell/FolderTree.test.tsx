@@ -39,6 +39,7 @@ import {
 import type * as WorkspaceChangedFilesModule from "@/hooks/useWorkspaceChangedFiles";
 import { ROW_STATUS_SLOT_CLASS } from "./fileStatusUtils";
 import { FolderTree } from "./FolderTree";
+import { FileViewerContext } from "./FileViewerContext";
 
 afterEach(() => {
   cleanup();
@@ -49,22 +50,40 @@ beforeEach(() => copyTextMock.mockClear());
 /** Render FolderTree (the "All" files tab) with defaults, overriding per test.
  *  Wrapped in a QueryClientProvider because rendered rows call
  *  `useWorkspaceDirectory` (a TanStack query) for lazy subdirectory loading. */
-function renderTree(props: Partial<Parameters<typeof FolderTree>[0]> = {}) {
+function renderTree(
+  props: Partial<Parameters<typeof FolderTree>[0]> = {},
+  activeFilePath?: string,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const viewerContext =
+    activeFilePath === undefined
+      ? null
+      : {
+          activeFilePath,
+          workspaceRoot: "/work",
+          workspaceHome: null,
+          conversationId: "conv_abc",
+          openFile: vi.fn(),
+          openGithubTab: vi.fn(),
+          isChangedPath: () => false,
+        };
   return render(
     <QueryClientProvider client={queryClient}>
-      <FolderTree
-        files={undefined}
-        isLoading={false}
-        isError={false}
-        error={null}
-        onFileSelect={vi.fn()}
-        conversationId="conv_abc"
-        showHidden={false}
-        changedFiles={undefined}
-        sort="alpha"
-        {...props}
-      />
+      {/* eslint-disable-next-line react/jsx-no-constructed-context-values -- Each fixture mounts once with a fixed context. */}
+      <FileViewerContext.Provider value={viewerContext}>
+        <FolderTree
+          files={undefined}
+          isLoading={false}
+          isError={false}
+          error={null}
+          onFileSelect={vi.fn()}
+          conversationId="conv_abc"
+          showHidden={false}
+          changedFiles={undefined}
+          sort="alpha"
+          {...props}
+        />
+      </FileViewerContext.Provider>
     </QueryClientProvider>,
   );
 }
@@ -122,6 +141,38 @@ describe("FolderTree runner-offline state", () => {
 
     expect(screen.getByText(/failed to load: 500 internal server error/i)).toBeInTheDocument();
     expect(screen.queryByText(/agent is asleep/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("FolderTree active file", () => {
+  it.each([false, true])(
+    "marks the canonical active path in tree and filename results (search=%s)",
+    (search) => {
+      renderTree(
+        {
+          files: [file("index.ts"), file("other.ts")],
+          browseLocation: "src",
+          workspaceRoot: "/work",
+          ...(search ? { searchQuery: "index", searchResults: [file("index.ts")] } : {}),
+        },
+        "/work/src/index.ts",
+      );
+      const active = screen
+        .getByText("index.ts")
+        .closest("li")
+        ?.querySelector("[aria-current=true]");
+      expect(active).toHaveClass("bg-accent");
+      expect(screen.queryByText("other.ts")?.closest("[aria-current=true]")).toBeFalsy();
+    },
+  );
+  it("does not mark a same-named file in another browsed folder", () => {
+    renderTree(
+      { files: [file("index.ts")], browseLocation: "src-other", workspaceRoot: "/work" },
+      "/work/src/index.ts",
+    );
+    expect(
+      screen.getByText("index.ts").closest("li")?.querySelector("[aria-current=true]"),
+    ).toBeNull();
   });
 });
 

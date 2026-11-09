@@ -31,6 +31,8 @@ async def inspect_git(environment: OSEnvironment, params: dict[str, Any]) -> dic
     root = filesystem._resolve("")
     authorized = dict(params)
     filesystem._resolve(str(params.get("path", "")))
+    if "scope" in params:
+        filesystem._resolve(params["scope"])
     for directory in params.get("directories", []):
         filesystem._resolve(directory)
     script = WORKSPACE_GIT_SCRIPT + "\nimport json\n"
