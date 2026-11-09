@@ -29,7 +29,6 @@ import {
   SquareCheckIcon,
   SquareIcon,
   MoreHorizontalIcon,
-  XIcon,
   SearchIcon,
   UploadIcon,
 } from "lucide-react";
@@ -37,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/notifications";
 import { formatBytes } from "./fileStatusUtils";
 import { useFileDropTarget } from "@/hooks/useFileDropTarget";
 import { FileDropOverlay } from "@/components/FileDropOverlay";
@@ -126,7 +126,6 @@ interface ExplorerContextValue {
   reveal: () => void;
   menu: (target: ExplorerEntry) => ReactNode;
   toolbarMenu: (viewOptions?: ReactNode) => ReactNode;
-  feedback: ReactNode;
   chooseUpload: (directory: boolean, path?: string) => void;
   busy: boolean;
   isDragActive: boolean;
@@ -295,6 +294,7 @@ export function ExplorerActionsProvider({
   const tree = useRef<TreeControls>({ entries: [] });
   const root = useRef<HTMLDivElement>(null);
   const [dropTarget, setDropTarget] = useState<HTMLDivElement | null>(null);
+  const [dropHint, setDropHint] = useState("");
   const setRoot = useCallback((element: HTMLDivElement | null) => {
     root.current = element;
     setDropTarget(element);
@@ -303,7 +303,6 @@ export function ExplorerActionsProvider({
   const [dialog, setDialog] = useState<ActionDialog | null>(null);
   const [value, setValue] = useState("");
   const [overwrite, setOverwrite] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [localBusy, setBusy] = useState(false);
   const transfers = useSyncExternalStore(subscribeExplorerTransfers, getExplorerTransfers);
   const busy =
@@ -374,16 +373,17 @@ export function ExplorerActionsProvider({
         (transfer) => transfer.conversationId === resourceIdentity && transferIsActive(transfer),
       )
     ) {
-      setError("A file transfer is already running in this session.");
+      toast.warning("A file transfer is already running in this workspace.");
       return;
     }
     busyRef.current = true;
     setBusy(true);
-    setError(null);
     try {
       await action();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      toast.error("File operation failed", {
+        description: cause instanceof Error ? cause.message : String(cause),
+      });
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -432,7 +432,6 @@ export function ExplorerActionsProvider({
     );
   };
   const openDialog = (kind: ActionDialog["kind"], entries: ExplorerEntry[], parent = base) => {
-    setError(null);
     setOverwrite(false);
     setValue(
       kind === "rename"
@@ -809,23 +808,31 @@ export function ExplorerActionsProvider({
     }
   };
 
+  const dropEntry = (event: DragEvent): ExplorerEntry => {
+    const row =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-explorer-entry]")
+        : null;
+    return row?.dataset.explorerEntry
+      ? { path: row.dataset.explorerEntry, directory: row.dataset.directory === "true" }
+      : { path: base, directory: true };
+  };
   const isDragActive = useFileDropTarget(writable ? dropTarget : null, () => {}, {
     additionalTypes: [DRAG_TYPE],
     capture: true,
+    onDragOver: (event) => {
+      const internal = Array.from(event.dataTransfer?.types ?? []).includes(DRAG_TYPE);
+      const action = internal ? (event.ctrlKey || event.metaKey ? "Copy" : "Move") : "Upload";
+      setDropHint(`${action} to ${destinationFor(dropEntry(event)) || "workspace root"}`);
+    },
     onDrop: (event) => {
-      const folder = (event.target as HTMLElement).closest<HTMLElement>(
-        "[data-explorer-entry][data-directory=true]",
-      );
       event.stopPropagation();
-      drop(
-        { path: folder?.dataset.explorerEntry ?? base, directory: true },
-        event.dataTransfer!,
-        event.ctrlKey || event.metaKey,
-      );
+      drop(dropEntry(event), event.dataTransfer!, event.ctrlKey || event.metaKey);
     },
   });
   useEffect(() => {
     if (isDragActive) return;
+    setDropHint("");
     root.current
       ?.querySelectorAll<HTMLElement>("[data-drop-target]")
       .forEach((element) => delete element.dataset.dropTarget);
@@ -861,20 +868,6 @@ export function ExplorerActionsProvider({
     chooseUpload,
     busy,
     isDragActive,
-    feedback: error && !dialog && !upload && !pasteConflict && trash === null && (
-      <div role="alert" className="flex gap-2 border-t border-border p-2 text-xs text-destructive">
-        <span className="min-w-0 flex-1 break-words">{error}</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => setError(null)}
-          aria-label="Dismiss file error"
-        >
-          <XIcon />
-        </Button>
-      </div>
-    ),
   };
 
   const applyDialog = async () => {
@@ -1031,9 +1024,12 @@ export function ExplorerActionsProvider({
         }}
       >
         {children}
-        {context.feedback}
         {isDragActive && dropTarget && (
-          <FileDropOverlay container={dropTarget} label="Drop files into this folder" />
+          <FileDropOverlay
+            container={dropTarget}
+            appearance="outline"
+            label={dropHint || "Drop onto a folder, or here for the current folder"}
+          />
         )}
         <input
           ref={fileInput}
@@ -1101,11 +1097,6 @@ export function ExplorerActionsProvider({
               overwrites the existing destination items.
             </DialogDescription>
           </DialogHeader>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={() => setPasteConflict(null)}>
               Cancel
@@ -1175,11 +1166,6 @@ export function ExplorerActionsProvider({
               Replace existing destination
             </label>
           )}
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={() => setDialog(null)}>
               Cancel
@@ -1225,11 +1211,6 @@ export function ExplorerActionsProvider({
               </div>
             ))}
           </div>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
         </DialogContent>
       </Dialog>
       <Dialog
@@ -1264,11 +1245,6 @@ export function ExplorerActionsProvider({
             />
             Replace existing files
           </label>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setUpload(null)}>
               Cancel

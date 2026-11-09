@@ -25,7 +25,7 @@ import {
 import { useChatStore } from "@/store/chatStore";
 import { TranscriptScrollbar } from "@/pages/TranscriptScrollbar";
 import { TurnRail, type Turn } from "@/pages/TurnRail";
-import { FloatingBannerStack, StreamBudgetBanner } from "@/components/StreamBudgetBanner";
+import { StreamBudgetBanner } from "@/components/StreamBudgetBanner";
 import { DbcertBanner } from "@/components/DbcertBanner";
 import { ArcaShutdownBanner } from "@/components/ArcaShutdownBanner";
 import { useArcaShutdownBanner } from "@/hooks/useArcaShutdownBanner";
@@ -320,7 +320,7 @@ function TranscriptImpl({
   const showWorkingIndicator = shouldShowWorkingIndicator(display.showsWorking, display.bubbles);
   const arcaWarning = useArcaShutdownBanner();
   const showArcaBanner = arcaWarning.showForHost(hostId);
-  const hasPinnedBanner = display.hasTasks || showArcaBanner;
+  const hasPinnedBanner = display.hasTasks;
   return (
     <>
       {/* Task tracker pinned above the thread. Sibling of the viewport (not an
@@ -439,11 +439,9 @@ function TranscriptImpl({
           hasMoreHistory={display.hasMoreHistory}
         />
         {/* Too-many-tabs, dbcert, and sandbox-launch warnings, siblings of Conversation. */}
-        <FloatingBannerStack>
-          <StreamBudgetBanner />
-          <DbcertBanner conversationId={conversationId} hostId={hostId} />
-          <SandboxActionBanner />
-        </FloatingBannerStack>
+        <StreamBudgetBanner />
+        <DbcertBanner conversationId={conversationId} hostId={hostId} />
+        <SandboxActionBanner />
         {/* Left-edge minimap: one tick per turn. Desktop-only. */}
         {!isMobileViewport && (
           <TurnRail

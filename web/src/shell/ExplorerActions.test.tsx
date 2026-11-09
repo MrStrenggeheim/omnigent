@@ -303,33 +303,45 @@ describe("Explorer actions", () => {
     );
   });
 
-  it("moves a dragged selection into its target folder", async () => {
-    setup();
-    fireEvent.click(screen.getByRole("button", { name: "a.txt" }), { ctrlKey: true });
-    fireEvent.click(screen.getByRole("button", { name: "b.txt" }), { ctrlKey: true });
-    const payload = new Map<string, string>();
-    const transfer = {
-      get types() {
-        return [...payload.keys()];
-      },
-      setData: (type: string, value: string) => payload.set(type, value),
-      getData: (type: string) => payload.get(type) ?? "",
-      effectAllowed: "",
-      dropEffect: "",
-    };
-    fireEvent.dragStart(screen.getByTestId("row-a.txt"), { dataTransfer: transfer });
-    fireEvent.drop(screen.getByTestId("row-folder"), { dataTransfer: transfer });
-    await waitFor(() =>
-      expect(operation).toHaveBeenCalledWith("test", {
-        operation: "move",
-        entries: [
-          { source: "src/a.txt", destination: "src/folder/a.txt" },
-          { source: "src/b.txt", destination: "src/folder/b.txt" },
-        ],
-        overwrite: false,
-      }),
-    );
-  });
+  it.each([false, true])(
+    "drops a dragged selection into its target folder (copy=%s)",
+    async (copy) => {
+      setup();
+      fireEvent.click(screen.getByRole("button", { name: "a.txt" }), { ctrlKey: true });
+      fireEvent.click(screen.getByRole("button", { name: "b.txt" }), { ctrlKey: true });
+      const payload = new Map<string, string>();
+      const transfer = {
+        get types() {
+          return [...payload.keys()];
+        },
+        setData: (type: string, value: string) => payload.set(type, value),
+        getData: (type: string) => payload.get(type) ?? "",
+        effectAllowed: "",
+        dropEffect: "",
+      };
+      fireEvent.dragStart(screen.getByTestId("row-a.txt"), { dataTransfer: transfer });
+      const over = new MouseEvent("dragover", { bubbles: true, cancelable: true, ctrlKey: copy });
+      Object.defineProperty(over, "dataTransfer", { value: transfer });
+      fireEvent(screen.getByTestId("row-folder"), over);
+      expect(screen.getByTestId("file-drop-overlay")).toHaveTextContent(
+        `${copy ? "Copy" : "Move"} to src/folder`,
+      );
+      expect(transfer.dropEffect).toBe(copy ? "copy" : "move");
+      const drop = new MouseEvent("drop", { bubbles: true, cancelable: true, ctrlKey: copy });
+      Object.defineProperty(drop, "dataTransfer", { value: transfer });
+      fireEvent(screen.getByTestId("row-folder"), drop);
+      await waitFor(() =>
+        expect(operation).toHaveBeenCalledWith("test", {
+          operation: copy ? "copy" : "move",
+          entries: [
+            { source: "src/a.txt", destination: "src/folder/a.txt" },
+            { source: "src/b.txt", destination: "src/folder/b.txt" },
+          ],
+          overwrite: false,
+        }),
+      );
+    },
+  );
 
   it("disables mutations for read-only viewers and still offers folder search", async () => {
     const search = vi.fn();

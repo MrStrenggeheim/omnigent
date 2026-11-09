@@ -1,3 +1,4 @@
+import { toast } from "@/lib/notifications";
 import { useEffect, useState } from "react";
 import { PlugIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -61,16 +62,13 @@ function ServiceConnection({
   const [token, setToken] = useState("");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   async function run(action: () => Promise<void>) {
     setBusy(true);
-    setError(null);
-    setNotice(null);
     try {
       await action();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+      const message = e instanceof Error ? e.message : "Request failed";
+      toast.error("MCP connection failed", { description: message });
     } finally {
       setBusy(false);
     }
@@ -125,7 +123,7 @@ function ServiceConnection({
                 const result = await registryRequest<{ tools: string[] }>(`/${service.id}/test`, {
                   method: "POST",
                 });
-                setNotice(
+                toast.success(
                   `Tool discovery succeeded. Tools: ${result.tools.join(", ") || "none"}. Individual calls may require additional permissions.`,
                 );
               })
@@ -181,16 +179,6 @@ function ServiceConnection({
             Save token
           </Button>
         </form>
-      )}
-      {notice && (
-        <p role="status" className="text-sm">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
       )}
     </div>
   );

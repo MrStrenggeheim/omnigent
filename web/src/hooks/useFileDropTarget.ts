@@ -18,6 +18,7 @@ interface FileDropOptions {
   additionalTypes?: readonly string[];
   /** Handle the raw event when directories or an internal file selection are needed. */
   onDrop?: (event: DragEvent) => void;
+  onDragOver?: (event: DragEvent) => void;
   capture?: boolean;
 }
 
@@ -64,6 +65,7 @@ export function useFileDropTarget(
       e.preventDefault();
       // A drag entering from another window can arrive without a dragenter.
       setIsDragActive(true);
+      optionsRef.current.onDragOver?.(e);
     };
 
     const drop = (e: DragEvent): void => {

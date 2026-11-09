@@ -1,3 +1,5 @@
+import { toast, getNotificationSnapshot } from "@/lib/notifications";
+import { Toaster } from "@/components/ui/sonner";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,6 +77,8 @@ const ARCLET: TestHost = {
 };
 
 beforeEach(() => {
+  toast.dismiss();
+  render(<Toaster />);
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   state.hosts = [{ host_id: "arca", name: "jackson's arca", status: "online" }];
@@ -96,6 +100,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  toast.dismiss();
   vi.useRealTimers();
   delete (window as unknown as { omnigentDesktop?: unknown }).omnigentDesktop;
 });
@@ -113,6 +118,8 @@ describe("DbcertBanner", () => {
     expect(desktopRefresh).not.toHaveBeenCalled();
 
     cleanup();
+    toast.dismiss();
+    render(<Toaster />);
     vi.mocked(startHostDbcertRefresh).mockClear();
     (window as unknown as { omnigentDesktop: unknown }).omnigentDesktop = {
       kind: "electron",
@@ -244,6 +251,8 @@ describe("DbcertBanner", () => {
     await settle();
     expect(screen.queryByText(/has expired/)).toBeNull();
     cleanup();
+    toast.dismiss();
+    render(<Toaster />);
     vi.mocked(readHostDbcertExpiry).mockResolvedValue(null);
     renderBanner();
     await settle();
@@ -291,7 +300,7 @@ describe("DbcertBanner", () => {
     expect(startHostDbcertRefresh).not.toHaveBeenCalled();
     expect(desktopRefresh).toHaveBeenCalledWith();
     expect(screen.getByText(/Opening browser sign-in/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Refreshing…" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("progressbar", { name: "Refreshing certificate" })).toBeTruthy();
     await settle(4_000);
     expect(screen.queryByText(/has expired/)).toBeNull();
   });
@@ -328,7 +337,7 @@ describe("DbcertBanner", () => {
     await settle();
     expect(desktopRefresh).toHaveBeenCalledOnce();
     expect(readHostDbcertExpiry).toHaveBeenCalledTimes(readsBeforeRefresh);
-    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Refreshing certificate" })).toBeTruthy();
     vi.mocked(readHostDbcertExpiry).mockResolvedValue(RENEWED);
     finishSignIn({ ok: true });
     await settle();
@@ -339,7 +348,7 @@ describe("DbcertBanner", () => {
   it("stays dismissed for the cert it was dismissed for", async () => {
     renderBanner();
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     expect(screen.queryByText(/has expired/)).toBeNull();
     await settle(60_000);
     expect(screen.queryByText(/has expired/)).toBeNull();
@@ -352,7 +361,7 @@ describe("DbcertBanner", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh dbcert" }));
     await settle();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     // Renewed elsewhere, then expired again.
     vi.mocked(readHostDbcertExpiry).mockResolvedValue(RENEWED);
     await settle(60_000);
@@ -400,7 +409,7 @@ describe("DbcertBanner", () => {
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Refresh dbcert" }));
     await settle();
-    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Refreshing certificate" })).toBeTruthy();
     vi.mocked(readHostDbcertExpiry).mockResolvedValue(EXPIRED_LATER);
     view.rerender(banner("arclet"));
     await settle();
@@ -409,7 +418,11 @@ describe("DbcertBanner", () => {
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh dbcert" })).toBeTruthy();
     await settle(HOST_DBCERT_REFRESH_MS);
-    expect(screen.getByRole("button", { name: "Refresh dbcert" })).toBeTruthy();
+    const notice = getNotificationSnapshot().entries.find(
+      (entry) => entry.id === "host-dbcert:conv:arclet",
+    );
+    expect(notice?.visible).toBe(false);
+    expect(notice?.action).toMatchObject({ label: "Refresh dbcert" });
     expect(screen.queryByText(/Couldn't refresh it from here/)).toBeNull();
   });
 });
@@ -488,7 +501,7 @@ describe("LaptopDbcertBanner", () => {
       const view = render(<LaptopDbcertBanner onReady={onReady} onDismiss={vi.fn()} />);
       fireEvent.click(screen.getByRole("button", { name: "Refresh dbcert" }));
       await settle();
-      expect(screen.getByRole("button", { name: "Refreshing…" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("progressbar", { name: "Refreshing certificate" })).toBeTruthy();
       view.unmount();
       finish(verifying ? { ok: true, valid: true } : { ok: true });
       await settle();

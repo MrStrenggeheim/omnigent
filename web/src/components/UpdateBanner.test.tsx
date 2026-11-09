@@ -1,3 +1,5 @@
+import { toast } from "@/lib/notifications";
+import { Toaster } from "@/components/ui/sonner";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ElectronUpdateBridge, UpdateConfig, UpdateStatus } from "@/lib/nativeBridge";
@@ -38,11 +40,14 @@ function installBridge(status: UpdateStatus, config: UpdateConfig = DEFAULT_CONF
 }
 
 beforeEach(() => {
+  toast.dismiss();
+  render(<Toaster />);
   delete (window as unknown as Record<string, unknown>).omnigentDesktop;
 });
 
 afterEach(() => {
   cleanup();
+  toast.dismiss();
   delete (window as unknown as Record<string, unknown>).omnigentDesktop;
 });
 

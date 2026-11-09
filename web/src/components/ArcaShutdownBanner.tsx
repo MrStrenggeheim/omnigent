@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangleIcon, CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { useMarkArcaBannerWhenVisible } from "@/hooks/useArcaShutdownBanner";
 import { offersWorkweek } from "@/lib/arcaShutdownWarning";
 import { copyText } from "@/lib/clipboard";
-import { cn } from "@/lib/utils";
+import { useNotificationNotice } from "@/hooks/useNotificationNotice";
+import { toast } from "@/lib/notifications";
 import { ArcaExtendActions, useCanExtendArca } from "./ArcaExtendActions";
 
 function CommandCopyButton({ command }: { command: string }) {
@@ -22,7 +23,10 @@ function CommandCopyButton({ command }: { command: string }) {
       setCopied(true);
       if (resetTimeout.current) clearTimeout(resetTimeout.current);
       resetTimeout.current = setTimeout(() => setCopied(false), 2000);
-    } catch {
+    } catch (error) {
+      toast.error("Could not copy command", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setCopied(false);
     }
   };
@@ -49,7 +53,6 @@ function CommandCopyButton({ command }: { command: string }) {
 
 export function ArcaShutdownBanner({
   warning,
-  hasTasks = false,
 }: {
   warning: { day: string; dismissToday: () => void };
   hasTasks?: boolean;
@@ -66,46 +69,28 @@ export function ArcaShutdownBanner({
     </div>
   );
 
-  return (
-    <div
-      role="status"
-      className={cn(
-        "shrink-0 px-3 md:px-4",
-        hasTasks ? "mt-1" : "chat-plan-accordion mt-14 md:mt-12",
-      )}
-    >
-      <div className="mx-auto flex max-w-3xl items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-foreground">
-        <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />
-        <div className="min-w-0 flex-1 text-ui">
-          <p className="font-medium">
-            Your Arca will shut down at about 6 PM unless you keep it running.
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {desktopExtend && (
-              <ArcaExtendActions
-                day={warning.day}
-                onSuccess={warning.dismissToday}
-                fallback={() => copyCommands}
-              />
-            )}
-            {desktopExtend === false && copyCommands}
-          </div>
-          {desktopExtend === false && (
-            <p className="mt-1.5 text-muted-foreground">
-              Run this on your laptop. Already extended? You can ignore this.
-            </p>
-          )}
-          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
-            <button
-              type="button"
-              className="underline underline-offset-2 hover:no-underline"
-              onClick={warning.dismissToday}
-            >
-              Not now
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  useNotificationNotice(`arca-shutdown:${warning.day}`, {
+    title: "Your Arca will shut down at about 6 PM unless you keep it running.",
+    type: "warning",
+    description: "Extend it from your laptop to keep it running.",
+    jsx: (
+      <>
+        {desktopExtend && (
+          <ArcaExtendActions
+            day={warning.day}
+            onSuccess={warning.dismissToday}
+            fallback={() => copyCommands}
+          />
+        )}
+        {desktopExtend === false && (
+          <>
+            {copyCommands}
+            <p>Run this on your laptop. Already extended? You can ignore this.</p>
+          </>
+        )}
+      </>
+    ),
+    cancel: { label: "Not now", onClick: warning.dismissToday },
+  });
+  return null;
 }

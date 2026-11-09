@@ -1,3 +1,4 @@
+import { Toaster } from "@/components/ui/sonner";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "@/lib/notifications";
@@ -30,7 +31,6 @@ vi.mock("@/hooks/useNow", () => ({
 vi.mock("@/lib/CapabilitiesContext", () => ({ useServerInfo: () => ({}) }));
 vi.mock("@/lib/capabilities", () => ({ isFeatureEnabled: () => state.enabled }));
 vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn() }));
-vi.mock("@/lib/notifications", () => ({ toast: { dismiss: vi.fn() } }));
 
 function Banner({ hostId = "arca" }: { hostId?: string }) {
   const warning = useArcaShutdownBanner();
@@ -38,6 +38,8 @@ function Banner({ hostId = "arca" }: { hostId?: string }) {
 }
 
 beforeEach(() => {
+  toast.dismiss();
+  render(<Toaster />);
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(MON_5PM);
   localStorage.clear();
@@ -45,12 +47,13 @@ beforeEach(() => {
   state.enabled = true;
   state.now = MON_5PM;
   state.hosts = [{ host_id: "arca", name: "jackson's arca", status: "online" }];
-  vi.mocked(toast.dismiss).mockClear();
+  toast.dismiss();
   vi.mocked(copyText).mockReset().mockResolvedValue(undefined);
   delete (window as unknown as { omnigentDesktop?: unknown }).omnigentDesktop;
 });
 afterEach(() => {
   cleanup();
+  toast.dismiss();
   vi.restoreAllMocks();
   vi.useRealTimers();
   delete (window as unknown as { omnigentDesktop?: unknown }).omnigentDesktop;
@@ -185,25 +188,23 @@ describe("ArcaShutdownBanner", () => {
     expect(screen.getByRole("button", { name: "Copy arca extend overnight" })).toBeTruthy();
   });
 
-  it("marks and dismisses the toast only when the banner becomes visible", async () => {
+  it("marks the shared warning only when the conversation becomes visible", async () => {
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     render(<Banner />);
     expect(isWarnedToday(state.now)).toBe(false);
-    expect(toast.dismiss).not.toHaveBeenCalled();
+
     visibility.mockReturnValue("visible");
     fireEvent(document, new Event("visibilitychange"));
     await waitFor(() => expect(isWarnedToday(state.now)).toBe(true));
-    expect(toast.dismiss).toHaveBeenCalledWith("arca-shutdown:2026-10-05");
   });
 
   it("does not mark a new day when a sleeping tab wakes before its banner updates", () => {
     render(<Banner />);
     expect(isWarnedToday(MON_5PM)).toBe(true);
-    vi.mocked(toast.dismiss).mockClear();
+    toast.dismiss();
 
     vi.setSystemTime(TUE_9AM);
     fireEvent(document, new Event("visibilitychange"));
     expect(isWarnedToday(TUE_9AM)).toBe(false);
-    expect(toast.dismiss).not.toHaveBeenCalled();
   });
 });

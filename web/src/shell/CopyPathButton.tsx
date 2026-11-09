@@ -1,3 +1,4 @@
+import { toast } from "@/lib/notifications";
 // Copy-path button for workspace file rows and the files header.
 //
 // Two presentations from one component: rows pass `revealOnHover` so the icon
@@ -31,8 +32,7 @@ interface CopyPathButtonProps {
  *
  * Feedback is transient and in place: the icon becomes a check for two
  * seconds on success, or turns red with a "Copy failed" tooltip for three.
- * No toast — the button is often one of many in a list, so the confirmation
- * belongs on the row the user clicked rather than in a global surface.
+ * Operation outcomes are also retained in the notification center.
  *
  * :param path: The path to copy.
  * :param label: Tooltip text at rest.
@@ -66,8 +66,12 @@ export function CopyPathButton({
       await copyText(path);
       setCopyError(false);
       setCopied(true);
+      toast.success("Path copied", { description: path });
       timerRef.current = window.setTimeout(() => setCopied(false), 2000);
-    } catch {
+    } catch (error) {
+      toast.error("Could not copy path", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setCopied(false);
       setCopyError(true);
       timerRef.current = window.setTimeout(() => setCopyError(false), 3000);

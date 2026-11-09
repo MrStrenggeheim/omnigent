@@ -1,4 +1,5 @@
-import { AlertTriangleIcon, Loader2Icon, WifiOffIcon, XIcon } from "lucide-react";
+import { useNotificationNotice } from "@/hooks/useNotificationNotice";
+import { Loader2Icon, WifiOffIcon } from "lucide-react";
 import { ConversationEmptyState } from "@/components/ai-elements/conversation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { ErrorBanner } from "@/components/blocks/StatusBlocks";
@@ -22,35 +23,20 @@ export function SandboxActionBanner() {
   );
   const dismissed = useChatStore((s) => s.sandboxActionDismissed);
   const dismiss = useChatStore((s) => s.dismissSandboxAction);
-  if (asking === null || dismissed === asking) return null;
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className={cn(
-        "pointer-events-auto flex max-w-2xl items-center gap-2.5 rounded-xl",
-        "px-3.5 py-2 text-ui shadow-lg",
-        "border border-amber-300 bg-amber-100 text-amber-900",
-        "dark:border-amber-700/60 dark:bg-amber-950 dark:text-amber-100",
-        "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-      )}
-    >
-      <AlertTriangleIcon className="size-4 shrink-0" aria-hidden="true" />
-      <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">{asking}</p>
-      <button
-        type="button"
-        onClick={() => dismiss(asking)}
-        aria-label="Dismiss"
-        className={cn(
-          "-mr-1 shrink-0 rounded p-0.5 text-amber-900/60",
-          "hover:bg-amber-200 hover:text-amber-900",
-          "dark:text-amber-100/60 dark:hover:bg-amber-900 dark:hover:text-amber-100",
-        )}
-      >
-        <XIcon className="size-4" aria-hidden="true" />
-      </button>
-    </div>
+  const conversationId = useChatStore((s) => s.conversationId);
+  useNotificationNotice(
+    `sandbox-action:${conversationId}`,
+    asking !== null && dismissed !== asking
+      ? {
+          title: "Sandbox needs attention",
+          description: asking,
+          type: "warning",
+          cancel: { label: "Dismiss warning", onClick: () => dismiss(asking) },
+        }
+      : null,
+    asking ?? "",
   );
+  return null;
 }
 
 /**

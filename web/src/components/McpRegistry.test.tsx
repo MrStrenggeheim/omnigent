@@ -1,3 +1,5 @@
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "@/lib/notifications";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { McpRegistryConnections, McpRegistryPicker } from "./McpRegistry";
@@ -19,6 +21,8 @@ const service = {
 };
 
 beforeEach(() => {
+  toast.dismiss();
+  render(<Toaster />);
   vi.resetAllMocks();
 });
 

@@ -1,6 +1,7 @@
+import { Toaster } from "@/components/ui/sonner";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ChatStoreSeed } from "@/storybook/StoryProviders";
-import { FloatingBannerStack, StreamBudgetBanner } from "./StreamBudgetBanner";
+import { StreamBudgetBanner } from "./StreamBudgetBanner";
 
 const meta = {
   title: "Components/Presence/StreamBudgetBanner",
@@ -9,9 +10,8 @@ const meta = {
   decorators: [
     (Story) => (
       <div className="relative h-48 w-[720px] overflow-hidden rounded-xl border bg-background">
-        <FloatingBannerStack>
-          <Story />
-        </FloatingBannerStack>
+        <Story />
+        <Toaster />
       </div>
     ),
   ],

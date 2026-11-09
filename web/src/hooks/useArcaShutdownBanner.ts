@@ -1,5 +1,4 @@
 import { useEffect, useReducer } from "react";
-import { toast } from "@/lib/notifications";
 import { useHosts } from "@/hooks/useHosts";
 import { useNowSelector } from "@/hooks/useNow";
 import { isArcaHost, readArcaHostId } from "@/lib/arcaHost";
@@ -22,7 +21,6 @@ export function useMarkArcaBannerWhenVisible(day: string) {
       const now = new Date();
       if (dateKey(now) !== day || !isWarningWindow(now)) return;
       markWarnedToday(now);
-      toast.dismiss(`arca-shutdown:${day}`);
     };
     markIfVisible();
     document.addEventListener("visibilitychange", markIfVisible);

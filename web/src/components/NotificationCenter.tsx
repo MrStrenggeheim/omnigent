@@ -248,22 +248,19 @@ export function NotificationToasts(_props: ToasterProps) {
     .filter((entry) => entry.dismissible !== false && entry.visible)
     .slice(-3)
     .reverse();
-  if (centerOpen || (!required.length && !ordinary.length)) return null;
   return (
     <aside
       aria-label="Notifications"
-      className="fixed right-4 z-[70] flex max-h-[calc(var(--omnigent-viewport-height,100dvh)-5rem)] flex-col gap-2 overflow-y-auto overscroll-contain p-px"
+      aria-live="polite"
+      className="pointer-events-auto fixed right-4 z-[70] flex max-h-[calc(var(--omnigent-viewport-height,100dvh)-5rem)] flex-col gap-2 overflow-y-auto overscroll-contain p-px"
       style={{
         ...style,
+        display: centerOpen || (!required.length && !ordinary.length) ? "none" : undefined,
         bottom: `calc(${bottom} + max(0px, 100lvh - var(--omnigent-viewport-height, 100lvh)))`,
       }}
     >
-      {required.map((entry) => (
-        <NotificationCard key={entry.id} entry={entry} />
-      ))}
-      {ordinary.map((entry) => (
-        <NotificationCard key={entry.id} entry={entry} />
-      ))}
+      {!centerOpen && required.map((entry) => <NotificationCard key={entry.id} entry={entry} />)}
+      {!centerOpen && ordinary.map((entry) => <NotificationCard key={entry.id} entry={entry} />)}
     </aside>
   );
 }

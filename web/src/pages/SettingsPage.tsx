@@ -1,3 +1,4 @@
+import { toast } from "@/lib/notifications";
 import { DefaultModelSettings } from "./settings/DefaultModelSettings";
 /**
  * Settings page (``/settings``).
@@ -1337,7 +1338,6 @@ function IntegrationsSection() {
 function GithubIntegrationControl() {
   const [status, setStatus] = useState<GithubConnectionStatus | null | "loading">("loading");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<"connected" | "error" | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -1354,7 +1354,8 @@ function GithubIntegrationControl() {
     const params = new URLSearchParams(window.location.search);
     const outcome = params.get("github");
     if (outcome === "connected" || outcome === "error") {
-      setNotice(outcome);
+      if (outcome === "connected") toast.success("GitHub account connected.");
+      else toast.error("Couldn't connect your GitHub account. Please try again.");
       params.delete("github");
       const qs = params.toString();
       window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
@@ -1382,23 +1383,6 @@ function GithubIntegrationControl() {
 
   return (
     <div className="flex flex-col gap-4">
-      {notice === "connected" && (
-        <div
-          role="status"
-          className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm"
-        >
-          GitHub account connected.
-        </div>
-      )}
-      {notice === "error" && (
-        <div
-          role="alert"
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          Couldn't connect your GitHub account. Please try again.
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <SettingsLabel
           label="GitHub"
@@ -1532,7 +1516,6 @@ function DeleteWorktreesOnArchiveControl() {
 function DatabricksIntegrationControl() {
   const [status, setStatus] = useState<DatabricksConnectionStatus | null | "loading">("loading");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<"connected" | "error" | null>(null);
   const [workspace, setWorkspace] = useState("");
 
   const refresh = useCallback(async () => {
@@ -1548,7 +1531,8 @@ function DatabricksIntegrationControl() {
     const params = new URLSearchParams(window.location.search);
     const outcome = params.get("databricks");
     if (outcome === "connected" || outcome === "error") {
-      setNotice(outcome);
+      if (outcome === "connected") toast.success("Databricks workspace connected.");
+      else toast.error("Couldn't connect your Databricks workspace. Please try again.");
       params.delete("databricks");
       const qs = params.toString();
       window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
@@ -1580,23 +1564,6 @@ function DatabricksIntegrationControl() {
 
   return (
     <div className="flex flex-col gap-4">
-      {notice === "connected" && (
-        <div
-          role="status"
-          className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm"
-        >
-          Databricks workspace connected.
-        </div>
-      )}
-      {notice === "error" && (
-        <div
-          role="alert"
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          Couldn't connect your Databricks workspace. Please try again.
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <SettingsLabel
           label="Databricks"

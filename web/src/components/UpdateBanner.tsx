@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangleIcon, DownloadIcon, RotateCcwIcon, XIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { type UpdateStatus, updateBridge } from "@/lib/nativeBridge";
-import { cn } from "@/lib/utils";
+import { NotificationCard } from "./NotificationCard";
+import { useNotificationNotice } from "@/hooks/useNotificationNotice";
+import {
+  getNotificationSnapshot,
+  subscribeNotifications,
+  type NotifyInput,
+} from "@/lib/notifications";
 
 function statusVersion(status: UpdateStatus | null): string | null {
   return status?.info?.version ?? null;
@@ -14,22 +17,12 @@ function formatPercent(percent: number | undefined): number {
   return Math.max(0, Math.min(100, Math.round(percent)));
 }
 
-/**
- * Desktop update toast.
- *
- * `variant` controls only the outer chrome so the SAME component serves two
- * hosts: `floating` (default) pins it bottom-right for the in-page web build;
- * `bare` drops the fixed positioning so the Electron shell can mount it inside
- * its own corner overlay window (which owns position/size). See
- * web/src/update-overlay.tsx + the shell's update overlay window.
- */
+/** Publish desktop updates; the native overlay can render the same card directly. */
 export function UpdateBanner({ variant = "floating" }: { variant?: "floating" | "bare" } = {}) {
   const bridge = updateBridge();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [skippedVersion, setSkippedVersion] = useState<string | null | "loading">("loading");
   const [autoInstall, setAutoInstall] = useState(true);
-  const [hiddenVersion, setHiddenVersion] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<"download" | "install" | "skip" | null>(null);
 
   useEffect(() => {
     if (!bridge) return undefined;
@@ -69,10 +62,7 @@ export function UpdateBanner({ variant = "floating" }: { variant?: "floating" | 
   }, [bridge]);
 
   const version = statusVersion(status);
-  const hidden =
-    skippedVersion === "loading" ||
-    (version !== null && (version === skippedVersion || version === hiddenVersion)) ||
-    (status?.state === "error-security" && hiddenVersion === "error-security");
+  const hidden = skippedVersion === "loading" || (version !== null && version === skippedVersion);
   const visibleStatus = useMemo(() => {
     if (!status || hidden) return null;
     if (status.state === "idle" || status.state === "checking" || status.state === "none") {
@@ -82,186 +72,98 @@ export function UpdateBanner({ variant = "floating" }: { variant?: "floating" | 
   }, [hidden, status]);
 
   const onDownload = useCallback(async () => {
-    if (!bridge) return;
-    setBusyAction("download");
-    try {
-      await bridge.download();
-    } finally {
-      setBusyAction(null);
-    }
+    await bridge?.download();
   }, [bridge]);
-
   const onInstall = useCallback(async () => {
-    if (!bridge) return;
-    setBusyAction("install");
-    try {
-      await bridge.installNow();
-    } finally {
-      setBusyAction(null);
-    }
+    await bridge?.installNow();
   }, [bridge]);
-
   const onSkip = useCallback(async () => {
     if (!bridge || !version) return;
-    setBusyAction("skip");
-    try {
-      const next = await bridge.setConfig({ skippedVersion: version });
-      setSkippedVersion(next.skippedVersion);
-    } finally {
-      setBusyAction(null);
-    }
+    const next = await bridge.setConfig({ skippedVersion: version });
+    setSkippedVersion(next.skippedVersion);
   }, [bridge, version]);
-
-  if (!bridge || !visibleStatus) return null;
-
-  const releaseNotes = visibleStatus.info?.releaseNotes;
   const progress =
-    visibleStatus.state === "downloading" ? formatPercent(visibleStatus.progress?.percent) : 0;
-  const isError = visibleStatus.state === "error-security";
-  const Icon = isError
-    ? AlertTriangleIcon
-    : visibleStatus.state === "downloaded"
-      ? RotateCcwIcon
-      : DownloadIcon;
+    visibleStatus?.state === "downloading"
+      ? formatPercent(visibleStatus.progress?.percent)
+      : undefined;
+  const isError = visibleStatus?.state === "error-security";
+  const input: NotifyInput | null = visibleStatus
+    ? {
+        title: isError
+          ? "Update check failed"
+          : visibleStatus.state === "downloading"
+            ? `Downloading Omnigent Desktop update… ${progress}%`
+            : visibleStatus.state === "downloaded"
+              ? `Omnigent Desktop ${version ?? "update"} is ready to install`
+              : `Omnigent Desktop ${version ?? "update"} is available`,
+        type: isError ? "error" : "info",
+        description: (
+          <>
+            {isError && visibleStatus.lastError && <p>{visibleStatus.lastError}</p>}
+            {visibleStatus.state !== "downloading" && !isError && (
+              <>
+                {visibleStatus.currentVersion && (
+                  <p>Current version: {visibleStatus.currentVersion}.</p>
+                )}
+                <p>Updating won’t interrupt existing sessions.</p>
+                {autoInstall && visibleStatus.state === "downloaded" && (
+                  <p>Installs automatically on next quit.</p>
+                )}
+              </>
+            )}
+            {visibleStatus.info?.releaseNotes && visibleStatus.state !== "downloading" && (
+              <details>
+                <summary className="cursor-pointer">Release notes</summary>
+                <div className="max-h-32 overflow-auto whitespace-pre-wrap">
+                  {visibleStatus.info.releaseNotes}
+                </div>
+              </details>
+            )}
+          </>
+        ),
+        progress:
+          progress !== undefined
+            ? { value: progress, active: true, label: "Update download progress" }
+            : undefined,
+        action:
+          visibleStatus.state === "available"
+            ? {
+                label: "Update now",
+                onClick: async (event) => {
+                  event.preventDefault();
+                  await onDownload();
+                },
+              }
+            : visibleStatus.state === "downloaded"
+              ? {
+                  label: "Restart to update",
+                  onClick: async (event) => {
+                    event.preventDefault();
+                    await onInstall();
+                  },
+                }
+              : undefined,
+        cancel:
+          visibleStatus.state === "available"
+            ? { label: "Skip this version", onClick: onSkip }
+            : undefined,
+      }
+    : null;
+  useNotificationNotice("desktop-update", input, visibleStatus?.state ?? "");
+  return variant === "bare" ? <DesktopUpdateCard /> : null;
+}
 
-  return (
-    <div
-      role={isError ? "status" : "region"}
-      aria-label="Desktop update"
-      className={cn(
-        "rounded-xl border border-border bg-background p-3.5 text-ui shadow-lg",
-        // `floating`: pin bottom-right for the in-page web build. `bare`: fill
-        // the shell's overlay window, which supplies position + size itself.
-        variant === "floating"
-          ? "fixed right-4 bottom-4 z-50 w-80 max-w-[calc(100vw-2rem)] animate-in fade-in-0 slide-in-from-bottom-2 duration-200"
-          : "w-full",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <div
-          className={cn(
-            "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full",
-            isError
-              ? "bg-amber-500/10 text-amber-600 dark:text-amber-500"
-              : "bg-primary/10 text-primary",
-          )}
-        >
-          <Icon className="size-4" aria-hidden="true" />
-        </div>
-
-        <div className="min-w-0 flex-1">
-          {visibleStatus.state === "available" && (
-            <>
-              <p className="font-medium text-foreground">
-                Omnigent Desktop {visibleStatus.info?.version ?? "update"} is available
-              </p>
-              {visibleStatus.currentVersion && (
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Current version: {visibleStatus.currentVersion}.
-                </p>
-              )}
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Updating won’t interrupt existing sessions.
-              </p>
-            </>
-          )}
-          {visibleStatus.state === "downloading" && (
-            <>
-              <p className="font-medium text-foreground">
-                Downloading Omnigent Desktop update… {progress}%
-              </p>
-              <Progress
-                value={progress}
-                className="mt-2 h-1.5"
-                aria-label="Update download progress"
-              />
-            </>
-          )}
-          {visibleStatus.state === "downloaded" && (
-            <>
-              <p className="font-medium text-foreground">
-                Omnigent Desktop {visibleStatus.info?.version ?? "update"} is ready to install
-              </p>
-              {visibleStatus.currentVersion && (
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Current version: {visibleStatus.currentVersion}.
-                </p>
-              )}
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Updating won’t interrupt existing sessions.
-              </p>
-              {autoInstall && (
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Installs automatically on next quit.
-                </p>
-              )}
-            </>
-          )}
-          {isError && (
-            <>
-              <p className="font-medium text-foreground">Update check failed</p>
-              {visibleStatus.lastError && (
-                <p className="mt-0.5 line-clamp-3 text-sm text-muted-foreground">
-                  {visibleStatus.lastError}
-                </p>
-              )}
-            </>
-          )}
-
-          {releaseNotes && visibleStatus.state !== "downloading" && (
-            <details className="mt-1.5 text-sm text-muted-foreground">
-              <summary className="cursor-pointer select-none text-foreground hover:underline">
-                Release notes
-              </summary>
-              <div className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap">{releaseNotes}</div>
-            </details>
-          )}
-
-          {visibleStatus.state === "available" && (
-            <div className="mt-3 flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={() => void onDownload()}
-                loading={busyAction === "download"}
-              >
-                Update now
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void onSkip()}
-                loading={busyAction === "skip"}
-                disabled={!version}
-              >
-                Skip this version
-              </Button>
-            </div>
-          )}
-
-          {visibleStatus.state === "downloaded" && (
-            <div className="mt-3 flex items-center gap-2">
-              <Button size="sm" onClick={() => void onInstall()} loading={busyAction === "install"}>
-                Restart to update
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {(isError ||
-          visibleStatus.state === "available" ||
-          visibleStatus.state === "downloaded") && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Dismiss"
-            className="-mt-1 -mr-1 shrink-0"
-            onClick={() => setHiddenVersion(isError ? "error-security" : (version ?? null))}
-          >
-            <XIcon className="size-3.5" />
-          </Button>
-        )}
-      </div>
-    </div>
+/** The native overlay has its own renderer, but uses the shared notification card. */
+function DesktopUpdateCard() {
+  const { entries } = useSyncExternalStore(
+    subscribeNotifications,
+    getNotificationSnapshot,
+    getNotificationSnapshot,
   );
+  const entry = entries.find((item) => item.id === "desktop-update" && item.visible);
+  return entry ? (
+    <div aria-label="Desktop update">
+      <NotificationCard entry={entry} />
+    </div>
+  ) : null;
 }

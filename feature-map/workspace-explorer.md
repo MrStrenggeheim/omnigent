@@ -33,6 +33,7 @@ Git supplies change status by default; explicit captured comparisons retain the 
 - Rows: right-click a file/folder for its actions; use the row action menu on touch devices.
 - Keyboard: arrows and Home/End move through visible rows; F2 renames; Delete moves selections to trash; Ctrl/Cmd+C, X and V copy, cut and paste.
 - Drag-and-drop: move selected entries onto a folder, hold the copy modifier to copy, or drop files/directories from the local computer to upload them.
+- The shared dashed drop outline keeps folder targets visible, highlights a hovered folder and names the move/copy/upload destination; dropping onto a file uses its containing folder.
 - Drop feedback uses the same dashed overlay as chat; the hovered destination folder is highlighted beneath it.
 - Mobile web and native shell: Workspace → Files or Changes opens the shared Explorer in a drawer.
 - Notifications in the conversation header, Files/Changes drawer or mobile full-screen file viewer opens shared transfer activity after its popup collapses.
@@ -60,6 +61,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Open tab reconciliation after folder moves/deletions: `web/src/lib/workspaceFileEvents.test.ts`.
 - Modified-click range selection, Ctrl toggle and folder expansion suppression across preview creation: `tests/e2e_ui/files/test_workbench_ownership.py::test_explorer_modified_clicks_select_ranges_without_opening_folders`.
 - Keyboard rename, bulk ZIP selection, drag auto-expansion/move, external expanded-folder updates: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_keyboard_bulk_drag_reveal_and_external_refresh`.
+- Collapsed/expanded folder moves, modifier-copy, nested external upload and retained failure notifications, both in Files and beside an open preview: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_drop_into_collapsed_and_expanded_folders`.
 - For keyboard, bulk selection and drag-and-drop, create two folders and three files; select adjacent and nonadjacent rows, copy/paste into another folder, rename using F2, and drop onto a collapsed folder to check auto-expansion.
 - Upload a directory containing a nested binary file and an empty folder; verify both structure and downloaded bytes, then cancel an in-progress transfer and confirm the unfinished destination was not installed.
 - Open a file, return to Files and confirm its ancestors remain expanded; press Collapse all folders and confirm expansion clears.

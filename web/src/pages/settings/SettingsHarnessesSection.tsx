@@ -1,7 +1,7 @@
+import { toast } from "@/lib/notifications";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  CheckCircle2Icon,
   ChevronDownIcon,
   KeyRoundIcon,
   Plus,
@@ -108,11 +108,6 @@ export const SettingsHarnessesSection = () => {
     if (requestedHostId !== null) setSelectedHostId(requestedHostId);
   }, [requestedHostId]);
   const [credentialKinds, setCredentialKinds] = useState<Record<string, HarnessCredentialKind>>({});
-  const [readyNotice, setReadyNotice] = useState<{
-    harness: string;
-    hostId: string;
-    version?: string;
-  } | null>(null);
 
   // Gate the "Set up" affordance on the install feature, matching New Chat: with
   // it off the setup dialog has no runnable install step, so we show status
@@ -169,13 +164,6 @@ export const SettingsHarnessesSection = () => {
             selectedHost
               ? credentialKinds[hostHarnessKey(selectedHost.host_id, detail.harness)]
               : undefined
-          }
-          readyNotice={
-            readyNotice !== null &&
-            readyNotice.hostId === selectedHost?.host_id &&
-            readyNotice.harness === detail.harness
-              ? readyNotice
-              : null
           }
           onFix={(mode) => selectedHost && openFix(detail, selectedHost, mode)}
         />
@@ -270,7 +258,9 @@ export const SettingsHarnessesSection = () => {
                 [hostHarnessKey(fixedHost.host_id, entry.harness)]: credentialKind,
               }));
             }
-            setReadyNotice({ harness: entry.harness, hostId: fixedHost.host_id, version });
+            toast.success(
+              `${entry.name}${version ? ` ${version}` : ""} is ready on ${fixedHost.name}. Checked just now.`,
+            );
           }}
         />
       )}
@@ -571,7 +561,6 @@ function HarnessDetail({
   canSetup,
   installable,
   credentialKind,
-  readyNotice,
   onFix,
 }: {
   entry: HarnessEntry;
@@ -579,7 +568,6 @@ function HarnessDetail({
   canSetup: boolean;
   installable: boolean;
   credentialKind?: HarnessCredentialKind;
-  readyNotice: { harness: string; hostId: string; version?: string } | null;
   onFix: (mode: HarnessFixMode) => void;
 }) {
   const status = harnessStatus(entry.harness, host);
@@ -635,7 +623,6 @@ function HarnessDetail({
   );
   const settings = host ? (
     <div className="flex flex-col gap-6">
-      {readyNotice && <ReadyNotice entry={entry} host={host} version={readyNotice.version} />}
       {status.needsSetup && !credentialProblem && (
         <HarnessWarning
           entry={entry}
@@ -674,7 +661,6 @@ function HarnessDetail({
             <p className="text-ui text-muted-foreground">
               MCP servers, skills, and plugins aren't listed for {entry.name} yet.
             </p>
-            {readyNotice && <ReadyNotice entry={entry} host={host} version={readyNotice.version} />}
             {credentialCard}
           </>
         ) : canFix ? (
@@ -762,26 +748,6 @@ function HarnessWarning({
           {action}
         </Button>
       )}
-    </div>
-  );
-}
-
-function ReadyNotice({
-  entry,
-  host,
-  version,
-}: {
-  entry: HarnessEntry;
-  host: Host;
-  version?: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-ui text-green-700 dark:text-green-300">
-      <CheckCircle2Icon className="size-4 shrink-0" aria-hidden />
-      <p>
-        {entry.name}
-        {version ? ` ${version}` : ""} is ready on {host.name}. Checked just now.
-      </p>
     </div>
   );
 }

@@ -15,6 +15,8 @@ Notifications combine brief popups, retained history, required prompts and file-
 - `clear`: remove individual settled entries or clear completed notifications without discarding active operations or required prompts.
 - `required-prompts`: keep prompts such as terminal clipboard consent available until their owning flow resolves or removes them.
 - `layout`: use the same card presentation and width for popups and history, adapt to the active layout and expose only one open center when several headers have bells.
+- `shared-notices`: Explorer failures, connection results, harness setup results, stream-capacity warnings, sandbox attention, certificate refresh and desktop updates use the shared notification store and cards.
+- `scope-lifetime`: chat/host notices retain history when their view closes, with obsolete controls and active progress retired; hiding a popup while its scope remains active preserves valid actions.
 
 ## How to get to it (user POV)
 
@@ -43,6 +45,8 @@ The entries below map current scenarios to user surfaces; a test's presence is c
 | Session archive from row, bulk selection or header menu | Use the entry-point recipes in [Sessions](sessions.md); `web/src/shell/archiveUndoToast.test.tsx` covers the brief Undo deadline and later Restore. | Undo restores the archived batch during its brief window; after collapse, history offers Restore for that captured batch without promising its former runner is still alive. |
 | Unpin popup and retained Undo | `tests/e2e_ui/sessions/test_sidebar_pin_unpin.py::test_undo_unpin_restores_pinned_slot` covers immediate popup Undo; `web/src/shell/unpinUndoToast.test.tsx` covers the adapter. | Undo returns the session to its previous Pinned position; manually repeat from notification history to check the retained action. |
 | Shared popup/history controls and multiple bells | `web/src/components/ui/toast.test.tsx` covers hide/history, retained actions, hover pause, required prompts, the visible-popup limit, shared width, clearing and one open center across two bells. | Hiding keeps history, clearing preserves active work, and opening either bell yields one center; these component checks do not prove every header's browser route. |
+| Explorer error retention beside Files and open previews | `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_drop_into_collapsed_and_expanded_folders` | A rejected move collapses from its popup and remains in bell history. |
+| View-owned warning lifecycle | `web/src/hooks/useNotificationNotice.test.tsx`, `web/src/components/DbcertBanner.test.tsx`, `web/src/pages/ChatIndicators.test.tsx` | StrictMode preserves notices, progress does not restart expiry, and scope changes retire stale actions. |
 | Required terminal clipboard prompt and asynchronous copy failure | `web/src/components/blocks/TerminalView.test.tsx` and `web/src/components/ArcaShutdownToast.test.tsx`; manually trigger consent and a denied clipboard copy in a supported browser. | The required decision remains reachable; an unsuccessful copy does not remove the notice that lets the user retry. |
 
 Model coverage in `web/src/lib/notifications.test.ts` verifies expiry, overlapping pointer/focus pauses, retained actions, failed async actions, progress updates without renewed expiry, completion during cancellation, required-prompt retention, history limits and callbacks that keep their own popup open.
@@ -57,6 +61,8 @@ No physical iOS, Android or Electron wrapper verification is established by thes
 ## Gotchas
 
 - Notification history lives in memory for the current app run; it survives in-app navigation, not a browser reload, and is not a synchronized notification inbox.
+- Form validation, loading/empty states and recorded transcript errors remain with their owning content; they are not separate floating notification systems.
+- The desktop updater's native overlay is a separate renderer that uses the shared notification card; its history is not synchronized with the main app renderer.
 - Browser or operating-system notifications about idle agents and the session unread dot are separate features from the in-app Notifications bell.
 - Loading notices, required prompts and notices explicitly configured to stay open do not use the ordinary expiry; unpin and session archive have shorter action-specific durations.
 - Hovering or focusing an ordinary popup pauses its countdown, but session archive's live Undo has an absolute five-second cap and then becomes Restore even while hovered.

@@ -1,3 +1,5 @@
+import { toast } from "@/lib/notifications";
+import { Toaster } from "@/components/ui/sonner";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SandboxStatus } from "@/lib/types";
@@ -8,6 +10,8 @@ import { McpStartupIndicator, SandboxActionBanner } from "./ChatIndicators";
 const conversationId = "indicator-test-session";
 
 beforeEach(() => {
+  toast.dismiss();
+  render(<Toaster />);
   useChatStore.setState({
     conversationId,
     mcpStartup: null,
@@ -17,6 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  toast.dismiss();
   useChatStore.setState({
     conversationId: null,
     mcpStartup: null,
@@ -128,6 +133,7 @@ describe("SandboxActionBanner", () => {
 
   afterEach(() => {
     cleanup();
+    toast.dismiss();
     conversationRegistry.clear();
     bindConversationForTest(null);
   });
@@ -162,12 +168,12 @@ describe("SandboxActionBanner", () => {
     showSession("conv_a");
     report("conv_a", "action_required");
     render(<SandboxActionBanner />);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     expect(screen.queryByRole("status")).toBeNull();
     showSession("conv_b");
     report("conv_b", "action_required");
     expect(screen.getByRole("status")).toHaveTextContent(DETAILS);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     showSession("conv_a");
     expect(screen.queryByRole("status")).toBeNull();
   });
@@ -176,7 +182,7 @@ describe("SandboxActionBanner", () => {
     showSession("conv_a");
     report("conv_a", "action_required");
     render(<SandboxActionBanner />);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     // A rebind seeds the store from the session snapshot, a new object with the same warning.
     showSession("conv_a", { stage: "action_required", error: null, details: DETAILS });
     expect(screen.queryByRole("status")).toBeNull();
@@ -186,9 +192,10 @@ describe("SandboxActionBanner", () => {
     showSession("conv_a");
     report("conv_a", "action_required");
     render(<SandboxActionBanner />);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     // The transcript unmounts while the terminal is open, and mounts again after.
     cleanup();
+    toast.dismiss();
     render(<SandboxActionBanner />);
     expect(screen.queryByRole("status")).toBeNull();
   });
@@ -197,7 +204,7 @@ describe("SandboxActionBanner", () => {
     showSession("conv_a");
     report("conv_a", "action_required");
     render(<SandboxActionBanner />);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     showSession("conv_b");
     report("conv_a", "provisioning");
     report("conv_a", "action_required");
@@ -209,7 +216,7 @@ describe("SandboxActionBanner", () => {
     showSession("conv_a");
     report("conv_a", "action_required");
     render(<SandboxActionBanner />);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     report("conv_a", "provisioning");
     report("conv_a", "action_required");
     expect(screen.getByRole("status")).toHaveTextContent(DETAILS);

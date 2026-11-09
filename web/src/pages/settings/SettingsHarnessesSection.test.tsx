@@ -1,3 +1,4 @@
+import { getNotificationSnapshot } from "@/lib/notifications";
 // Integration tests for Settings → Harnesses: real per-host readiness
 // derivation (harnessReadinessOnHost runs unmocked) driving the card status,
 // Set-up affordance, Installed filter, and the details page. The host query, the
@@ -653,7 +654,11 @@ describe("Harness details", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reconfigure" }));
     fireEvent.click(screen.getByRole("button", { name: "Complete fix" }));
 
-    expect(screen.getByText("Codex is ready on my-laptop. Checked just now.")).toBeTruthy();
+    expect(
+      getNotificationSnapshot().entries.some(
+        (entry) => entry.title === "Codex is ready on my-laptop. Checked just now.",
+      ),
+    ).toBe(true);
     expect(screen.getByText("· Isaac")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Reconfigure" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reconfigure credential" })).toBeNull();

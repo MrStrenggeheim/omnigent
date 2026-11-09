@@ -1,3 +1,4 @@
+import { toast } from "@/lib/notifications";
 // Hover-reveal download button for workspace file rows.
 //
 // Designed to be placed inside a parent element that carries the Tailwind
@@ -60,7 +61,10 @@ export function FileDownloadButton({
     try {
       if (onDownload) await onDownload();
       else await downloadWorkspaceFile(conversationId, path);
-    } catch {
+    } catch (error) {
+      toast.error("Download failed", {
+        description: `${path}: ${error instanceof Error ? error.message : String(error)}`,
+      });
       setDownloadError(true);
       window.clearTimeout(errorTimerRef.current);
       errorTimerRef.current = window.setTimeout(() => setDownloadError(false), 3000);

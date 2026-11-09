@@ -330,7 +330,7 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         expect(panel.get_by_text("2 selected", exact=True)).to_be_visible()
         panel.get_by_role("button", name="More file actions", exact=True).click()
         with page.expect_download(timeout=30_000) as pending:
-            page.get_by_role("menuitem", name="Download as ZIP", exact=True).click()
+            page.get_by_role("menuitem", name="Download selection as ZIP", exact=True).click()
         archive = tmp_path / "selection.zip"
         pending.value.save_as(archive)
         with zipfile.ZipFile(archive) as downloaded:
@@ -360,10 +360,93 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         panel.get_by_role("tab", name="Files", exact=True).click()
         _folder_action(page, panel, "Collapse all folders")
         expect(_entry(panel, "target/b.txt")).to_have_count(0)
-        panel.get_by_role("button", name="Reveal active file", exact=True).click()
+        _entry(panel, "target").locator("button[aria-expanded]").click()
         expect(_entry(panel, "target/b.txt")).to_be_visible(timeout=15_000)
         _seed_file(base_url, session_id, "target/external.txt", "Changed outside the Explorer.\n")
         expect(_entry(panel, "target/external.txt")).to_be_visible(timeout=20_000)
+    finally:
+        _cleanup_session_workdir(session_id)
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=["files", "preview"])
+def test_explorer_drop_into_collapsed_and_expanded_folders(
+    page: Page, seeded_session: tuple[str, str], preview: bool, request: pytest.FixtureRequest
+) -> None:
+    base_url, session_id = seeded_session
+    for path in ("source.txt", "preview.txt", "target/inner/kept.txt", "other/kept.txt"):
+        _seed_file(base_url, session_id, path, f"Content of {path}\n")
+    try:
+        page.set_viewport_size({"width": 1440, "height": 1000})
+        page.add_init_script("localStorage.setItem('omnigent:file-explorer-visible', 'true')")
+        page.goto(f"{base_url}/c/{session_id}?view=explore")
+        panel = page.get_by_role("complementary", name="Workspace")
+        expect(_entry(panel, "source.txt")).to_be_visible(timeout=30_000)
+        if preview:
+            _entry(panel, "preview.txt").locator("button").first.click()
+            expect(page.get_by_test_id("file-viewer")).to_be_visible()
+        _folder_action(page, panel, "Collapse all folders")
+        source = _entry(panel, "source.txt")
+        target = _entry(panel, "target")
+        source.hover()
+        page.mouse.down()
+        target.hover()
+        target.hover()
+        expect(target).to_have_attribute("data-drop-target", "true")
+        expect(panel.get_by_test_id("file-drop-overlay")).to_contain_text("Move to target")
+        page.screenshot(
+            path=str(
+                Path(request.config.getoption("output"))
+                / f"folder-drop-{'preview' if preview else 'files'}.png"
+            )
+        )
+        expect(target.locator("button[aria-expanded]")).to_have_attribute(
+            "aria-expanded", "true", timeout=10_000
+        )
+        page.mouse.up()
+        expect(_entry(panel, "source.txt")).to_have_count(0, timeout=20_000)
+        expect(_entry(panel, "target/source.txt")).to_be_visible()
+        _entry(panel, "other").locator("button[aria-expanded]").click()
+        _entry(panel, "target/source.txt").drag_to(_entry(panel, "other"))
+        expect(_entry(panel, "other/source.txt")).to_be_visible(timeout=20_000)
+        assert _read_file(base_url, session_id, "other/source.txt") == "Content of source.txt\n"
+        page.keyboard.down("ControlOrMeta")
+        _entry(panel, "other/source.txt").drag_to(_entry(panel, "target"))
+        page.keyboard.up("ControlOrMeta")
+        expect(_entry(panel, "target/source.txt")).to_be_visible(timeout=20_000)
+        expect(_entry(panel, "other/source.txt")).to_be_visible()
+        transfer = page.evaluate_handle("""() => {
+            const transfer = new DataTransfer();
+            transfer.items.add(new File(
+                ['uploaded into folder'], 'incoming.txt', {type: 'text/plain'}
+            ));
+            return transfer;
+        }""")
+        target_file = _entry(panel, "other/kept.txt")
+        target_file.dispatch_event("dragenter", {"dataTransfer": transfer})
+        target_file.dispatch_event("dragover", {"dataTransfer": transfer})
+        expect(panel.get_by_test_id("file-drop-overlay")).to_contain_text("Upload to other")
+        target_file.dispatch_event("drop", {"dataTransfer": transfer})
+        dialog = page.get_by_role("dialog", name="Upload 1 file(s)")
+        expect(dialog.get_by_role("textbox", name="Destination folder")).to_have_value("other")
+        dialog.get_by_role("button", name="Upload", exact=True).click()
+        expect(_entry(panel, "other/incoming.txt")).to_be_visible(timeout=20_000)
+        assert _read_file(base_url, session_id, "other/incoming.txt") == "uploaded into folder"
+        _entry(panel, "target").drag_to(_entry(panel, "target/inner"))
+        error = page.get_by_role("alert").filter(has_text="File operation failed")
+        expect(error).to_contain_text("inside itself", timeout=20_000)
+        error.get_by_role("button", name="Hide notification", exact=True).click()
+        expect(error).not_to_be_visible()
+        page.get_by_role("button", name="Notifications", exact=True).filter(
+            visible=True
+        ).first.click()
+        history = page.get_by_role("dialog", name="Notifications")
+        expect(history).to_contain_text("inside itself")
+        page.screenshot(
+            path=str(
+                Path(request.config.getoption("output"))
+                / f"file-error-history-{'preview' if preview else 'files'}.png"
+            )
+        )
     finally:
         _cleanup_session_workdir(session_id)
 

@@ -1,11 +1,19 @@
+import { toast } from "@/lib/notifications";
+import { Toaster } from "@/components/ui/sonner";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it } from "vitest";
 
 import { StreamBudgetBanner } from "./StreamBudgetBanner";
 import { useChatStore } from "@/store/chatStore";
 
+beforeEach(() => {
+  toast.dismiss();
+  render(<Toaster />);
+});
+
 afterEach(() => {
   cleanup();
+  toast.dismiss();
   useChatStore.setState({ streamBudgetExceeded: false, streamBudgetBannerDismissed: false });
 });
 
@@ -25,7 +33,7 @@ describe("StreamBudgetBanner", () => {
   it("hides once dismissed and records the dismissal", () => {
     useChatStore.setState({ streamBudgetExceeded: true, streamBudgetBannerDismissed: false });
     render(<StreamBudgetBanner />);
-    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     expect(useChatStore.getState().streamBudgetBannerDismissed).toBe(true);
     expect(screen.queryByText(/a lot of conversations open across your tabs/i)).toBeNull();
   });
