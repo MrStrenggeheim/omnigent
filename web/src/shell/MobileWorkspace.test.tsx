@@ -32,17 +32,23 @@ function WorkspaceHarness({
   initialActive = null,
   onOpen,
   beforeNavigate,
+  covered = false,
+  onReveal,
 }: {
   sessionId?: string;
   tabs?: typeof availableTabs;
   initialActive?: string | null;
   onOpen?: (id: string) => void;
+  covered?: boolean;
+  onReveal?: () => void;
   beforeNavigate?: (navigate: () => void) => void;
 }) {
   const [active, setActive] = useState(initialActive);
   return (
     <MobileWorkspaceProvider
       sessionId={sessionId}
+      covered={covered}
+      onOpen={onReveal}
       active={active}
       overlayToggle={!beforeNavigate || !active}
       onClose={() => setActive(null)}
@@ -310,4 +316,12 @@ describe("MobileWorkspace", () => {
     expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true");
     expect(onOpen).toHaveBeenLastCalledWith("files");
   });
+});
+
+it("reveals a covered workspace without closing its remembered page", () => {
+  const reveal = vi.fn();
+  render(<WorkspaceHarness initialActive="agents" covered onReveal={reveal} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+  expect(reveal).toHaveBeenCalledOnce();
+  expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute("aria-selected", "true");
 });

@@ -17,7 +17,7 @@ import { readPanelSizePreference, writePanelSizePreference } from "@/lib/panelSi
 // search box + "New session" button usable; the viewport-relative ceiling keeps
 // the sidebar from consuming more than half of the desktop layout.
 const DEFAULT_WIDTH_PX = 320;
-const MIN_WIDTH_PX = 220;
+const MIN_WIDTH_PX = 180;
 const MAX_WIDTH_RATIO = 0.5;
 
 function clamp(w: number): number {

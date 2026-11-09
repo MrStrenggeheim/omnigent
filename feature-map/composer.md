@@ -10,6 +10,8 @@ and steers messages while the agent is busy.
 
 ## Sub-features
 
+- `quiet-focus`: typing leaves the composer frame neutral, without an accent border or outline; individual keyboard controls retain their focus indicators.
+
 - `prompt-link`: opening the new-session page with `?prompt=`
   fills an editable draft without starting a session. The consumed prompt is
   removed from the URL while other query parameters and the fragment remain.

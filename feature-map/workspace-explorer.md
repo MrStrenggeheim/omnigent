@@ -36,7 +36,7 @@ Git supplies change status by default, while an optional agent-change overlay ex
 - Notifications in the conversation header, Files/Changes drawer or mobile full-screen file viewer opens shared transfer activity after its popup collapses.
 - Search in folder opens the shared [workspace content search](workspace-content-search.md) with the chosen scope.
 
-- Wide file workspace: maximize or widen the right panel, then open a file to keep Files or Changes visible beside it.
+- Wide file workspace: maximize or widen the right panel, then open a file to keep Files or Changes visible beside it; drag their divider or use its arrow keys to adjust and remember the Explorer width.
 
 ## Driving it with the repro environment
 
@@ -46,7 +46,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Delayed background refresh, shared drop overlay, idle/hover row controls and selection visibility: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_background_refresh_and_shared_hover_controls`.
 - Transfer progress and cancellation remain accessible through the [notification center](notifications.md) across folder, file and session navigation; real browser navigation during upload is covered by `tests/e2e_ui/files/test_explorer_file_operations.py::test_upload_continues_while_viewing_another_file`, including popup, retained-center and phone-center variants.
 - Desktop and mobile toolbar search, replacement preview, apply and undo: `tests/e2e_ui/files/test_explorer_file_operations.py::test_workspace_search_replace_preview_and_undo`.
-- Adaptive Explorer/viewer layout, file navigation and resize continuity: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_wide_workspace_keeps_explorer_beside_stable_file_viewer`; `web/src/shell/AdaptiveFileWorkspace.test.tsx` covers draft and focus preservation.
+- Adaptive Explorer/viewer layout, draggable remembered width, 48px control headers, file navigation and resize continuity: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_wide_workspace_keeps_explorer_beside_stable_file_viewer`; `web/src/shell/AdaptiveFileWorkspace.test.tsx` covers draft and focus preservation.
 - Filename search and directory reveal: `tests/e2e_ui/files/test_file_search.py`.
 - Desktop and phone More file actions → the shared comparison dropdown, nested repository status, retained parent status during delayed discovery, absent historical paths and reload persistence: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_shared_comparison_keeps_files_live_and_gates_mixed_revisions`.
 - The same browser scenario checks Git deletions in Changes on desktop; on a phone, close Files, choose Workspace → Changes and open a deleted text file for review as a separate manual check.

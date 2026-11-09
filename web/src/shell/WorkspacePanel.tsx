@@ -1484,7 +1484,7 @@ function WorkspacePanelImpl({
           aria-label="Workspace tabs"
           tabIndex={-1}
           onKeyDown={handlePermanentTabNumber}
-          className="workspace-tab-strip shrink-0 flex items-center overflow-x-hidden border-b border-border px-2 py-3"
+          className="workspace-control-header workspace-tab-strip flex items-center overflow-x-hidden border-b border-border px-2"
         >
           <WorkspaceTabsScroller
             grow={showOpenTabs}
@@ -1892,7 +1892,7 @@ function WorkspacePanelImpl({
           <div
             role="tablist"
             aria-label="Side chats"
-            className="flex shrink-0 items-center gap-1 overflow-x-auto border-border border-b px-2 py-1.5"
+            className="workspace-control-header flex items-center gap-1 overflow-x-auto border-border border-b px-2"
           >
             {sideChats.tabs.map((childId, index) => {
               const active = sideChats.selected === childId;

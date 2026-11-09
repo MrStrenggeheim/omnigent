@@ -79,7 +79,7 @@ export function MobilePanelDrawer({
         // drawer past the status bar / home indicator (see index.css); without
         // it the header sits under the notch and Close is untappable.
         "mobile-panel-drawer flex flex-col overflow-hidden bg-card transition-[translate] duration-150 ease-out",
-        "fixed inset-0 z-50 md:hidden",
+        "fixed inset-0 z-40 md:hidden",
         open ? "translate-x-0 shadow-lg" : "translate-x-full shadow-none",
       )}
       aria-hidden={!open}

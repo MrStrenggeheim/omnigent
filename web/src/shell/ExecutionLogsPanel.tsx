@@ -141,7 +141,7 @@ export function ExecutionLogsPanel({
       style={{ width: panelWidth }}
       className={cn(
         "flex flex-col overflow-hidden bg-card transition-[translate,border-color,border-width] duration-150 ease-out",
-        "fixed inset-0 z-50",
+        "fixed inset-0 z-40",
         open ? "translate-x-0 shadow-lg" : "translate-x-full shadow-none",
         "md:relative md:inset-auto md:z-auto md:shadow-none md:translate-x-0 md:shrink-0",
         open ? "md:border-border md:border-l" : "md:w-0 md:border-l-0",
@@ -157,7 +157,7 @@ export function ExecutionLogsPanel({
       )}
       {open && <MobileWorkspaceTabs onClose={onClose} />}
       {isDesktop && (
-        <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-3">
+        <header className="workspace-control-header flex items-center justify-between border-border border-b px-3">
           <h2 className="font-medium text-ui">Execution logs</h2>
           <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
             <XIcon className="size-4" />

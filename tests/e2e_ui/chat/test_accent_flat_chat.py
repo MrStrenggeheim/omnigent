@@ -103,6 +103,22 @@ def test_chat_uses_selected_accent_and_flat_surfaces(
             share.evaluate("element => getComputedStyle(element).backgroundColor")
             == styles["primary"]
         )
+    # Typing keeps the composer's neutral frame instead of adding an accent outline.
+    composer = page.locator("[data-composer-card]").last
+    before_frame = composer.evaluate(
+        """element => {
+          const s=getComputedStyle(element);
+          return [s.borderColor,s.outlineStyle,s.outlineWidth];
+        }"""
+    )
+    composer.locator("textarea").fill("Focus should keep a quiet frame")
+    after_frame = composer.evaluate(
+        """element => {
+          const s=getComputedStyle(element);
+          return [s.borderColor,s.outlineStyle,s.outlineWidth];
+        }"""
+    )
+    assert after_frame == before_frame
     output = Path(request.config.getoption("output"))
     page.screenshot(
         path=str(output / f"flat-chat-{'phone-dark' if mobile else 'desktop'}.png"),

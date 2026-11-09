@@ -520,12 +520,6 @@
   background-image: none;
 }
 
-.composer-reference-surface:focus-within {
-  border-color: var(--ring);
-  outline: 2px solid color-mix(in srgb, var(--ring) 20%, transparent);
-  outline-offset: 1px;
-}
-
 /* Use an opaque accent wash so the tray masks stacked content without
  * inheriting a different hue from the palette's muted surfaces. */
 .composer-workspace-surface,
@@ -592,6 +586,13 @@
 
 /* The desktop workspace rail stays mounted through its exit so its content
    can fade and slide as one stable sibling of the session surface. */
+.workspace-control-header {
+  height: 48px;
+  min-height: 48px;
+  flex-shrink: 0;
+  padding-block: 0;
+}
+
 .workspace-panel-motion {
   min-width: 0;
   overflow: hidden;

@@ -265,6 +265,21 @@ def test_wide_workspace_keeps_explorer_beside_stable_file_viewer(
             explorer.bounding_box()["x"] + explorer.bounding_box()["width"]
             <= viewer.bounding_box()["x"] + 1
         )
+        divider = explorer.get_by_role("separator", name="Resize file explorer")
+        before_width = explorer.bounding_box()["width"]
+        handle = divider.bounding_box()
+        page.mouse.move(handle["x"] + handle["width"] / 2, handle["y"] + 150)
+        page.mouse.down()
+        page.mouse.move(handle["x"] + 100, handle["y"] + 150, steps=8)
+        page.mouse.up()
+        assert explorer.bounding_box()["width"] > before_width + 80
+        expect(viewer).to_have_attribute("data-resize-identity", "same-viewer")
+        headers = panel.locator(".workspace-control-header")
+        for header in headers.all():
+            if header.is_visible():
+                assert header.bounding_box()["height"] == 48
+        divider.press("ArrowLeft")
+        assert explorer.bounding_box()["width"] > before_width + 50
         folder = _entry(explorer, prefix)
         expect(folder).to_be_visible(timeout=15_000)
         if folder.locator("button[aria-expanded]").get_attribute("aria-expanded") != "true":

@@ -125,7 +125,7 @@ export function DiffComparisonControls({
       className={
         compact
           ? "inline-flex min-w-0 shrink-0"
-          : "flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-ui"
+          : "workspace-control-header flex items-center gap-2 border-b border-border px-3 text-ui"
       }
     >
       <DropdownMenu modal={false}>

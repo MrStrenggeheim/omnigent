@@ -195,6 +195,32 @@ def test_mobile_workspace_keeps_chat_actions_separate(
         "aria-selected", "true"
     )
     expect(tabs.get_by_role("tab", name="Shells", exact=True)).to_have_count(0)
+    # Opening the left drawer preserves Workspace underneath; revealing Workspace dismisses it.
+    left.click()
+    conversations = page.get_by_role("complementary", name="Conversations", exact=True)
+    expect(close_left).to_be_visible()
+    expect(page.get_by_test_id("files-panel-drawer")).to_have_attribute("data-state", "open")
+    page.wait_for_function(
+        """element => {
+          const r=element.getBoundingClientRect();
+          return r.x >= 0 && element.contains(
+            document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));
+        }""",
+        arg=conversations.element_handle(),
+    )
+    scrim = page.get_by_test_id("sidebar-scrim")
+    assert scrim.evaluate(
+        """element => {
+          const r=element.getBoundingClientRect();
+          return document.elementFromPoint(r.right-10,r.y+r.height/2)===element;
+        }"""
+    )
+    page.get_by_role("button", name="Open workspace", exact=True).click()
+    expect(close_left).to_have_count(0)
+    expect(page.get_by_test_id("files-panel-drawer")).to_have_attribute("data-state", "open")
+    expect(tabs.get_by_role("tab", name="Files", exact=True)).to_have_attribute(
+        "aria-selected", "true"
+    )
     tabs.get_by_role("tab", name="Changes", exact=True).click()
     expect(
         page.get_by_test_id("files-panel-drawer").get_by_role("tree", name="Changed files")

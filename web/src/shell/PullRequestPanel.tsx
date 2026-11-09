@@ -1162,7 +1162,7 @@ export function PullRequestPanel({ conversationId }: { conversationId: string })
   return (
     <div className="flex h-full min-h-0 flex-col">
       {showTrackingControls ? (
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-2">
+        <div className="workspace-control-header flex items-center gap-2 border-b border-border px-2">
           <PanelTitle copy={copy} showTitle={prs.length === 0} />
           <div className="ml-auto flex min-w-0 flex-1 items-center gap-2">
             {prs.length > 0 && (
@@ -1261,7 +1261,7 @@ export function PullRequestPanel({ conversationId }: { conversationId: string })
           </div>
         </div>
       ) : panelState.kind !== "ready" ? (
-        <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-2">
+        <div className="workspace-control-header flex items-center justify-between gap-2 border-b border-border px-2">
           <PanelTitle copy={copy} showTitle />
           {refreshButton}
         </div>
@@ -1812,7 +1812,7 @@ function PullRequestPanelDetails({
             </p>
           )}
           {files.length > 0 && (
-            <div className="flex w-full shrink-0 items-center justify-between gap-2 border-b border-border px-2 py-1">
+            <div className="workspace-control-header flex w-full items-center justify-between gap-2 border-b border-border px-2">
               <IconButton
                 label={sidebarCollapsed ? "Show file list" : "Hide file list"}
                 onClick={() => setSidebarCollapsed((v) => !v)}

@@ -536,7 +536,7 @@ export function FilesPanel({
         )}
       >
         {/* Shared folder scope and actions for Files and Changes. */}
-        <div className="flex h-11 shrink-0 items-center gap-[2px] px-2">
+        <div className="workspace-control-header flex items-center gap-[2px] px-2">
           {workingDir && workspaceRoot && (
             <BrowseLocationBar
               current={workingDir}

@@ -159,7 +159,7 @@ export function TerminalsPanel({
       style={panelStyle}
       className={cn(
         "flex flex-col overflow-hidden bg-card transition-[translate,border-color,border-width] duration-150 ease-out",
-        "fixed inset-0 z-50",
+        "fixed inset-0 z-40",
         open ? "translate-x-0 shadow-lg" : "translate-x-full shadow-none",
         "md:relative md:inset-auto md:z-auto md:shadow-none md:translate-x-0",
         fluid ? "md:flex-1" : "md:shrink-0",
@@ -178,7 +178,7 @@ export function TerminalsPanel({
 
       {open && <MobileWorkspaceTabs onClose={onClose} />}
       {isDesktop && (
-        <header className="flex shrink-0 items-center justify-between border-border border-b px-4 py-2">
+        <header className="workspace-control-header flex items-center justify-between border-border border-b px-3">
           <h2 className="font-medium text-ui">Shells</h2>
           <div className="flex items-center gap-1">
             {/* Renders only when the agent's spec declares terminals. */}

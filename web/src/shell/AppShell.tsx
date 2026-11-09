@@ -2550,6 +2550,8 @@ function AppShellImpl() {
       sessionId={conversationId}
       tabs={mobileWorkspaceTabs}
       active={mobileWorkspaceActive}
+      covered={isMobileViewport() && (sidebarOpen || sidebarPeek)}
+      onOpen={handleSidebarClose}
       overlayToggle={!fileViewerOpen}
       onClose={() => {
         setSelectedFilePath(null);

@@ -5,6 +5,8 @@ Workspace drawers and the phone's full-screen file viewer share horizontally scr
 
 ## Sub-features
 
+- `overlay-order`: opening the left sidebar preserves Workspace underneath it; revealing Workspace dismisses the left sidebar and restores its selected page.
+
 - `compact-controls`: header icons share a compact 24px visible surface and 16px glyph with separate 44px mobile touch targets.
 - `stable-toggles`: left and right outline-panel controls retain their viewport positions and fill the respective narrow segment while open.
 - `header-split`: separate the workspace panel icon from the chat-actions kebab; workspace navigation remains reachable when no chat actions are available.

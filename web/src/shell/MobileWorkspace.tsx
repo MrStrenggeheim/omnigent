@@ -29,6 +29,7 @@ const WorkspaceContext = createContext<{
   open: () => void;
   close: () => void;
   overlay: boolean;
+  covered: boolean;
   focusTab: { current: boolean };
 } | null>(null);
 
@@ -38,6 +39,8 @@ export function MobileWorkspaceProvider({
   tabs,
   active,
   onClose,
+  onOpen,
+  covered = false,
   overlayToggle = true,
   children,
 }: {
@@ -45,6 +48,9 @@ export function MobileWorkspaceProvider({
   tabs: MobileWorkspaceTab[];
   active: string | null;
   onClose?: () => void;
+  /** Reveal Workspace while dismissing another overlay, retaining the active page. */
+  onOpen?: () => void;
+  covered?: boolean;
   /** FileViewer renders its own control through its unsaved-change guard. */
   overlayToggle?: boolean;
   children: ReactNode;
@@ -60,9 +66,10 @@ export function MobileWorkspaceProvider({
       if (!tab) return;
       remembered.current = { sessionId, tab: id };
       focusTab.current = true;
+      onOpen?.();
       tab.open();
     },
-    [tabs, sessionId],
+    [tabs, sessionId, onOpen],
   );
   const open = useCallback(() => {
     const previous = remembered.current?.sessionId === sessionId ? remembered.current?.tab : null;
@@ -71,8 +78,8 @@ export function MobileWorkspaceProvider({
   }, [sessionId, tabs, select]);
   const close = useCallback(() => onClose?.(), [onClose]);
   const value = useMemo(
-    () => ({ tabs, active, select, open, close, focusTab, overlay: !!onClose }),
-    [tabs, active, select, open, close, onClose],
+    () => ({ tabs, active, select, open, close, focusTab, overlay: !!onClose, covered }),
+    [tabs, active, select, open, close, onClose, covered],
   );
   return (
     <WorkspaceContext.Provider value={value}>
@@ -85,7 +92,7 @@ export function MobileWorkspaceProvider({
 export function MobileWorkspaceButton() {
   const workspace = useContext(WorkspaceContext);
   if (!workspace?.tabs.length) return null;
-  const expanded = workspace.active !== null;
+  const expanded = workspace.active !== null && !workspace.covered;
   return (
     <SidebarToggle
       side="right"
@@ -110,7 +117,7 @@ export function MobileWorkspaceOverlayButton({
   const workspace = useContext(WorkspaceContext);
   const isMobile = useIsMobileViewport();
   if (!isMobile || !workspace?.tabs.length) return null;
-  const expanded = workspace.active !== null;
+  const expanded = workspace.active !== null && !workspace.covered;
   return createPortal(
     <SidebarToggle
       side="right"
@@ -160,7 +167,7 @@ export function MobileWorkspaceTabs({
   }, [workspace?.active, workspace?.focusTab]);
   if (!workspace && onClose)
     return (
-      <div className="relative h-14 shrink-0 md:hidden">
+      <div className="workspace-control-header relative md:hidden">
         <SidebarToggle
           side="right"
           expanded
@@ -183,10 +190,10 @@ export function MobileWorkspaceTabs({
           if (beforeNavigate) beforeNavigate(navigate);
           else navigate();
         }}
-        className="h-14 shrink-0 gap-0 border-b border-border px-14 md:hidden"
+        className="workspace-control-header gap-0 border-b border-border px-14 md:hidden"
         data-mobile-workspace-tabs
       >
-        <div ref={scroller} className="overflow-x-auto overscroll-x-contain px-2 py-1">
+        <div ref={scroller} className="overflow-x-auto overscroll-x-contain px-2">
           <TabsList aria-label="Workspace" variant="pill">
             {workspace.tabs.map((tab) => (
               <TabsTrigger

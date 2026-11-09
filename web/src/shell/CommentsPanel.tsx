@@ -176,7 +176,7 @@ export function CommentsPanel({
         />
       )}
       {/* Header — fixed height so layout doesn't shift when button is hidden */}
-      <div className="flex h-11 shrink-0 items-center justify-between px-3 border-b border-border">
+      <div className="workspace-control-header flex items-center justify-between px-3 border-b border-border">
         <span className="text-sm font-semibold">Comments</span>
         {tab === "open" && (
           <Button

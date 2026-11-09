@@ -1533,7 +1533,7 @@ function FileViewerBody({
       {mobileOverlay && <MobileWorkspaceTabs beforeNavigate={guardDirty} />}
       <div
         ref={toolbarHeaderRef}
-        className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3"
+        className="workspace-control-header flex min-w-0 items-center justify-between gap-2 border-b border-border px-3"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {/* Back button is the dismiss affordance for the mobile full-screen
@@ -2012,7 +2012,7 @@ function FileViewerBody({
         style={{ paddingBottom: keyboardInset || undefined }}
         className={cn(
           "flex flex-col flex-1 min-h-0 overflow-hidden bg-card",
-          mobileOverlay && "fixed inset-0 z-50 shadow-lg",
+          mobileOverlay && "fixed inset-0 z-40 shadow-lg",
         )}
       >
         {innerContent}
@@ -2028,7 +2028,7 @@ function FileViewerBody({
       className={cn(
         "flex flex-col overflow-hidden bg-card transition-[translate,border-color,border-width] duration-150 ease-out",
         // Mobile (default): fixed full-screen overlay, slide via translate-x.
-        "fixed inset-0 z-50 shadow-lg",
+        "fixed inset-0 z-40 shadow-lg",
         open ? "translate-x-0" : "translate-x-full",
         // Desktop: static flex sibling; inline width from resize hook.
         "md:relative md:inset-auto md:z-auto md:shadow-none md:translate-x-0 md:shrink-0",

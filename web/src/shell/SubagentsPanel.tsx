@@ -174,7 +174,7 @@ function ViewModeToggle({
   onViewModeChange: (mode: ViewMode) => void;
 }) {
   return (
-    <div className="flex h-11 shrink-0 items-center gap-0.5 border-b px-2">
+    <div className="workspace-control-header flex items-center gap-0.5 border-b px-2">
       <h2 className="pl-1 font-medium text-ui">Agents</h2>
       <div className="ml-auto flex items-center gap-0.5">
         <Button

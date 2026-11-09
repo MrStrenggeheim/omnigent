@@ -13,6 +13,8 @@ export interface PanelSizePreferences {
   sidebarWidthPx?: number;
   /** Width for the comments panel inside the file viewer. */
   commentsPanelWidthPx?: number;
+  /** Width of the Explorer beside an open file in the workspace. */
+  explorerColumnWidthPx?: number;
 }
 
 export type PanelSizePreferenceKey = keyof PanelSizePreferences;
@@ -45,6 +47,8 @@ export function readPanelSizePreferences(): PanelSizePreferences {
     if (isValidWidth(record.sidebarWidthPx)) prefs.sidebarWidthPx = record.sidebarWidthPx;
     if (isValidWidth(record.commentsPanelWidthPx))
       prefs.commentsPanelWidthPx = record.commentsPanelWidthPx;
+    if (isValidWidth(record.explorerColumnWidthPx))
+      prefs.explorerColumnWidthPx = record.explorerColumnWidthPx;
     return prefs;
   } catch {
     return {};

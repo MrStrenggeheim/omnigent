@@ -89,7 +89,7 @@ export function FilesPanelDrawer({
       style={{ width: panelWidth }}
       className={cn(
         "flex flex-col overflow-hidden bg-card transition-[translate,border-color,border-width] duration-150 ease-out",
-        "fixed inset-0 z-50",
+        "fixed inset-0 z-40",
         open ? "translate-x-0 shadow-lg" : "translate-x-full shadow-none",
         "md:relative md:inset-auto md:z-auto md:shadow-none md:translate-x-0 md:shrink-0",
         open ? "md:border-border md:border-l" : "md:w-0 md:border-l-0",

@@ -312,7 +312,7 @@ export function PdfViewer({
   return (
     <div className="flex h-full flex-col">
       {/* Toolbar: page count + zoom controls. */}
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-1.5">
+      <div className="workspace-control-header flex items-center justify-between gap-2 border-b border-border px-3">
         <span className="text-sm text-muted-foreground tabular-nums">
           {numPages > 0 ? `${numPages} page${numPages === 1 ? "" : "s"}` : ""}
         </span>

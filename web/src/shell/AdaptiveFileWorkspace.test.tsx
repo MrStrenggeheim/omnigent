@@ -32,6 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   observers.clear();
   vi.unstubAllGlobals();
 });
@@ -147,4 +148,33 @@ it("does not reserve Explorer space when the session has no file panel", () => {
   );
   expect(screen.queryByRole("region", { name: "File explorer" })).toBeNull();
   expect(screen.getByRole("region", { name: "File viewer" })).toHaveTextContent("Viewer");
+});
+
+it("remembers resized Explorer width, clamps to leave viewer room and restores it after narrowing", () => {
+  const tree = () => (
+    <AdaptiveFileWorkspace width={1000} isMobile={false} explorer={<div>Explorer</div>}>
+      <textarea aria-label="Persistent draft" defaultValue="draft" />
+    </AdaptiveFileWorkspace>
+  );
+  const view = render(tree());
+  const draft = screen.getByLabelText("Persistent draft");
+  let divider = screen.getByRole("separator", { name: "Resize file explorer" });
+  fireEvent.keyDown(divider, { key: "End" });
+  expect(screen.getByRole("region", { name: "File explorer" })).toHaveStyle({ width: "640px" });
+  expect(
+    JSON.parse(localStorage.getItem("omnigent:panel-size-preferences")!).explorerColumnWidthPx,
+  ).toBe(640);
+  resize(720);
+  expect(screen.getByRole("region", { name: "File explorer" })).toHaveStyle({ width: "360px" });
+  resize(719);
+  expect(screen.queryByRole("separator", { name: "Resize file explorer" })).toBeNull();
+  resize(1000);
+  expect(screen.getByRole("region", { name: "File explorer" })).toHaveStyle({ width: "640px" });
+  expect(screen.getByLabelText("Persistent draft")).toBe(draft);
+  view.unmount();
+  render(tree());
+  divider = screen.getByRole("separator", { name: "Resize file explorer" });
+  expect(divider).toHaveAttribute("aria-valuenow", "640");
+  fireEvent.keyDown(divider, { key: "Home" });
+  expect(divider).toHaveAttribute("aria-valuenow", "260");
 });
