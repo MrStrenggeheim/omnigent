@@ -640,7 +640,7 @@ describe("ProjectSettingsDialog", () => {
       await waitFor(() =>
         expect(screen.getByTestId("project-settings-effort")).toHaveTextContent("High"),
       );
-      if (clearModel) await pickSelectOption("project-settings-model", "No default");
+      if (clearModel) await pickSelectOption("project-settings-model", "Use global model default");
       expect(screen.getByTestId("project-settings-effort")).toHaveTextContent("High");
       fireEvent.click(screen.getByTestId("project-settings-save"));
       await waitFor(() =>
@@ -652,4 +652,16 @@ describe("ProjectSettingsDialog", () => {
       );
     },
   );
+  it("stores an explicit harness default even without a model catalog", async () => {
+    availableAgentsMock.mockReturnValue({ data: [codexAgent()] });
+    hostModelOptionsMock.mockReturnValue({ data: [] });
+    getProjectMock.mockResolvedValue({ id: "p_1", name: "Work", config: { agent_id: "ag_codex" } });
+    renderDialog();
+    await waitFor(() => expect(screen.getByTestId("project-settings-model")).toBeEnabled());
+    await pickSelectOption("project-settings-model", "Harness default");
+    fireEvent.click(screen.getByTestId("project-settings-save"));
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith("p_1", expect.objectContaining({ model: "" })),
+    );
+  });
 });

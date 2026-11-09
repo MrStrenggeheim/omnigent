@@ -988,9 +988,8 @@ describe("NewChatLandingScreen project prefill", () => {
     expect(body.model_override).toBe("opus");
   });
 
-  it("treats an invalid stored project model as no default (remembered pick still seeds)", async () => {
-    // A retired/unknown id must not seed — and must not displace the user's
-    // remembered pick, which stays the effective model.
+  it("uses the harness default when a configured project model is unavailable", async () => {
+    // A retired configured model must not silently substitute a remembered model.
     setClaudeAgentAndModels();
     localStorage.setItem(
       HARNESS_OPTIONS_KEY,
@@ -1005,8 +1004,43 @@ describe("NewChatLandingScreen project prefill", () => {
       ),
     );
     const body = await submitAndReadBody();
-    expect(body.model_override).toBe("sonnet");
+    expect(body.model_override).toBeUndefined();
   });
+
+  it.each([
+    { global: "opus", project: undefined, expected: "opus" },
+    { global: "retired", project: undefined, expected: undefined },
+    { global: "", project: undefined, expected: undefined },
+    { global: "opus", project: "sonnet", expected: "sonnet" },
+    { global: "opus", project: "", expected: undefined },
+    { global: "opus", project: "retired", expected: undefined },
+  ])(
+    "resolves project $project over global $global and clears unavailable models",
+    async ({ global, project, expected }) => {
+      setClaudeAgentAndModels();
+      localStorage.setItem(
+        "omnigent:default-model-by-harness",
+        JSON.stringify({ "claude-native": global, "codex-native": "unrelated" }),
+      );
+      localStorage.setItem(
+        HARNESS_OPTIONS_KEY,
+        JSON.stringify({ "claude-native": { model: "sonnet" } }),
+      );
+      setProjectConfig({
+        host_id: "host_1",
+        agent_id: CLAUDE_AGENT_ID,
+        ...(project === undefined ? {} : { model: project }),
+      });
+      renderLanding();
+      await waitFor(() =>
+        expect(screen.getByTestId("new-chat-landing-agent-select")).toHaveAccessibleName(
+          /Claude Code/,
+        ),
+      );
+      const body = await submitAndReadBody();
+      expect(body.model_override).toBe(expected);
+    },
+  );
 
   it("does not clobber a user's committed model pick when the project config arrives late", async () => {
     // The config's model can resolve (or refresh) after the composer is

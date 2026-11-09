@@ -1,3 +1,4 @@
+import { readDefaultModel, availableDefaultModel } from "@/lib/defaultModelPreferences";
 import { useLoadedConversations } from "@/hooks/useSidebarData";
 import { useComposerContext } from "@/hooks/useComposerContext";
 import { useSlashCompletion } from "@/hooks/useSlashCompletion";
@@ -4260,22 +4261,19 @@ export function NewChatLandingScreen() {
     setBypassSandbox(false);
     setCostControlMode(null);
   }, [effectiveAgentId, setCostControlMode]);
-  // A project-configured default model (Project settings) outranks the user's
-  // remembered per-harness pick — but only while the composer sits on the
-  // project's configured agent; switching to another agent falls back to the
-  // remembered pick / harness default.
+  // Project defaults belong to their configured agent; global model defaults
+  // belong to the harness independently of which agent was chosen.
+  const globalDefaultModel = useMemo(() => readDefaultModel(previewHarness), [previewHarness]);
   const projectDefaultModel =
-    prefillConfig?.model != null &&
+    (prefillConfig?.model != null &&
     prefillConfig.agentId != null &&
     effectiveAgentId === prefillConfig.agentId
       ? prefillConfig.model
       : prefillConfig === undefined && cachedPickerOptions?.agent.id === effectiveAgentId
         ? cachedPickerOptions.model
-        : null;
-  // The same default validated against the selected harness's current vocab.
-  // An unknown/retired stored id must behave as "no project default": the
-  // model seed falls back to the remembered pick, and the remembered-routing
-  // seed below stays live (an invalid pin must not suppress it).
+        : null) ?? globalDefaultModel;
+  // Validate against the selected harness's current catalog. A retired
+  // configured model uses the harness default, not another remembered pin.
   const projectModelVocab =
     selectedNativeHarness === "pi-native"
       ? piModelOptions
@@ -4341,11 +4339,9 @@ export function NewChatLandingScreen() {
     // the composer sits on the project's configured agent — unless the user
     // already committed an explicit pick this visit, which always wins.
     const projectSeed = (options: readonly { id: string }[]) =>
-      !userPickedModelRef.current &&
-      projectDefaultModel != null &&
-      options.some((m) => m.id === projectDefaultModel)
-        ? projectDefaultModel
-        : null;
+      userPickedModelRef.current
+        ? null
+        : (availableDefaultModel(projectDefaultModel, options) ?? null);
     // Project effort outranks the remembered effort when the seeded model's ladder offers it.
     const projectEffortSeed = (
       modelOptions: readonly NativeModelOption[],
@@ -4364,6 +4360,15 @@ export function NewChatLandingScreen() {
       if (projectEffort != null) _setCostControlMode((mode) => (mode === "on" ? null : mode));
       setPickedEffort(projectEffort ?? fallback);
     };
+    if (projectDefaultModel != null && !userPickedModelRef.current) _setCostControlMode(null);
+    if (selectedNativeHarness === "devin-native") {
+      setPickedModel(
+        projectSeed(devinModelOptions) ??
+          (stored.model != null && devinModelOptions.some((model) => model.id === stored.model)
+            ? stored.model
+            : ""),
+      );
+    }
     if (selectedNativeHarness === "pi-native") {
       setPickedModel(
         projectSeed(piModelOptions) ??
@@ -4454,6 +4459,7 @@ export function NewChatLandingScreen() {
     claudeModelOptions,
     codexModelOptions,
     piModelOptions,
+    devinModelOptions,
     projectDefaultModel,
     projectDefaultEffort,
   ]);
@@ -4516,9 +4522,12 @@ export function NewChatLandingScreen() {
   // switch itself (the router always routes), so it's left alone.
   useEffect(() => {
     if (!selectedNativeHarness || autoRoutingSelected) return;
-    // A valid project model or effort is an explicit pin that remembered routing
-    // would drop; an invalid stored value seeds no pin and doesn't suppress it.
-    if (projectDefaultModelValid != null && !userPickedModelRef.current) return;
+    // Explicit startup model defaults also override remembered routing, including
+    // the choice to use the harness default when a configured model is unavailable.
+    if (projectDefaultModel != null && !userPickedModelRef.current) {
+      _setCostControlMode(null);
+      return;
+    }
     if (projectDefaultEffortValid != null && !userPickedEffortRef.current) return;
     const storedRouting =
       (pickerEdits?.agentId === effectiveAgentId && pickerEdits.harness === selectedNativeHarness
@@ -4531,7 +4540,7 @@ export function NewChatLandingScreen() {
     smartRoutingEligible,
     effectiveAgentId,
     autoRoutingSelected,
-    projectDefaultModelValid,
+    projectDefaultModel,
     projectDefaultEffortValid,
     setCostControlMode,
     pickerEdits,

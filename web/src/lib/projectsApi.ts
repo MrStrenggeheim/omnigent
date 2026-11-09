@@ -50,6 +50,7 @@ export interface ProjectConfig {
    * alongside an `agent_id` whose harness takes a model override; unset =
    * the harness's own configured default.
    */
+  /** Empty selects the harness default; omission inherits the global model preference. */
   model?: string;
   /**
    * Default reasoning effort for new sessions with the default agent (e.g.

@@ -47,12 +47,40 @@ def test_global_agent_default_yields_to_project(
         created.raise_for_status()
         project = created.json()
         try:
+            page.route(
+                "**/v1/hosts/*/harnesses/claude-native/model-options",
+                lambda route: route.fulfill(
+                    json={
+                        "models": [
+                            {"id": "opus", "displayName": "Opus"},
+                            {"id": "sonnet", "displayName": "Sonnet"},
+                        ]
+                    }
+                ),
+            )
             page.goto(f"{live_server}/settings/general")
             control = page.get_by_test_id("settings-default-agent")
             picker = control.get_by_test_id("new-chat-landing-agent-select")
             expect(picker).to_be_enabled(timeout=30_000)
             picker.click()
             page.get_by_test_id(f"new-chat-landing-agent-{first['id']}").click()
+            assert (
+                page.evaluate("localStorage.getItem('omnigent:default-agent-id')") == first["id"]
+            )
+            models = page.get_by_test_id("settings-default-models")
+            models.get_by_role("combobox", name="Model default harness", exact=True).click()
+            page.get_by_role("option", name="Claude Code", exact=True).click()
+            models.get_by_role("combobox", name="Default model", exact=True).click()
+            page.get_by_role("option", name="Opus", exact=True).click()
+            saved_models = page.evaluate(
+                "JSON.parse(localStorage.getItem('omnigent:default-model-by-harness'))"
+            )
+            assert saved_models["claude-native"] == "opus"
+            models.get_by_role("combobox", name="Model default harness", exact=True).click()
+            page.get_by_role("option", name="Codex", exact=True).click()
+            expect(
+                models.get_by_role("combobox", name="Default model", exact=True)
+            ).to_contain_text("Use last selected model")
             assert (
                 page.evaluate("localStorage.getItem('omnigent:default-agent-id')") == first["id"]
             )

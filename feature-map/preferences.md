@@ -8,6 +8,8 @@ local; automatic client sync and shared/machine scope controls remain deferred.
 
 ## Sub-features
 
+- `default-models`: General → Sessions sets independent model defaults for Claude Code, Codex, Pi and Devin; explicit choices override project defaults, then harness-specific global defaults, then remembered choices or the harness default.
+- `unavailable-model`: a configured model missing from the current catalog uses the harness default; project settings can explicitly select Harness default without a catalog or inherit the global choice.
 - `default-agent`: General → Sessions selects a default agent for new chats in this browser/app; explicit choices and project defaults take precedence, and an unavailable configured agent is reported instead of silently substituted.
 
 - `accent-surfaces`: Share, navigation, message surfaces, links, focus and composer chrome follow the selected accent in light/dark mode while semantic status colors remain distinct.

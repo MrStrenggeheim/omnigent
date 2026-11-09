@@ -45,6 +45,7 @@ import { WorkspacePickerDialog } from "./WorkspacePickerDialog";
 
 /** Select sentinel for "no default" — Radix Select can't hold an empty value. */
 const NONE = "__none__";
+const HARNESS_DEFAULT = "__harness_default__";
 
 /** A labeled row: label + optional hint on the left, the control on the right. */
 function Field({
@@ -183,7 +184,7 @@ export function ProjectSettingsDialog({
     setUseWorktree(c.use_worktree ?? readAlwaysUseWorktree());
     setBaseBranch(c.base_branch ?? "");
     setAgentId(c.agent_id ?? null);
-    setModel(c.model ?? NONE);
+    setModel(c.model === "" ? HARNESS_DEFAULT : (c.model ?? NONE));
     // The server stores config untyped, so ignore a malformed effort.
     setEffort(typeof c.effort === "string" && c.effort ? c.effort : NONE);
     setWorkspaceOpen(false);
@@ -226,7 +227,8 @@ export function ProjectSettingsDialog({
     // is unknowable — keep the stored model (already in the spread) so an
     // unrelated save during that window can't silently delete a valid default.
     const agentUnresolved = agentId != null && selectedAgent === null;
-    if (supportsModelDefault && model !== NONE) config.model = model;
+    if (supportsModelDefault && model !== NONE)
+      config.model = model === HARNESS_DEFAULT ? "" : model;
     else if (!agentUnresolved) delete config.model;
     if (supportsEffortDefault && effortValue !== NONE) config.effort = effortValue;
     else if (!agentUnresolved) delete config.effort;
@@ -269,7 +271,8 @@ export function ProjectSettingsDialog({
   const selectedNativeSpec = nativeCodingAgentForAvailableAgent(selectedAgent);
   const harnessTakesModel =
     nativeAgentHasCapability(selectedAgent, "modelPicker") ||
-    selectedNativeSpec?.harness === "codex-native";
+    selectedNativeSpec?.harness === "codex-native" ||
+    nativeAgentHasCapability(selectedAgent, "devinMode");
   // Live host-resolved model options. The project's default host when set,
   // else the first online host (the composer's auto-pick) — without the
   // fallback a Codex project (no static catalog) could never populate the
@@ -292,14 +295,11 @@ export function ProjectSettingsDialog({
   }, [hostModelOptions, selectedNativeSpec]);
   // Keep a stored model the current options don't list as a labeled fallback
   // item, so opening + saving the dialog doesn't silently drop the default.
-  const storedModelMissing = model !== NONE && !modelOptions.some((m) => m.id === model);
-  // With no catalog resolved and nothing stored, the select could only offer
-  // "No default" — an action it can't perform. Degrade honestly (documented
-  // catalog gap for host-resolved harnesses): disable it and say why, rather
-  // than hide the field the harness legitimately supports.
+  const storedModelMissing =
+    model !== NONE && model !== HARNESS_DEFAULT && !modelOptions.some((m) => m.id === model);
+  // Even without a catalog, users can choose global inheritance or the harness default.
   const modelPickerEmpty = modelOptions.length === 0 && model === NONE;
-  // Offer the control only for a model-taking harness; when it can only render
-  // "No default" it stays visible but disabled with an explanatory hint.
+  // Only offer model overrides where the launch path supports them.
   const supportsModelDefault = harnessTakesModel;
   // Mirror the composer's effort ladder (Codex varies per model).
   const effortLadder = (pinnedModel: string) =>
@@ -555,21 +555,22 @@ export function ProjectSettingsDialog({
               label="Model"
               hint={
                 modelPickerEmpty
-                  ? "No model catalog available — pick a Host default (or connect a host) to choose from its models"
-                  : "Default model for new sessions with this agent"
+                  ? "Choose global or harness default, or connect a host to select a model"
+                  : "Project override; unavailable models use the harness default"
               }
             >
               <Select
                 value={model}
                 onValueChange={selectModel}
                 onOpenChange={onDropdownOpenChange}
-                disabled={isLoading || modelPickerEmpty}
+                disabled={isLoading}
               >
                 <SelectTrigger className="w-full" data-testid="project-settings-model">
                   <SelectValue placeholder="No default" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={NONE}>No default</SelectItem>
+                  <SelectItem value={NONE}>Use global model default</SelectItem>
+                  <SelectItem value={HARNESS_DEFAULT}>Harness default</SelectItem>
                   {modelOptions.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.label}

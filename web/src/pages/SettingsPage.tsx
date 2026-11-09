@@ -1,3 +1,4 @@
+import { DefaultModelSettings } from "./settings/DefaultModelSettings";
 /**
  * Settings page (``/settings``).
  *
@@ -1945,6 +1946,9 @@ function GeneralSection() {
         </SettingsGroup>
         <SettingsGroup title="Sessions" testId="settings-group-sessions">
           <DefaultAgentControl />
+          <div className="mt-4 border-t border-border pt-4">
+            <DefaultModelSettings />
+          </div>
           <div className="mt-4 border-t border-border pt-4">
             <BackgroundSessionTitlesControl />
           </div>

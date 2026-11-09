@@ -149,6 +149,11 @@ def test_project_settings_offers_model_default_for_native_harness(
     # should surface the control (populated for Claude's static catalog;
     # present-but-disabled for Codex, whose catalog needs a host).
     expect(page.get_by_test_id("project-settings-model")).to_be_visible(timeout=5_000)
+    expect(page.get_by_test_id("project-settings-model")).to_be_enabled()
+    page.get_by_test_id("project-settings-model").click()
+    expect(page.get_by_role("option", name="Use global model default", exact=True)).to_be_visible()
+    page.get_by_role("option", name="Harness default", exact=True).click()
+    expect(page.get_by_test_id("project-settings-model")).to_contain_text("Harness default")
 
 
 def test_project_settings_model_and_effort_defaults_round_trip(
