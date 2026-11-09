@@ -62,7 +62,7 @@ export function TerminalCommandCard({ kind, input, stdout, stderr }: TerminalCom
   return (
     <Collapsible defaultOpen={false} className="group not-prose w-full">
       <CollapsibleTrigger className="w-full cursor-pointer">{trigger}</CollapsibleTrigger>
-      <CollapsibleContent className="mt-1 ml-2 space-y-2 border-l pl-3 py-1 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=open]:animate-in">
+      <CollapsibleContent className="mt-1 space-y-2 py-1 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=open]:animate-in">
         {hasStdout && (
           <CodeBlock code={stdout as string} language="bash">
             <CodeBlockHeader>

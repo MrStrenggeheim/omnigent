@@ -108,7 +108,7 @@ export const ChatComposer = forwardRef<HTMLDivElement, ChatComposerProps>(functi
       ref={ref}
       data-composer-card
       className={cn(
-        "composer-reference-surface relative flex w-full flex-col rounded-2xl border transition-shadow duration-150 has-[textarea:focus]:shadow-[var(--composer-shadow-focus)] md:min-h-[105px]",
+        "composer-reference-surface relative flex w-full flex-col rounded-xl border transition-shadow duration-150 has-[textarea:focus]:shadow-[var(--composer-shadow-focus)] md:min-h-[105px]",
         className,
       )}
       {...props}
@@ -478,7 +478,7 @@ export const ComposerSendButton = forwardRef<
       size="icon"
       variant={interrupt ? "destructive" : "default"}
       className={cn(
-        "size-8 shrink-0 rounded-lg transition-opacity md:size-7",
+        "size-8 shrink-0 rounded-full transition-opacity md:size-7",
         !interrupt &&
           "hover:opacity-80 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100",
         className,

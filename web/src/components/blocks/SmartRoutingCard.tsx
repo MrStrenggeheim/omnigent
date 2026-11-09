@@ -164,10 +164,7 @@ export function SmartRoutingCard({ arguments: args, output, state }: SmartRoutin
   return (
     <Collapsible
       defaultOpen={false}
-      className={cn(
-        "group not-prose my-1 flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-2",
-        TOOL_SURFACE_WIDTH_CLASS,
-      )}
+      className={cn("group not-prose my-1 flex flex-col gap-1.5 py-1", TOOL_SURFACE_WIDTH_CLASS)}
       data-testid="smart-routing-card"
       data-state-kind={judging ? "judging" : failed ? "failed" : "sized"}
     >

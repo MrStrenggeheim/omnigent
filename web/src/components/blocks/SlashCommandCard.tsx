@@ -3,7 +3,7 @@
 // collapsible rhythm. Two kinds:
 //
 //   skill   — plugin/Skill invocations (``/dev-productivity:simplify``,
-//             ``/oncall``). Wand icon in brand pink, prefix "Skill".
+//             ``/oncall``). Wand icon in the selected accent, prefix "Skill".
 //   command — surfaced CLI built-ins (``/effort``, ``/clear``,
 //             ``/compact``, ``/model``, ``/ultrareview``). Command
 //             icon (⌘ glyph) in slate, prefix "Command". These change
@@ -29,8 +29,7 @@ const KIND_STYLES: Record<SlashCommandKind, KindStyle> = {
     // WandSparkles, not Sparkles — plain Sparkles is the thinking/reasoning
     // marker (ai-elements/reasoning), and skills must not look like thoughts.
     Icon: WandSparklesIcon,
-    // Brand pink — matches the composer slash-command tint and the nessie
-    // workflow chips so every skill surface shares one palette.
+    // Share the composer's selected accent for skill invocations.
     iconClass: "text-brand-accent",
   },
   command: {
@@ -94,7 +93,7 @@ export function SlashCommandCard({ kind, name, arguments: args, output }: SlashC
   return (
     <Collapsible defaultOpen={false} className="group not-prose w-full">
       <CollapsibleTrigger className="w-full cursor-pointer">{trigger}</CollapsibleTrigger>
-      <CollapsibleContent className="mt-1 ml-2 space-y-2 border-l pl-3 py-1 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=open]:animate-in">
+      <CollapsibleContent className="mt-1 space-y-2 py-1 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=open]:animate-in">
         {hasArgs && <ArgsPanel args={args} />}
         {hasOutput && <OutputPanel output={output as string} />}
       </CollapsibleContent>

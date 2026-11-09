@@ -8,6 +8,9 @@ local; automatic client sync and shared/machine scope controls remain deferred.
 
 ## Sub-features
 
+- `accent-surfaces`: Share, navigation, message surfaces, links, focus and composer chrome follow the selected accent in light/dark mode while semantic status colors remain distinct.
+- `flat-transcript`: assistant prose stays unboxed, tool groups use compact disclosures and code has one technical frame.
+
 - `user-defaults`: set, list, and remove defaults on this machine; cover empty
   config, invalid keys, legacy scalar harness settings, and custom config homes.
 - `project-defaults`: project YAML overrides user YAML for the model and the
@@ -209,6 +212,8 @@ Use the process recipe above for replica and restart transport.
 For later slices, continue live verification of each newly connected path on an
 isolated deployment. Record the candidate/runtime versions, configuration,
 observed results, any mocked services, and remaining entry-point gaps.
+
+- Real chat accent and flat rendering across desktop light and phone dark: `tests/e2e_ui/chat/test_accent_flat_chat.py::test_chat_uses_selected_accent_and_flat_surfaces`.
 
 ## Gotchas
 

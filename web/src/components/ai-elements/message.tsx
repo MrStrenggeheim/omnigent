@@ -68,7 +68,7 @@ export const MessageContent = ({ children, className, ...props }: MessageContent
       // User and assistant prose share the settings-driven interface text
       // token, so their size and line-height stay in lockstep.
       "is-user:dark flex w-fit min-w-0 max-w-full flex-col gap-2 text-ui",
-      "group-[.is-user]:ml-auto group-[.is-user]:overflow-hidden group-[.is-user]:rounded-2xl group-[.is-user]:bg-muted group-[.is-user]:px-3 group-[.is-user]:py-2 group-[.is-user]:text-foreground group-[.is-user]:ring-1 group-[.is-user]:ring-border/60",
+      "group-[.is-user]:ml-auto group-[.is-user]:overflow-hidden group-[.is-user]:rounded-xl group-[.is-user]:bg-accent group-[.is-user]:px-3 group-[.is-user]:py-2 group-[.is-user]:text-accent-foreground",
       // Tighter than the user bubble's gap-2 so muted single-line tool
       // ("See N steps") / reasoning rows don't look orphaned between prose.
       "group-[.is-assistant]:gap-1.5 group-[.is-assistant]:text-foreground",
@@ -468,10 +468,7 @@ function ChatTable({ children, className, node: _node, ...props }: ChatTableProp
     : null;
 
   return (
-    <div
-      className="my-4 flex flex-col gap-2 rounded-lg border border-border bg-sidebar p-2"
-      data-streamdown="table-wrapper"
-    >
+    <div className="my-4 flex flex-col gap-1.5" data-streamdown="table-wrapper">
       {showControls && (
         <div className="flex items-center justify-end gap-1">
           {showCopy && <TableCopyDropdown />}

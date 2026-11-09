@@ -61,9 +61,9 @@
      * (launching/idle/done) — distinct from the shared amber --warning (still
      * used by the "Needs response" badge). */
   --color-session-active: var(--session-active);
-  /* Brand pink — reserved for brand moments, not status. */
+  /* Selected brand accent, separate from semantic status colors. */
   --color-brand-accent: var(--brand-accent);
-  /* Pink tag surface (translucent) — generates `bg-tag-pink`. */
+  /* Legacy tag utility name; its surface follows the selected accent. */
   --color-tag-pink: var(--tag-pink);
   /* Named status hues — success/warning/info are repointed to the
      * green/yellow/blue of this set below, so the two stay in lockstep. */
@@ -137,11 +137,6 @@
   --text-xs--line-height: var(--text-sm--line-height);
 }
 
-/* Apple system-blue accent (hue 256, matches iOS / macOS systemBlue —
- * ~#007AFF light, ~#0A84FF dark). Reserved for focus rings, charts,
- * unread state, and the active sidebar highlight; surfaces and primary
- * buttons stay neutral grey (hue 240). See designs/UI/WEB_UI.md (still
- * describes the older cobalt direction). */
 /* Give iOS Home Screen apps a top colour surface without painting over content. */
 .ios-status-surface {
   display: none;
@@ -265,8 +260,6 @@
   /* Weaker panel border for low-contrast dividers. */
   --border-weak: #ececee;
   --button-icon-hover-color: #27272a;
-  /* Pink tag surface — a translucent wash, so it tints whatever it sits on. */
-  --tag-pink: rgba(240, 1, 150, 0.06);
   /* Named status hues. success/warning/info above mirror green/yellow/blue. */
   --status-blue: #3b8ff5;
   --status-green: #2ea65c;
@@ -305,9 +298,6 @@
      * the small dot keeps adequate contrast against the dark canvas (the
      * light-mode #2f7fd4 reads too dim here). */
   --session-active: #5ca4f5;
-  /* Pink tag surface — a heavier wash than light, since 6% all but vanishes
-     * against the dark canvas. */
-  --tag-pink: rgba(240, 1, 150, 0.15);
   --status-blue: #3b8ff5;
   --status-green: #2ea65c;
   --status-yellow: #d4972a;
@@ -319,6 +309,50 @@
   --chart-4: oklch(0.75 0.16 70);
   --chart-5: oklch(0.65 0.008 240);
   --tooltip-bg: #2a2440;
+}
+
+/* Presentation tokens compose over the generated palettes, including custom
+ * accents applied at runtime. Omni keeps its signature accent; other palettes
+ * use their primary action color for every decorative brand surface. */
+:root:not(.dark):not([data-theme]) {
+  --primary: color-mix(in srgb, var(--brand-accent) 80%, black);
+  --link: var(--primary);
+}
+.dark:not([data-theme]) {
+  --primary: var(--brand-accent);
+  --link: color-mix(in srgb, var(--brand-accent) 50%, white);
+}
+:root:not(.dark)[data-theme],
+.dark[data-theme] {
+  --brand-accent: var(--primary);
+}
+/* Keep preset links in the action's hue with extra text contrast. Custom
+ * palettes already calculate link contrast across their reading surfaces. */
+:root:not(.dark)[data-theme]:not([data-theme="custom"]) {
+  --link: color-mix(in srgb, var(--primary) 80%, var(--foreground));
+}
+.dark[data-theme]:not([data-theme="custom"]) {
+  --link: color-mix(in srgb, var(--primary) 65%, var(--foreground));
+}
+
+:root:not(.dark):not([data-theme]),
+:root:not(.dark)[data-theme],
+.dark:not([data-theme]),
+.dark[data-theme] {
+  --ring: var(--primary);
+  --accent: color-mix(in srgb, var(--primary) 12%, var(--background));
+  --accent-foreground: var(--foreground);
+  --selection-background: color-mix(in srgb, var(--primary) 18%, transparent);
+  --selection-foreground: var(--foreground);
+  --sidebar: color-mix(in srgb, var(--primary) 4%, var(--background));
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-ring: var(--ring);
+  --sidebar-active: var(--accent);
+  --sidebar-active-foreground: var(--foreground);
+  --tag-pink: color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 /* Main-sidebar item labels use the same text-ui semantic step as Appearance
@@ -481,41 +515,22 @@
 }
 
 .composer-reference-surface {
-  border-color: color(srgb 0.129412 0 0.0509804 / 0.1);
-  background-color: rgba(255, 255, 255, 0.8);
+  border-color: var(--border);
+  background-color: var(--card-solid);
   background-image: none;
 }
 
-.dark .composer-reference-surface {
-  border-width: 0.5px;
-  border-color: color(srgb 0.960784 0.960784 0.956863 / 0.04);
-  background-color: rgba(255, 255, 255, 0.05);
+.composer-reference-surface:focus-within {
+  border-color: var(--ring);
+  outline: 2px solid color-mix(in srgb, var(--ring) 20%, transparent);
+  outline-offset: 1px;
 }
 
-/* --background is the opaque palette canvas; flatten tints over it to mask the stack. */
-.composer-workspace-surface {
-  background:
-    linear-gradient(
-      color-mix(in oklch, var(--muted) 70%, transparent),
-      color-mix(in oklch, var(--muted) 70%, transparent)
-    ),
-    var(--background);
-}
-
-/* Preserve the translucent dark tray while matching the mock's single warm
-   surface across queued rows and workspace metadata in light themes. */
+/* Use an opaque accent wash so the tray masks stacked content without
+ * inheriting a different hue from the palette's muted surfaces. */
+.composer-workspace-surface,
 .composer-queued-surface {
-  background-color: color-mix(in oklab, var(--tray) 40%, transparent);
-}
-
-:root:not(.dark) .composer-workspace-surface,
-:root:not(.dark) .composer-queued-surface {
-  background:
-    linear-gradient(
-      color-mix(in oklch, var(--muted) 85%, transparent),
-      color-mix(in oklch, var(--muted) 85%, transparent)
-    ),
-    var(--background);
+  background: color-mix(in srgb, var(--primary) 4%, var(--background));
 }
 
 .composer-subagent-surface {
@@ -618,18 +633,20 @@
   }
 }
 
-/* The transparent <main> shows the palette canvas through. */
-.app-shell {
+/* Match generated selector specificity so palette gradients give way to the
+ * flat canvas and accent wash, without changing the generated palette file. */
+:root:not(.dark):not([data-theme]) .app-shell,
+:root:not(.dark)[data-theme] .app-shell,
+.dark:not([data-theme]) .app-shell,
+.dark[data-theme] .app-shell {
   background: var(--background);
 }
 
-/* A desktop peek floats over the chat instead of pushing it aside, so its
- * gradient layers need an opaque base rather than the translucent card color. */
-:root:not(.dark):not([data-theme]) .conversations-sidebar.is-peek,
-:root:not(.dark)[data-theme] .conversations-sidebar.is-peek,
-.dark:not([data-theme]) .conversations-sidebar.is-peek,
-.dark[data-theme] .conversations-sidebar.is-peek {
-  background-color: var(--card-solid);
+:root:not(.dark):not([data-theme]) .conversations-sidebar,
+:root:not(.dark)[data-theme] .conversations-sidebar,
+.dark:not([data-theme]) .conversations-sidebar,
+.dark[data-theme] .conversations-sidebar {
+  background: var(--sidebar);
 }
 
 /* Edge treatment is mode-specific but palette-independent. */
@@ -640,21 +657,6 @@ html:not(.dark) .conversations-sidebar:not(.is-peek) {
 .dark .conversations-sidebar {
   border-right: 1px solid rgb(255 255 255 / 2%);
   box-shadow: inset -8px 0 12px -8px rgb(0 0 0 / 5%);
-}
-
-/* Below md the sidebar is a full-screen overlay ON TOP of the chat, so it has
- * to be opaque — the rules above set `background` as a shorthand, which resets
- * background-color and would otherwise let the conversation show through the
- * translucent layers. Restores what Sidebar.tsx's max-md:bg-card-solid does on
- * desktop. Above md the sidebar pushes content aside instead of covering it,
- * so it keeps its translucent canvas there. */
-@media (width < 48rem) {
-  :root:not(.dark):not([data-theme]) .conversations-sidebar,
-  :root:not(.dark)[data-theme] .conversations-sidebar,
-  .dark:not([data-theme]) .conversations-sidebar,
-  .dark[data-theme] .conversations-sidebar {
-    background-color: var(--card-solid);
-  }
 }
 
 /* Fade scrolling content before it reaches the transparent header or composer.
@@ -1196,35 +1198,16 @@ html[data-electron-mac] .breadcrumb-folder {
   }
 }
 
-/* Share button — glassy pink effect (both modes). The vertical
- * gradient alone does the embossed work (lighter top = light catch,
- * darker bottom = shadow, simulating a convex surface lit from above);
- * no border or inset shine. Light mode: gentler gradient, no shadow —
- * the full emboss + dark depth shadow reads too heavy on the light
- * canvas. Dark mode: stronger emboss plus the grounding shadow. */
+/* Keep the shared Share hook while using the same flat action as Send. */
 .share-button-glassy {
-  background: linear-gradient(to bottom, #fa3d99 0%, #f22286 40%, #d51d74 100%);
-  border: none;
+  background: var(--primary);
+  border-color: transparent;
   box-shadow: none;
-  color: #ffffff;
+  color: var(--primary-foreground);
 }
 
 .share-button-glassy:hover {
-  /* Darken the gradient slightly on hover */
-  background: linear-gradient(to bottom, #ec3790 0%, #e51b7d 40%, #c41a6b 100%);
-}
-
-.dark .share-button-glassy {
-  background: linear-gradient(150deg, #ff4da6 0%, #f22286 40%, #b8185f 100%);
-  border: none;
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.5),
-    0 1px 3px rgba(0, 0, 0, 0.4);
-  color: #ffffff;
-}
-
-.dark .share-button-glassy:hover {
-  background: linear-gradient(150deg, #f0408f 0%, #e51b7d 40%, #a51455 100%);
+  background: color-mix(in srgb, var(--primary) 90%, var(--background));
 }
 
 @layer base {
@@ -1419,6 +1402,22 @@ html[data-electron-mac] .breadcrumb-folder {
 .chat-code-block > [data-streamdown="code-block"] > .sticky,
 .chat-mermaid > [data-streamdown="mermaid-block"] > .sticky {
   position: static;
+}
+
+/* Keep one code frame with its toolbar, including before highlighting settles
+ * and when the renderer inserts wrappers between the code body and pre. */
+:is(.chat-markdown, .message-markdown, .chat-code-block) [data-streamdown="code-block-body"],
+:is(.chat-markdown, .message-markdown, .chat-code-block) pre {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:is(.chat-markdown, .message-markdown, .chat-code-block) pre {
+  margin: 0;
+  /* Highlighted pre elements can carry an inline background. */
+  background: transparent !important;
 }
 
 /* Word-wrap toggle for chat code blocks (see ChatCodeBlockPre in message.tsx).
@@ -1726,7 +1725,7 @@ html[data-electron-mac] .breadcrumb-folder {
   opacity: 0;
   transform: scale(0.55) rotate(40deg);
 }
-/* Lit state: brand pink so on/off reads unmistakably at a glance. */
+/* Lit state follows the selected accent. */
 .imc-toggle[data-mode="on"] {
   color: var(--brand-accent);
 }
@@ -2351,12 +2350,12 @@ html[data-electron-mac] .breadcrumb-folder {
 @media (min-width: 48rem) {
   :root:not(.dark)[data-theme="custom"][data-custom-translucent-sidebar]
     :is(.conversations-sidebar, aside[aria-label="Workspace"]:not([data-maximized])) {
-    background: var(--custom-light-sidebar);
+    background: color-mix(in srgb, var(--sidebar) 82%, transparent);
     backdrop-filter: blur(20px) saturate(1.12);
   }
   .dark[data-theme="custom"][data-custom-translucent-sidebar]
     :is(.conversations-sidebar, aside[aria-label="Workspace"]:not([data-maximized])) {
-    background: var(--custom-dark-sidebar);
+    background: color-mix(in srgb, var(--sidebar) 82%, transparent);
     backdrop-filter: blur(20px) saturate(1.12);
   }
   :root[data-theme="custom"][data-custom-translucent-sidebar]
