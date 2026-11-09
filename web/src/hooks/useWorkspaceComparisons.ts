@@ -1,3 +1,4 @@
+import { useWorkbenchWorkspace, queryIdentity, resourceBase } from "@/lib/workbenchWorkspace";
 import { useQuery } from "@tanstack/react-query";
 import { authenticatedFetch } from "@/lib/identity";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
@@ -14,6 +15,7 @@ import {
   isAgentComparison,
   useWorkspaceComparison,
   type ComparisonTurn,
+  type WorkspaceComparisonScope,
 } from "@/lib/workspaceComparison";
 
 export interface WorkspaceComparisonResult {
@@ -50,18 +52,40 @@ export function useAgentTurnChoices(sessionId: string | undefined, path: string,
 
 export function useWorkspaceComparisonChanges(
   sessionId: string | undefined,
-  options: WorkspaceGitOptions = {},
+  options: WorkspaceGitOptions & WorkspaceComparisonScope & { agentEnabled?: boolean } = {},
 ) {
-  const { comparison } = useWorkspaceComparison(sessionId);
-  const serveable = useWorkspaceServeable(sessionId);
-  const environment = useWorkspaceEnvironment(sessionId, { enabled: options.enabled });
-  const active = useSessionActive(sessionId);
-  useTrailingInvalidate(sessionId, active, "workspace-comparison-changes");
+  const workspace = useWorkbenchWorkspace(options.workspace);
+  const workspaceId = options.workspaceId ?? workspace?.id;
+  const view = options.view ?? "changes";
+  const { comparison } = useWorkspaceComparison({
+    ...options,
+    workspaceId,
+    view,
+    conversationId: sessionId,
+  });
+  const querySessionId = isAgentComparison(comparison) ? comparison.sourceChatId : sessionId;
+  const agent = isAgentComparison(comparison);
+  const identity = agent ? querySessionId : queryIdentity(workspaceId, sessionId);
+  const serveable = useWorkspaceServeable(querySessionId, agent ? null : workspace);
+  const environment = useWorkspaceEnvironment(querySessionId, {
+    enabled: options.enabled,
+    workspace: agent ? null : workspace,
+  });
+  const active = useSessionActive(querySessionId);
+  useTrailingInvalidate(identity, active, "workspace-comparison-changes");
   const path = options.path ?? "";
   const directories = [...new Set(options.directories ?? [])].sort().slice(0, 128);
-  const agent = isAgentComparison(comparison);
   return useQuery<WorkspaceComparisonResult>({
-    queryKey: ["workspace-comparison-changes", sessionId, path, comparison, directories],
+    queryKey: [
+      "workspace-comparison-changes",
+      identity,
+      path,
+      comparison,
+      directories,
+      workspaceId,
+      view,
+      options.agentEnabled,
+    ],
     queryFn: async ({ signal }) => {
       const params = agent
         ? new URLSearchParams({
@@ -78,7 +102,7 @@ export function useWorkspaceComparisonChanges(
             target: comparison.target,
           });
       const response = await authenticatedFetch(
-        `/v1/sessions/${encodeURIComponent(sessionId!)}/resources/environments/default/${agent ? "changes" : "git"}?${params}`,
+        `${resourceBase(agent ? null : workspaceId, querySessionId)}/environments/default/${agent ? "changes" : "git"}?${params}`,
         { signal },
       );
       if (!response.ok) throw await apiErrorFromResponse(response);
@@ -94,17 +118,21 @@ export function useWorkspaceComparisonChanges(
     },
     enabled:
       options.enabled !== false &&
-      !!sessionId &&
-      !isTempConvId(sessionId) &&
+      (!agent || options.agentEnabled !== false) &&
+      !!identity &&
+      (agent || !workspaceId ? !!querySessionId && !isTempConvId(querySessionId) : true) &&
       serveable !== false &&
       environment.data?.available === true,
     staleTime: 5_000,
     refetchInterval: 5_000,
     retry: false,
     placeholderData: (previous, query) =>
-      query?.queryKey[1] === sessionId &&
+      query?.queryKey[1] === identity &&
       query?.queryKey[2] === path &&
-      JSON.stringify(query?.queryKey[3]) === JSON.stringify(comparison)
+      JSON.stringify(query?.queryKey[3]) === JSON.stringify(comparison) &&
+      query?.queryKey[5] === workspaceId &&
+      query?.queryKey[6] === view &&
+      query?.queryKey[7] === options.agentEnabled
         ? previous
         : undefined,
   });

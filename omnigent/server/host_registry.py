@@ -6,9 +6,8 @@ hosts with active WebSocket tunnels on this replica. The persistent
 source of truth for which hosts exist; this registry only tracks
 which hosts are live *here*.
 
-Simpler than :class:`TunnelRegistry` because the host tunnel
-carries only control frames (launch/stop runner), not HTTP
-request/response traffic. No per-request reassembly queues needed.
+Unlike the runner tunnel, host requests use typed operations and attachment channels.
+Host requests do not require generic HTTP request/response reassembly queues.
 
 The registry also holds what connected hosts *report* about themselves and
 nothing persists — today the per-family gateway-inference map (see
@@ -46,6 +45,8 @@ from omnigent.host.frames import (
     HostPluginsResultFrame,
     HostSkillContentResultFrame,
     HostSkillsResultFrame,
+    HostTerminalResultFrame,
+    HostTerminalStreamFrame,
 )
 from omnigent.host.harness_startup import HarnessStartup
 from omnigent.runner.transports.ws_tunnel.diagnostics import OutboundFrame, TunnelDiagnostics
@@ -174,6 +175,15 @@ def _fail_pending_inventory(pending: dict[str, asyncio.Future[Any]], host_id: st
             # The owner loop can close between the check and scheduling. The
             # pending map is already retired, so there is nothing to wake.
             continue
+
+
+def _fail_pending_terminals(conn: HostConnection) -> None:
+    _fail_pending_inventory(conn.pending_terminals, conn.host_id)
+    for queue in conn.terminal_channels.values():
+        if queue.full():
+            queue.get_nowait()
+        queue.put_nowait(HostTerminalStreamFrame("", "close", "host disconnected", 1013))
+    conn.terminal_channels.clear()
 
 
 def _fail_pending_skills(conn: HostConnection) -> None:
@@ -480,6 +490,12 @@ class HostConnection:
     pending_fs_requests: dict[str, asyncio.Future[dict[str, Any]]] = field(
         default_factory=dict,
     )
+    pending_terminals: dict[str, asyncio.Future[HostTerminalResultFrame]] = field(
+        default_factory=dict
+    )
+    terminal_channels: dict[str, asyncio.Queue[HostTerminalStreamFrame]] = field(
+        default_factory=dict
+    )
     pending_model_options: dict[str, asyncio.Future[dict[str, Any]]] = field(
         default_factory=dict,
     )
@@ -616,6 +632,7 @@ class HostRegistry:
                 _fail_pending_mcp_tools(old)
                 _fail_pending_skills(old)
                 _fail_pending_mcp_servers(old)
+                _fail_pending_terminals(old)
             self._hosts[key] = conn
             if hello.interactive_shells is not None:
                 self._interactive_shells[host_id] = normalize_interactive_shells(
@@ -665,6 +682,7 @@ class HostRegistry:
         _fail_pending_mcp_tools(removed)
         _fail_pending_skills(removed)
         _fail_pending_mcp_servers(removed)
+        _fail_pending_terminals(removed)
         return True
 
     def mark_frame_seen(self, conn: HostConnection) -> bool:

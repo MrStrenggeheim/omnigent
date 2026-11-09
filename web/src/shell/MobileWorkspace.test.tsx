@@ -34,6 +34,7 @@ function WorkspaceHarness({
   beforeNavigate,
   covered = false,
   onReveal,
+  onNewShell,
 }: {
   sessionId?: string;
   tabs?: typeof availableTabs;
@@ -41,6 +42,7 @@ function WorkspaceHarness({
   onOpen?: (id: string) => void;
   covered?: boolean;
   onReveal?: () => void;
+  onNewShell?: () => void;
   beforeNavigate?: (navigate: () => void) => void;
 }) {
   const [active, setActive] = useState(initialActive);
@@ -49,6 +51,7 @@ function WorkspaceHarness({
       sessionId={sessionId}
       covered={covered}
       onOpen={onReveal}
+      onNewShell={onNewShell}
       active={active}
       overlayToggle={!beforeNavigate || !active}
       onClose={() => setActive(null)}
@@ -324,4 +327,22 @@ it("reveals a covered workspace without closing its remembered page", () => {
   fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
   expect(reveal).toHaveBeenCalledOnce();
   expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute("aria-selected", "true");
+});
+
+it("offers every panel and new-shell action from the compact mobile plus menu", async () => {
+  const create = vi.fn();
+  render(<WorkspaceHarness initialActive="files" onNewShell={create} />);
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Open workspace panel" }), {
+    button: 0,
+  });
+  await screen.findByRole("menuitem", { name: availableTabs[0].label });
+  for (const tab of availableTabs)
+    expect(screen.getByRole("menuitem", { name: tab.label })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Shells" }));
+  expect(screen.getByRole("tab", { name: "Shells" })).toHaveAttribute("aria-selected", "true");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Open workspace panel" }), {
+    button: 0,
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "New shell" }));
+  expect(create).toHaveBeenCalledOnce();
 });

@@ -28,8 +28,18 @@ def _apply_name(page: Page, name: str) -> None:
     expect(dialog).not_to_be_visible(timeout=20_000)
 
 
+def _folder_action(page: Page, panel: Locator, name: str) -> None:
+    button = panel.get_by_role("button", name=name, exact=True).filter(visible=True)
+    if button.is_visible():
+        button.click()
+        return
+    more = panel.get_by_role("button", name="More file actions", exact=True).filter(visible=True)
+    expect(more).to_be_visible(timeout=30_000)
+    more.click()
+    page.get_by_role("menuitem", name=name, exact=True).click()
+
+
 def _open_row_actions(panel: Locator, path: str) -> None:
-    _entry(panel, path).hover()
     panel.get_by_role("button", name=f"Actions for {path}", exact=True).click()
 
 
@@ -41,13 +51,10 @@ def test_explorer_manages_files_transfers_and_recovery(
     try:
         page.goto(f"{base_url}/c/{session_id}?view=explore")
         panel = page.get_by_role("complementary", name="Workspace")
-        expect(panel.get_by_role("button", name="New file", exact=True)).to_be_visible(
-            timeout=30_000
-        )
-        panel.get_by_role("button", name="New folder", exact=True).click()
+        _folder_action(page, panel, "New folder")
         _apply_name(page, "library")
         expect(_entry(panel, "library")).to_be_visible()
-        panel.get_by_role("button", name="New file", exact=True).click()
+        _folder_action(page, panel, "New file")
         _apply_name(page, "created.txt")
         assert _read_file(base_url, session_id, "created.txt") == ""
 
@@ -156,15 +163,16 @@ def test_workspace_search_replace_preview_and_undo(
         page.goto(f"{base_url}/c/{session_id}?view=explore")
         if mobile:
             page.get_by_role("button", name="Open workspace").click()
-            page.get_by_role("button", name="New file", exact=True).filter(visible=True).click()
+            _folder_action(page, page.get_by_test_id("files-panel-drawer"), "New file")
             _apply_name(page, "phone.txt")
             _open_row_actions(page.get_by_test_id("files-panel-drawer"), "phone.txt")
             page.get_by_role("menuitem", name="Rename…", exact=True).click()
             _apply_name(page, "phone-renamed.txt")
             assert _read_file(base_url, session_id, "phone-renamed.txt") == ""
-        page.get_by_role("button", name="Search folder contents", exact=True).filter(
+        page.get_by_role("button", name="More file actions", exact=True).filter(
             visible=True
         ).click()
+        page.get_by_role("menuitem", name="Search folder contents…", exact=True).click()
         panel = page.get_by_role("region", name="Content search").filter(visible=True)
         query = panel.get_by_role("searchbox", name="Search file contents")
         expect(query).to_be_visible(timeout=30_000)
@@ -317,9 +325,8 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         page.keyboard.press("F2")
         _apply_name(page, "keyboard.txt")
         expect(_entry(panel, "keyboard.txt")).to_be_visible()
-        _entry(panel, "keyboard.txt").hover()
-        panel.get_by_role("checkbox", name="Select keyboard.txt", exact=True).check()
-        panel.get_by_role("checkbox", name="Select b.txt", exact=True).check()
+        _entry(panel, "keyboard.txt").locator("button").first.click(modifiers=["ControlOrMeta"])
+        _entry(panel, "b.txt").locator("button").first.click(modifiers=["ControlOrMeta"])
         expect(panel.get_by_text("2 selected", exact=True)).to_be_visible()
         panel.get_by_role("button", name="More file actions", exact=True).click()
         with page.expect_download(timeout=30_000) as pending:
@@ -333,9 +340,9 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         transfers.get_by_role("status").filter(has_text="Download complete").get_by_role(
             "button", name="Hide notification", exact=True
         ).click()
-        panel.get_by_role("checkbox", name="Select keyboard.txt", exact=True).uncheck()
-        panel.get_by_role("checkbox", name="Select b.txt", exact=True).uncheck()
-        panel.get_by_role("button", name="Collapse all folders", exact=True).click()
+        _entry(panel, "keyboard.txt").locator("button").first.click(modifiers=["ControlOrMeta"])
+        _entry(panel, "b.txt").locator("button").first.click(modifiers=["ControlOrMeta"])
+        _folder_action(page, panel, "Collapse all folders")
         source = _entry(panel, "b.txt")
         destination = _entry(panel, "target")
         source.hover()
@@ -351,7 +358,7 @@ def test_explorer_keyboard_bulk_drag_reveal_and_external_refresh(
         _entry(panel, "target/b.txt").locator("button").first.click()
         expect(page.get_by_test_id("file-viewer")).to_be_visible(timeout=30_000)
         panel.get_by_role("tab", name="Files", exact=True).click()
-        panel.get_by_role("button", name="Collapse all folders", exact=True).click()
+        _folder_action(page, panel, "Collapse all folders")
         expect(_entry(panel, "target/b.txt")).to_have_count(0)
         panel.get_by_role("button", name="Reveal active file", exact=True).click()
         expect(_entry(panel, "target/b.txt")).to_be_visible(timeout=15_000)
@@ -373,7 +380,7 @@ def test_explorer_background_refresh_and_shared_hover_controls(
         held.append(route)
 
     endpoint = re.compile(
-        rf"/sessions/{session_id}/resources/environments/default/filesystem/parent/nested(?:\?|$)"
+        rf"/(?:sessions/{session_id}|workbench-workspaces/[^/]+)/resources/environments/default/filesystem/parent/nested(?:\?|$)"
     )
     try:
         page.goto(f"{base_url}/c/{session_id}?view=explore")
@@ -382,24 +389,27 @@ def test_explorer_background_refresh_and_shared_hover_controls(
         expect(first).to_be_visible(timeout=30_000)
         search = panel.get_by_role("searchbox", name="Search all files")
         search.click()
-        expect(first.locator("[data-file-actions]")).to_have_css("opacity", "0")
         expect(first.locator("[data-file-size]")).to_be_visible()
-        expect(first.get_by_role("checkbox").locator("..")).to_have_css("opacity", "0")
-        first.hover()
-        expect(first.locator("[data-file-actions]")).to_have_css("opacity", "1")
-        expect(first.locator("[data-file-size]")).not_to_be_visible()
+        expect(first.get_by_role("checkbox")).to_have_count(0)
+        menu = first.get_by_role("button", name="Actions for a.txt", exact=True)
+        expect(menu).to_be_visible()
         assert first.locator("[data-explorer-action] button").evaluate_all(
             "buttons => buttons.map(button => button.getAttribute('aria-label'))"
-        ) == ["Select a.txt", "Download a.txt", "Copy path: a.txt", "Actions for a.txt"]
-        first.get_by_role("checkbox", name="Select a.txt").check()
-        search.click()
-        search.hover()
-        second = _entry(panel, "b.txt")
-        expect(second.get_by_role("checkbox").locator("..")).to_have_css("opacity", "1")
-        expect(second.locator("[data-file-actions]")).to_have_css("opacity", "0")
-        expect(second.locator("[data-file-size]")).to_be_visible()
+        ) == ["Actions for a.txt"]
+        actions_box = first.locator("[data-explorer-action]").bounding_box()
+        assert actions_box is not None and actions_box["width"] < 104
         first.hover()
-        first.get_by_role("checkbox", name="Select a.txt").uncheck()
+        expect(first.locator("[data-file-size]")).to_be_visible()
+        expect(menu).to_be_visible()
+        first.locator("button").first.click(modifiers=["ControlOrMeta"])
+        expect(first).to_have_attribute("aria-selected", "true")
+        search.click()
+        second = _entry(panel, "b.txt")
+        expect(second.get_by_role("checkbox")).to_have_count(0)
+        expect(second.get_by_role("button", name="Actions for b.txt", exact=True)).to_be_visible()
+        expect(second.locator("[data-file-size]")).to_be_visible()
+        first.locator("button").first.click(modifiers=["ControlOrMeta"])
+        expect(first).to_have_attribute("aria-selected", "false")
         _entry(panel, "parent").get_by_role("button", name="parent/", exact=True).click()
         nested = _entry(panel, "parent/nested")
         expect(nested).to_be_visible(timeout=15_000)

@@ -1,3 +1,13 @@
+import { PlusIcon, TerminalIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   createContext,
   useContext,
@@ -30,6 +40,9 @@ const WorkspaceContext = createContext<{
   close: () => void;
   overlay: boolean;
   covered: boolean;
+  headerControl?: ReactNode;
+  onNewShell?: () => void;
+  newShellDisabled?: boolean;
   focusTab: { current: boolean };
 } | null>(null);
 
@@ -41,6 +54,9 @@ export function MobileWorkspaceProvider({
   onClose,
   onOpen,
   covered = false,
+  headerControl,
+  onNewShell,
+  newShellDisabled = false,
   overlayToggle = true,
   children,
 }: {
@@ -51,6 +67,9 @@ export function MobileWorkspaceProvider({
   /** Reveal Workspace while dismissing another overlay, retaining the active page. */
   onOpen?: () => void;
   covered?: boolean;
+  headerControl?: ReactNode;
+  onNewShell?: () => void;
+  newShellDisabled?: boolean;
   /** FileViewer renders its own control through its unsaved-change guard. */
   overlayToggle?: boolean;
   children: ReactNode;
@@ -78,8 +97,31 @@ export function MobileWorkspaceProvider({
   }, [sessionId, tabs, select]);
   const close = useCallback(() => onClose?.(), [onClose]);
   const value = useMemo(
-    () => ({ tabs, active, select, open, close, focusTab, overlay: !!onClose, covered }),
-    [tabs, active, select, open, close, onClose, covered],
+    () => ({
+      tabs,
+      active,
+      select,
+      open,
+      close,
+      focusTab,
+      overlay: !!onClose,
+      covered,
+      headerControl,
+      onNewShell,
+      newShellDisabled,
+    }),
+    [
+      tabs,
+      active,
+      select,
+      open,
+      close,
+      onClose,
+      covered,
+      headerControl,
+      onNewShell,
+      newShellDisabled,
+    ],
   );
   return (
     <WorkspaceContext.Provider value={value}>
@@ -190,10 +232,16 @@ export function MobileWorkspaceTabs({
           if (beforeNavigate) beforeNavigate(navigate);
           else navigate();
         }}
-        className="workspace-control-header gap-0 border-b border-border px-14 md:hidden"
+        className="workspace-control-header flex-row! items-center gap-0 border-b border-border px-14 md:hidden"
         data-mobile-workspace-tabs
       >
-        <div ref={scroller} className="overflow-x-auto overscroll-x-contain px-2">
+        {workspace.headerControl && (
+          <div className="min-w-0 shrink-0">{workspace.headerControl}</div>
+        )}
+        <div
+          ref={scroller}
+          className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain px-2"
+        >
           <TabsList aria-label="Workspace" variant="pill">
             {workspace.tabs.map((tab) => (
               <TabsTrigger
@@ -210,6 +258,50 @@ export function MobileWorkspaceTabs({
             ))}
           </TabsList>
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="shrink-0"
+              aria-label="Open workspace panel"
+            >
+              <PlusIcon className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Panels</DropdownMenuLabel>
+            {workspace.tabs.map((tab) => (
+              <DropdownMenuItem
+                key={tab.id}
+                onSelect={() => {
+                  const navigate = () => workspace.select(tab.id);
+                  if (beforeNavigate) beforeNavigate(navigate);
+                  else navigate();
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+              </DropdownMenuItem>
+            ))}
+            {workspace.onNewShell && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={workspace.newShellDisabled}
+                  onSelect={() => {
+                    if (beforeNavigate) beforeNavigate(workspace.onNewShell!);
+                    else workspace.onNewShell?.();
+                  }}
+                >
+                  <TerminalIcon />
+                  New shell
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </Tabs>
     </>
   );

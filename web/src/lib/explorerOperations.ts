@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "@/lib/identity";
+import { resourceBase, type WorkspaceResourceTarget } from "./workbenchWorkspace";
 import { triggerBrowserDownload } from "@/hooks/useFileContent";
 
 /* eslint-disable no-await-in-loop -- Directory readers return batches in order and nested reads depend on their parents. */
@@ -56,12 +57,13 @@ export function isExplorerInternalPath(path: string): boolean {
 }
 
 export async function filesystemOperation(
-  conversationId: string,
+  conversationId: string | undefined,
   body: Record<string, unknown>,
   signal?: AbortSignal,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<FilesystemOperationResult> {
   const response = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/default/filesystem-operations`,
+    `${resourceBase(workspace, conversationId)}/environments/default/filesystem-operations`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

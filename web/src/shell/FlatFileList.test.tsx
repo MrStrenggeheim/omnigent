@@ -104,7 +104,7 @@ describe("FlatFileList status / download alignment", () => {
     expect(screen.getByText("2.0 KB")).toHaveClass("text-sm", "text-muted-foreground");
   });
 
-  it("keeps status separate while actions replace the far-right file size", () => {
+  it("keeps status and size without a reserved hover-action overlay", () => {
     renderList({
       files: [
         {
@@ -123,13 +123,10 @@ describe("FlatFileList status / download alignment", () => {
     expect(letter.parentElement).toHaveClass(ROW_STATUS_SLOT_CLASS);
 
     const size = screen.getByText("2.0 KB");
-    const slot = size.parentElement;
-    expect(slot).toHaveClass("relative");
-    expect(size).toHaveClass("group-hover:invisible");
-    const download = screen.getByRole("button", { name: /download app\.ts/i });
-    const overlay = download.closest("span.absolute") as HTMLElement | null;
-    expect(overlay).not.toBeNull();
-    expect(slot).toContainElement(overlay);
+    expect(size).not.toHaveClass("group-hover:invisible");
+    expect(size.closest("[data-explorer-action]")).not.toHaveClass("w-[104px]");
+    expect(screen.queryByRole("button", { name: /download app/i })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 });
 
@@ -216,7 +213,7 @@ describe("FlatFileList line-change counter", () => {
 });
 
 describe("FlatFileList copy path", () => {
-  it("copies the full path even though the button is named for the file", () => {
+  it("keeps the full path without an extra inline copy control", () => {
     // The accessible name carries only the basename (so a screen reader isn't
     // read a whole path per row, and the name can't collide with the folder
     // toggles that legitimately contain directory segments) -- but the
@@ -235,10 +232,9 @@ describe("FlatFileList copy path", () => {
       ],
     });
 
-    const button = screen.getByRole("button", { name: "Copy path: app.ts" });
-    fireEvent.click(button);
-
-    expect(copyTextMock).toHaveBeenCalledWith("src/deep/app.ts");
+    expect(screen.queryByRole("button", { name: "Copy path: app.ts" })).toBeNull();
+    expect(screen.getByText("app.ts")).toBeInTheDocument();
+    expect(copyTextMock).not.toHaveBeenCalled();
   });
 });
 

@@ -689,6 +689,40 @@ class SqlConversationMetadata(OmnigentBase):
     )
 
 
+class SqlWorkbenchWorkspace(OmnigentBase):
+    """Owner-private filesystem identities, independent of conversations."""
+
+    __tablename__ = "workbench_workspaces"
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, default=current_workspace_id, server_default="0"
+    )
+    id: Mapped[str] = mapped_column(Uuid16(), primary_key=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    account_generation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    host_id: Mapped[str | None] = mapped_column(Uuid16(), nullable=True)
+    target_kind: Mapped[str] = mapped_column(String(16))
+    target_id: Mapped[str] = mapped_column(String(256))
+    generation: Mapped[str] = mapped_column(String(128))
+    root: Mapped[str] = mapped_column(Text)
+    source_session_id: Mapped[str | None] = mapped_column(Uuid16(), nullable=True)
+    source_environment_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (
+        Index("ix_workbench_workspaces_owner", "workspace_id", "owner_user_id", "id"),
+    )
+
+
+class SqlWorkbenchWorkspaceSession(OmnigentBase):
+    """A chat's reference to an independently authorized workspace."""
+
+    __tablename__ = "workbench_workspace_sessions"
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, default=current_workspace_id, server_default="0"
+    )
+    session_id: Mapped[str] = mapped_column(Uuid16(), primary_key=True)
+    workbench_workspace_id: Mapped[str] = mapped_column(Uuid16())
+
+
 class SqlProject(OmnigentBase):
     """
     SQLAlchemy model for the ``projects`` table.

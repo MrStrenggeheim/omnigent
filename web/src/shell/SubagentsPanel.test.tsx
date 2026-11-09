@@ -28,6 +28,12 @@ vi.mock("@/hooks/useSession", () => ({
   useSession: vi.fn(),
 }));
 
+vi.mock("./SubagentsGraphView", () => ({
+  SubagentsGraphView: ({ rootSessionId }: { rootSessionId: string }) => (
+    <div>Agent graph for {rootSessionId}</div>
+  ),
+}));
+
 // Stub the brand logos with plain SVGs so jsdom doesn't have to resolve
 // @lobehub/ui's runtime tooltip imports. The assertions prove which icon
 // the row selected, independent of the real glyph internals.
@@ -161,6 +167,35 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("SubagentsPanel", () => {
+  it("embeds the existing tree without adding a header or scroll container", () => {
+    mockChildTree({ conv_root: [childInfo({ id: "conv_child", tool: "researcher" })] });
+    const { container } = render(
+      <MemoryRouter>
+        <SubagentsPanel conversationId="conv_child" rootSessionId="conv_root" embedded />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("heading", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("subagent-main-row")).toHaveAttribute("href", "/c/conv_root");
+    expect(childRow(container, "conv_child")).toHaveClass("bg-accent");
+    expect(container.querySelector("ul")).not.toHaveClass("overflow-y-auto");
+  });
+
+  it("accepts the Activity header's graph selection while embedded", async () => {
+    useChildSessionsMock.mockReturnValue({ children: [], isLoading: false, error: null });
+    render(
+      <MemoryRouter>
+        <SubagentsPanel
+          conversationId="conv_child"
+          rootSessionId="conv_root"
+          embedded
+          viewMode="graph"
+        />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Agent graph for conv_root")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Graph view" })).not.toBeInTheDocument();
+  });
+
   it("always renders a 'main' row linking to the root session", () => {
     // No children at all — the panel still shows the main link so
     // the user always has a path back to the parent.

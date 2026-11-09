@@ -100,6 +100,7 @@ interface TerminalClipboardRequest {
 }
 
 interface TerminalViewProps {
+  workspaceId?: string;
   /** Session/conversation identifier, e.g. ``"conv_abc123"``. */
   sessionId: string;
   /** Opaque terminal resource id, e.g. ``"terminal_bash_s1"``. */
@@ -158,6 +159,7 @@ interface TerminalViewProps {
 }
 
 export function TerminalView({
+  workspaceId,
   sessionId,
   terminalId,
   readOnly = false,
@@ -572,7 +574,11 @@ export function TerminalView({
           const h = getSessionHost(sessionId);
           return h && (!isDatabricksWorkspace() || !isHostKeyless(h)) ? h : undefined;
         })();
-        const relayUrl = buildAttachUrl(sessionId, terminalId, readOnly, computedHostId);
+        const relayUrl = workspaceId
+          ? resolveWebSocketUrl(
+              `/v1/workbench-workspaces/${encodeURIComponent(workspaceId)}/terminals/${encodeURIComponent(terminalId)}/attach${readOnly ? "?read_only=true" : ""}`,
+            )
+          : buildAttachUrl(sessionId, terminalId, readOnly, computedHostId);
         const directUrl = directAttachUrl ? withAttachParams(directAttachUrl, readOnly) : undefined;
         // Never keep the user waiting on the direct path: this resolves
         // direct only when the loopback listener is already known
@@ -615,6 +621,7 @@ export function TerminalView({
       };
     },
     [
+      workspaceId,
       sessionId,
       terminalId,
       readOnly,

@@ -1,3 +1,4 @@
+import { usePanelEscapeClose } from "@/hooks/usePanelEscapeClose";
 import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side push panel that hosts the working-folder file tree.
 // Triggered from `SessionRail`'s files card (or the mobile FAB).
@@ -62,14 +63,7 @@ export function FilesPanelDrawer({
   const { panelWidth, handleProps, isDesktop } = useResizablePanel(open);
   const ref = useRef<HTMLElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  usePanelEscapeClose(open, onClose);
 
   useEffect(() => {
     if (ref.current) {

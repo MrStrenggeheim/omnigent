@@ -1,3 +1,4 @@
+import { WorkbenchWorkspaceProvider, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
@@ -15,52 +16,73 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-it("supports explicit searches, filters and preserved results", async () => {
-  vi.mocked(authenticatedFetch).mockImplementation(
-    async () => new Response(JSON.stringify({ matches: [], truncated: false, warning: null })),
-  );
-  const client = new QueryClient();
-  const view = (request: number) => (
-    <StrictMode>
-      <QueryClientProvider client={client}>
-        <ContentSearchPanel key={request} conversationId="session-one" onFileSelect={vi.fn()} />
-      </QueryClientProvider>
-    </StrictMode>
-  );
-  const { rerender } = render(view(1));
-  expect(authenticatedFetch).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "  needle  " } });
-  const filters = screen.getByRole("button", { name: "Filter files" });
-  expect(screen.getByRole("searchbox").nextElementSibling).toBe(filters);
-  expect(filters).toHaveAttribute("aria-expanded", "false");
-  expect(screen.getByLabelText("Include")).not.toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Filter files" }));
-  expect(filters).toHaveAttribute("aria-expanded", "true");
-  expect(screen.getByLabelText("Include")).toBeVisible();
-  fireEvent.change(screen.getByLabelText("Include"), { target: { value: "src/**" } });
-  fireEvent.change(screen.getByLabelText("Exclude"), { target: { value: "*.test.ts" } });
-  fireEvent.click(screen.getByRole("button", { name: "Filter files" }));
-  expect(filters).toHaveAttribute("aria-expanded", "false");
-  expect(screen.getByLabelText("Include")).not.toBeVisible();
-  expect(authenticatedFetch).not.toHaveBeenCalled();
-  fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
-  expect(await screen.findByText(/No matches for/)).toBeInTheDocument();
-  expect(screen.getByRole("searchbox")).toHaveValue("  needle  ");
-  expect(authenticatedFetch).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Filter files" }));
-  fireEvent.change(screen.getByLabelText("Include"), { target: { value: "" } });
-  fireEvent.change(screen.getByLabelText("Exclude"), { target: { value: "" } });
-  fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
-  await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(2));
-  const cleared = new URL(String(vi.mocked(authenticatedFetch).mock.calls[1][0]), "http://test");
-  expect(cleared.searchParams.get("include")).toBe("");
-  expect(cleared.searchParams.get("exclude")).toBe("");
-  expect(await screen.findByText(/No matches for/)).toBeInTheDocument();
-  rerender(view(2));
-  expect(screen.getByRole("searchbox")).toHaveValue("  needle  ");
-  expect(screen.getByText(/No matches for/)).toBeInTheDocument();
-  expect(authenticatedFetch).toHaveBeenCalledTimes(2);
-});
+const workspace: WorkbenchWorkspace = {
+  id: "selected",
+  root: "/selected",
+  host_id: "host",
+  target_kind: "host",
+  capabilities: ["files", "search"],
+  permission_level: 2,
+};
+
+it.each([false, true])(
+  "supports explicit searches, filters and preserved results (workspace=%s)",
+  async (selected) => {
+    vi.mocked(authenticatedFetch).mockImplementation(
+      async () => new Response(JSON.stringify({ matches: [], truncated: false, warning: null })),
+    );
+    const client = new QueryClient();
+    const view = (request: number) => (
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <WorkbenchWorkspaceProvider value={selected ? workspace : null}>
+            <ContentSearchPanel
+              key={request}
+              conversationId={selected ? `chat-${request}` : "session-one"}
+              onFileSelect={vi.fn()}
+            />
+          </WorkbenchWorkspaceProvider>
+        </QueryClientProvider>
+      </StrictMode>
+    );
+    const { rerender } = render(view(1));
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "  needle  " } });
+    const filters = screen.getByRole("button", { name: "Filter files" });
+    expect(screen.getByRole("searchbox").nextElementSibling).toBe(filters);
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByLabelText("Include")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Filter files" }));
+    expect(filters).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Include")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Include"), { target: { value: "src/**" } });
+    fireEvent.change(screen.getByLabelText("Exclude"), { target: { value: "*.test.ts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Filter files" }));
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByLabelText("Include")).not.toBeVisible();
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+    fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
+    expect(await screen.findByText(/No matches for/)).toBeInTheDocument();
+    expect(screen.getByRole("searchbox")).toHaveValue("  needle  ");
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Filter files" }));
+    fireEvent.change(screen.getByLabelText("Include"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Exclude"), { target: { value: "" } });
+    fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(2));
+    const cleared = new URL(String(vi.mocked(authenticatedFetch).mock.calls[1][0]), "http://test");
+    expect(cleared.pathname).toBe(
+      `${selected ? "/v1/workbench-workspaces/selected" : "/v1/sessions/session-one"}/resources/environments/default/content-search`,
+    );
+    expect(cleared.searchParams.get("include")).toBe("");
+    expect(cleared.searchParams.get("exclude")).toBe("");
+    expect(await screen.findByText(/No matches for/)).toBeInTheDocument();
+    rerender(view(2));
+    expect(screen.getByRole("searchbox")).toHaveValue("  needle  ");
+    expect(screen.getByText(/No matches for/)).toBeInTheDocument();
+    expect(authenticatedFetch).toHaveBeenCalledTimes(2);
+  },
+);
 
 it("submits content and options explicitly, highlights results and opens the exact position", async () => {
   const onFileSelect = vi.fn();
@@ -345,73 +367,88 @@ it("pins a search folder while browsing changes and opens replace from its short
   expect(screen.getByLabelText("Search folder")).toHaveValue("tests");
 });
 
-it("previews selected replacements, applies searched snapshots and can undo them", async () => {
-  const match = {
-    id: "main:0:6",
-    path: "src/main.py",
-    relative_path: "main.py",
-    line: 1,
-    column: 1,
-    text: "needle",
-    match_start: 0,
-    match_end: 6,
-    start_byte: 0,
-    end_byte: 6,
-    sha256: "snapshot-hash",
-  };
-  const posts: Record<string, unknown>[] = [];
-  vi.mocked(authenticatedFetch).mockImplementation(async (_url, options) => {
-    if (options?.method !== "POST")
-      return new Response(JSON.stringify({ matches: [match], truncated: false, warning: null }));
-    const body = JSON.parse(String(options.body));
-    posts.push(body);
-    if (body.action === "preview")
-      return new Response(
-        JSON.stringify({
-          previews: [{ id: match.id, path: "main.py", line: 1, before: "needle", after: "thread" }],
-          errors: [],
-        }),
+it.each([false, true])(
+  "previews selected replacements, applies searched snapshots and can undo them (workspace=%s)",
+  async (selected) => {
+    const match = {
+      id: "main:0:6",
+      path: "src/main.py",
+      relative_path: "main.py",
+      line: 1,
+      column: 1,
+      text: "needle",
+      match_start: 0,
+      match_end: 6,
+      start_byte: 0,
+      end_byte: 6,
+      sha256: "snapshot-hash",
+    };
+    const posts: Record<string, unknown>[] = [];
+    vi.mocked(authenticatedFetch).mockImplementation(async (url, options) => {
+      expect(String(url)).toContain(
+        `${selected ? "/v1/workbench-workspaces/selected" : "/v1/sessions/replace"}/resources/environments/default/content-`,
       );
-    if (body.action === "apply")
-      return new Response(
-        JSON.stringify({ applied: ["main.py"], matches: 1, errors: [], undo_id: "undo-token" }),
-      );
-    return new Response(JSON.stringify({ restored: ["main.py"], errors: [], undo_id: null }));
-  });
-  render(
-    <QueryClientProvider client={new QueryClient()}>
-      <ContentSearchPanel conversationId="replace" scope="src" replaceOpen onFileSelect={vi.fn()} />
-    </QueryClientProvider>,
-  );
-  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "needle" } });
-  fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
-  expect(
-    await screen.findByRole("button", { name: "Open src/main.py at line 1" }),
-  ).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Replace with"), { target: { value: "thread" } });
-  fireEvent.click(screen.getByLabelText("Preserve case"));
-  expect(screen.getByLabelText("Preserve case")).toBeChecked();
-  fireEvent.click(screen.getByRole("button", { name: "Preview replacements (1)" }));
-  expect(await screen.findByText("Review replacements")).toBeInTheDocument();
-  expect(posts[0]).toMatchObject({
-    action: "preview",
-    path: "src",
-    query: "needle",
-    replacement: "thread",
-    preserve_case: true,
-    matches: [match],
-  });
-  expect(posts).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: "Apply replacements" }));
-  expect(await screen.findByText("Replaced 1 matches in 1 files.")).toBeInTheDocument();
-  expect(posts[1]).toMatchObject({ action: "apply", matches: [match] });
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Undo replacement" })).toBeEnabled(),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Undo replacement" }));
-  expect(await screen.findByText("Restored 1 files.")).toBeInTheDocument();
-  expect(posts[2]).toMatchObject({ action: "undo", path: "src", undo_id: "undo-token" });
-});
+      if (options?.method !== "POST")
+        return new Response(JSON.stringify({ matches: [match], truncated: false, warning: null }));
+      const body = JSON.parse(String(options.body));
+      posts.push(body);
+      if (body.action === "preview")
+        return new Response(
+          JSON.stringify({
+            previews: [
+              { id: match.id, path: "main.py", line: 1, before: "needle", after: "thread" },
+            ],
+            errors: [],
+          }),
+        );
+      if (body.action === "apply")
+        return new Response(
+          JSON.stringify({ applied: ["main.py"], matches: 1, errors: [], undo_id: "undo-token" }),
+        );
+      return new Response(JSON.stringify({ restored: ["main.py"], errors: [], undo_id: null }));
+    });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkbenchWorkspaceProvider value={selected ? workspace : null}>
+          <ContentSearchPanel
+            conversationId="replace"
+            scope="src"
+            replaceOpen
+            onFileSelect={vi.fn()}
+          />
+        </WorkbenchWorkspaceProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "needle" } });
+    fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
+    expect(
+      await screen.findByRole("button", { name: "Open src/main.py at line 1" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Replace with"), { target: { value: "thread" } });
+    fireEvent.click(screen.getByLabelText("Preserve case"));
+    expect(screen.getByLabelText("Preserve case")).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Preview replacements (1)" }));
+    expect(await screen.findByText("Review replacements")).toBeInTheDocument();
+    expect(posts[0]).toMatchObject({
+      action: "preview",
+      path: "src",
+      query: "needle",
+      replacement: "thread",
+      preserve_case: true,
+      matches: [match],
+    });
+    expect(posts).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Apply replacements" }));
+    expect(await screen.findByText("Replaced 1 matches in 1 files.")).toBeInTheDocument();
+    expect(posts[1]).toMatchObject({ action: "apply", matches: [match] });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Undo replacement" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Undo replacement" }));
+    expect(await screen.findByText("Restored 1 files.")).toBeInTheDocument();
+    expect(posts[2]).toMatchObject({ action: "undo", path: "src", undo_id: "undo-token" });
+  },
+);
 
 it("uses shared replacement checkboxes with mixed, all and empty selection states", async () => {
   const matches = [1, 2, 3].map((line) => ({

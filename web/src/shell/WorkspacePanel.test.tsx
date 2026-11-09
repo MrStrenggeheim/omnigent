@@ -296,7 +296,10 @@ describe("WorkspacePanel surface presentation", () => {
     const { onRightRailTabChange } = renderWorkspace({ showGithubTab: true });
 
     expect(screen.queryByRole("tab", { name: "Changes" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "Agents 1" })).toHaveAttribute("aria-keyshortcuts", "2");
+    expect(screen.getByRole("tab", { name: "Activity 1" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "2",
+    );
     fireEvent.pointerDown(screen.getByRole("button", { name: "Open new" }), { button: 0 });
     expect(screen.getByRole("menuitem", { name: "Pull Requests" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Files" })).toBeNull();
@@ -329,7 +332,7 @@ describe("WorkspacePanel surface presentation", () => {
     expect(screen.queryByTestId("files-panel-stub")).toBeNull();
     expect(screen.getByText("Open a Workspace tab from the + menu.")).toBeInTheDocument();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Open new" }), { button: 0 });
-    expect(screen.getByRole("menuitem", { name: "Agents" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Activity" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Files" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Pull Requests" })).toBeNull();
   });
@@ -479,7 +482,7 @@ describe("WorkspacePanel surface presentation", () => {
 
     const filesTab = screen.getByRole("tab", { name: "Files" });
     const changesTab = screen.getByRole("tab", { name: "Changes" });
-    const agentsTab = screen.getByRole("tab", { name: "Agents 1" });
+    const agentsTab = screen.getByRole("tab", { name: "Activity 1" });
     // Icon-only tabs carry their accessible name (queried above) plus a hover
     // tooltip, never a native title attribute. Exact size/padding classes are
     // intentionally not asserted — brittle styling detail, not behaviour.
@@ -489,10 +492,10 @@ describe("WorkspacePanel surface presentation", () => {
   });
 
   it.each([
-    ["files", ["Files", "Changes", "Pull Requests", "Agents 1"]],
-    ["changes", ["Changes", "Files", "Pull Requests", "Agents 1"]],
-    ["github", ["Pull Requests", "Files", "Changes", "Agents 1"]],
-    ["subagents", ["Agents 1", "Files", "Changes", "Pull Requests"]],
+    ["files", ["Files", "Changes", "Pull Requests", "Activity 1"]],
+    ["changes", ["Changes", "Files", "Pull Requests", "Activity 1"]],
+    ["github", ["Pull Requests", "Files", "Changes", "Activity 1"]],
+    ["subagents", ["Activity 1", "Files", "Changes", "Pull Requests"]],
   ] as const)("places the %s default first without reordering the remaining tabs", (tab, order) => {
     writeDefaultWorkspaceTab(tab);
     renderWorkspace({ showGithubTab: true, showBrowserTab: true, rightRailTab: "files" });
@@ -527,7 +530,10 @@ describe("WorkspacePanel surface presentation", () => {
 
     expect(changes).toHaveAttribute("aria-keyshortcuts", "1");
     expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-keyshortcuts", "2");
-    expect(screen.getByRole("tab", { name: "Agents 1" })).toHaveAttribute("aria-keyshortcuts", "4");
+    expect(screen.getByRole("tab", { name: "Activity 1" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "4",
+    );
 
     fireEvent.keyDown(changes, { key: "2" });
     fireEvent.keyDown(changes, { key: "5" });
@@ -555,7 +561,10 @@ describe("WorkspacePanel surface presentation", () => {
 
     expect(files).toHaveAttribute("aria-keyshortcuts", "1");
     expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-keyshortcuts", "2");
-    expect(screen.getByRole("tab", { name: "Agents 1" })).toHaveAttribute("aria-keyshortcuts", "3");
+    expect(screen.getByRole("tab", { name: "Activity 1" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "3",
+    );
 
     fireEvent.keyDown(files, { key: "3" });
     expect(onRightRailTabChange).toHaveBeenCalledWith("subagents");
@@ -568,14 +577,14 @@ describe("WorkspacePanel surface presentation", () => {
     expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual([
       "Files",
       "Changes",
-      "Agents 1",
+      "Activity 1",
     ]);
   });
 
   it("shows inert workspace chrome while a temporary session is pending", () => {
     renderWorkspace({ pending: true });
 
-    for (const name of ["Files", "Changes", "Pull Requests", "Agents"]) {
+    for (const name of ["Files", "Changes", "Pull Requests", "Activity"]) {
       expect(screen.getByRole("tab", { name: new RegExp(name) })).toBeDisabled();
     }
     expect(screen.getByText("Starting workspace…")).toBeInTheDocument();
@@ -612,7 +621,7 @@ describe("WorkspacePanel surface presentation", () => {
   it.each([
     { tabName: "Files", tooltip: "Files", shortcut: "1" },
     { tabName: "Changes", tooltip: "Changes", shortcut: "2" },
-    { tabName: "Agents 1", tooltip: "Agents", shortcut: "3" },
+    { tabName: "Activity 1", tooltip: "Activity", shortcut: "3" },
   ])(
     "explains the $tabName pane icon and its number with a hover tooltip",
     async ({ tabName, tooltip, shortcut }) => {
@@ -1502,7 +1511,7 @@ describe("WorkspacePanel panel picker", () => {
   it("lists available permanent panels and switches to them", () => {
     const { onRightRailTabChange } = renderWorkspace({ showGithubTab: true });
     fireEvent.pointerDown(screen.getByRole("button", { name: "Select panel" }), { button: 0 });
-    for (const name of ["Changes", "Pull Requests", "Agents"]) {
+    for (const name of ["Changes", "Pull Requests", "Activity"]) {
       expect(screen.getByRole("menuitem", { name })).toBeInTheDocument();
     }
     fireEvent.click(screen.getByRole("menuitem", { name: "Pull Requests" }));

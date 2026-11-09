@@ -1,3 +1,4 @@
+import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
 // The PR's title (in the panel header) and description (in the Summary tab), each
 // editable in place by editors. The description editor is a raw markdown textarea
 // with a preview; pasted, dropped, or picked images and videos upload at once and
@@ -282,7 +283,8 @@ export function PullRequestDescription({
   /** Images and videos can be uploaded into the body. */
   attachments: boolean;
 }) {
-  const key = `${conversationId}\n${prUrl ?? ""}`;
+  const workspace = useWorkbenchWorkspace();
+  const key = `${queryIdentity(workspace, conversationId)}\n${prUrl ?? ""}`;
   const draft = useSyncExternalStore(subscribeToDrafts, () => descriptionDrafts.get(key) ?? null);
   const canEdit = editable && !!prUrl;
 
@@ -352,6 +354,7 @@ function PullRequestDescriptionEditor({
   original: string;
   attachments: boolean;
 }) {
+  const workspace = useWorkbenchWorkspace();
   const update = useUpdatePullRequestDetails(conversationId);
   // Where an attachment goes: the last caret or selection, or the end before any.
   const selection = useRef<{ start: number; end: number } | null>(null);
@@ -394,7 +397,7 @@ function PullRequestDescriptionEditor({
           selection.current = { start: caret, end: caret };
           return { ...current, body, uploading: current.uploading + 1 };
         });
-        uploadPullRequestAttachment(conversationId, prUrl, file).then(
+        uploadPullRequestAttachment(conversationId, prUrl, file, workspace).then(
           (attachment) => {
             rememberUploadedImage(attachment.url, file);
             updateDescriptionDraft(
@@ -423,7 +426,7 @@ function PullRequestDescriptionEditor({
         );
       }
     },
-    [conversationId, draftKey, prUrl],
+    [conversationId, workspace, draftKey, prUrl],
   );
 
   const close = () => {

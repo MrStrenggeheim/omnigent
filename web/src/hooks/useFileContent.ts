@@ -18,6 +18,13 @@ import {
   useWorkspaceServeable,
 } from "@/hooks/useWorkspaceChangedFiles";
 import { useChatStore } from "@/store/chatStore";
+import {
+  useWorkbenchWorkspace,
+  queryIdentity,
+  resourceBase,
+  type WorkbenchWorkspace,
+  type WorkspaceResourceTarget,
+} from "@/lib/workbenchWorkspace";
 
 // The primary workspace environment is always "default".  This hook targets
 // the primary workspace; pass a different id if terminal environments are needed.
@@ -46,28 +53,30 @@ export interface FileContentResponse {
  * :param path: Workspace-relative or host-absolute file path.
  * :param query: Extra query parameters, e.g. ``{ download: "true" }``.
  */
-function workspaceFileUrl(
-  conversationId: string,
+export function workspaceFileUrl(
+  conversationId: string | undefined,
   path: string,
   query: Record<string, string> = {},
+  workspace?: WorkspaceResourceTarget,
 ): string {
   const base = browseLocationBase(path);
   const params = new URLSearchParams(base ? { ...query, base } : query).toString();
   return (
-    `/v1/sessions/${encodeURIComponent(conversationId)}` +
-    `/resources/environments/${DEFAULT_ENVIRONMENT_ID}/filesystem/${browseLocationSegment(path)}` +
+    `${resourceBase(workspace, conversationId)}` +
+    `/environments/${DEFAULT_ENVIRONMENT_ID}/filesystem/${browseLocationSegment(path)}` +
     (params ? `?${params}` : "")
   );
 }
 
 /** Read complete media bytes through the host's authenticated transport, with cancellation. */
 export async function fetchWorkspaceFileBlob(
-  conversationId: string,
+  conversationId: string | undefined,
   path: string,
   signal?: AbortSignal,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<Blob> {
   const res = await authenticatedFetch(
-    workspaceFileUrl(conversationId, path, { download: "true" }),
+    workspaceFileUrl(conversationId, path, { download: "true" }, workspace),
     {
       signal,
     },
@@ -77,10 +86,11 @@ export async function fetchWorkspaceFileBlob(
 }
 
 export async function fetchFileContent(
-  conversationId: string,
+  conversationId: string | undefined,
   path: string,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<FileContentResponse> {
-  const res = await authenticatedFetch(workspaceFileUrl(conversationId, path));
+  const res = await authenticatedFetch(workspaceFileUrl(conversationId, path, {}, workspace));
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return (await res.json()) as FileContentResponse;
 }
@@ -149,8 +159,12 @@ function clickDownloadLink(href: string, filename: string): void {
  * :param conversationId: The session/conversation ID, e.g. ``"sess_abc123"``.
  * :param path: Workspace-relative file path, e.g. ``"src/main.py"``.
  */
-export async function downloadWorkspaceFile(conversationId: string, path: string): Promise<void> {
-  const url = workspaceFileUrl(conversationId, path, { download: "true" });
+export async function downloadWorkspaceFile(
+  conversationId: string | undefined,
+  path: string,
+  workspace?: WorkspaceResourceTarget,
+): Promise<void> {
+  const url = workspaceFileUrl(conversationId, path, { download: "true" }, workspace);
   const filename = path.split("/").pop() ?? path;
   if (!isDatabricksWorkspace() && !isIOSShell() && !isAndroidShell()) {
     // A direct anchor navigation, so it must carry the deployment subpath the
@@ -181,42 +195,45 @@ export async function downloadWorkspaceFile(conversationId: string, path: string
 export function useFileContent(
   conversationId: string | undefined,
   path: string | null,
-  options: { retry?: boolean } = {},
+  options: { retry?: boolean; workspace?: WorkbenchWorkspace | null } = {},
 ) {
   // A `temp:*` id (navigate-first new-chat window) has no server session yet,
   // so never request `/v1/sessions/temp:*/resources/*` for it.
+  const workspace = useWorkbenchWorkspace(options.workspace);
   const serverId = isTempConvId(conversationId) ? undefined : conversationId;
+  const identity = queryIdentity(workspace, serverId);
   const focusedId = useChatStore((s) => s.conversationId);
   const sessionStatus = useChatStore((s) => s.sessionStatus);
   const sessionActive =
+    !workspace &&
     !!serverId &&
     serverId === focusedId &&
     (sessionStatus === "running" || sessionStatus === "waiting");
   // Serveable when the runner is online OR (runner offline but) the host can
   // read the workspace from disk — keeps the viewer live while the agent is
   // asleep. `false` only when neither source can answer.
-  const serveable = useWorkspaceServeable(serverId);
+  const serveable = useWorkspaceServeable(serverId, workspace);
   const queryClient = useQueryClient();
 
   const prevRef = useRef<{ id: string | undefined; active: boolean }>({
-    id: serverId,
+    id: identity,
     active: sessionActive,
   });
   useEffect(() => {
-    const sameSession = prevRef.current.id === serverId;
+    const sameSession = prevRef.current.id === identity;
     const justWentIdle = sameSession && prevRef.current.active && !sessionActive;
-    prevRef.current = { id: serverId, active: sessionActive };
-    if (justWentIdle && serverId && path) {
+    prevRef.current = { id: identity, active: sessionActive };
+    if (justWentIdle && identity && path) {
       void queryClient.invalidateQueries({
-        queryKey: ["file-content", serverId, path],
+        queryKey: ["file-content", identity, path],
       });
     }
-  }, [serverId, path, sessionActive, queryClient]);
+  }, [identity, path, sessionActive, queryClient]);
 
   return useQuery({
-    queryKey: ["file-content", serverId, path],
-    queryFn: () => fetchFileContent(serverId!, path!),
-    enabled: !!serverId && !!path && serveable !== false,
+    queryKey: ["file-content", identity, path],
+    queryFn: () => fetchFileContent(serverId!, path!, workspace),
+    enabled: !!identity && !!path && serveable !== false,
     staleTime: 5_000,
     ...(options.retry === undefined ? {} : { retry: options.retry }),
   });

@@ -1,3 +1,8 @@
+import {
+  WorkbenchWorkspaceProvider,
+  queryIdentity,
+  type WorkbenchWorkspace,
+} from "@/lib/workbenchWorkspace";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
@@ -169,4 +174,59 @@ it("does not restore an unlinked GitLab MR from an older host's stale selection"
     prs: [],
     selected_pr_url: undefined,
   });
+});
+
+it("uses one workspace PR cache and mutation target across unrelated chats", async () => {
+  const workspace: WorkbenchWorkspace = {
+    id: "selected",
+    root: "/selected",
+    host_id: "host",
+    target_kind: "host",
+    capabilities: ["github"],
+  };
+  const payload = {
+    object: "session.github.info",
+    available: true,
+    tracking_available: true,
+    prs: [],
+    pr: null,
+  };
+  const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(payload)));
+  vi.stubGlobal("fetch", fetch);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { result, rerender } = renderHook(
+    ({ sessionId }: { sessionId?: string }) => ({
+      info: usePullRequestInfo(sessionId),
+      update: useUpdateSessionPr(sessionId ?? ""),
+    }),
+    {
+      initialProps: { sessionId: undefined as string | undefined },
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <WorkbenchWorkspaceProvider value={workspace}>{children}</WorkbenchWorkspaceProvider>
+        </QueryClientProvider>
+      ),
+    },
+  );
+  await waitFor(() => expect(result.current.info.isSuccess).toBe(true));
+  expect(fetch.mock.calls[0][0]).toBe("/v1/workbench-workspaces/selected/resources/github");
+  rerender({ sessionId: "unrelated-chat" });
+  expect(result.current.info.data?.available).toBe(true);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await act(() =>
+    result.current.update.mutateAsync({
+      url: "https://github.com/example/repo/pull/1",
+      action: "attach",
+    }),
+  );
+  expect(
+    fetch.mock.calls.some(
+      ([url, init]) =>
+        String(url).endsWith("selected/resources/github/prs") && init?.method === "POST",
+    ),
+  ).toBe(true);
+  expect(
+    fetch.mock.calls.every(([url]) => String(url).includes("/workbench-workspaces/selected/")),
+  ).toBe(true);
+  expect(client.getQueryData(["github-info", queryIdentity(workspace)])).toMatchObject(payload);
 });

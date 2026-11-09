@@ -1,3 +1,4 @@
+import type { WorkspaceResourceTarget } from "@/lib/workbenchWorkspace";
 import type { AnyExtension } from "@tiptap/core";
 import { StarterKit } from "@tiptap/starter-kit";
 import { TableRow, TableCell, TableHeader } from "@tiptap/extension-table";
@@ -18,6 +19,7 @@ const SafeListItem = ListItem.extend({ content: "block+" });
 export function createMarkdownDocumentExtensions(
   conversationId: string,
   path: string,
+  workspace?: WorkspaceResourceTarget,
 ): AnyExtension[] {
   return [
     // Disabled built-ins are replaced below; duplicate extension names would
@@ -45,6 +47,6 @@ export function createMarkdownDocumentExtensions(
     // reflows prose to the viewer width like Preview; see TipTapSoftBreak.ts.
     SoftBreak,
     Markdown,
-    createWorkspaceImageExtension(conversationId, path),
+    createWorkspaceImageExtension(conversationId, path, workspace),
   ];
 }

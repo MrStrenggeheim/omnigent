@@ -5,6 +5,8 @@ import { authenticatedFetch } from "../lib/identity";
 import { useSessionRunnerOnline } from "@/hooks/RunnerHealthProvider";
 import { isTempConvId } from "@/lib/tempConversationId";
 import { terminalInfoFromResource, terminalsQueryKey, type TerminalInfo } from "@/lib/terminals";
+import { useWorkbenchWorkspace, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
+import { apiErrorFromResponse } from "@/lib/sessionsApi";
 import { showToast } from "@/components/ui/toast";
 
 export { terminalInfoFromResource, terminalsQueryKey, type TerminalInfo } from "@/lib/terminals";
@@ -255,13 +257,16 @@ async function fetchTerminalList(conversationId: string): Promise<TerminalInfo[]
 export async function createTerminal(
   conversationId: string,
   terminal: string,
+  workspace?: WorkbenchWorkspace | null,
 ): Promise<TerminalInfo> {
   // Random session key so repeated clicks launch fresh terminals —
   // the runner's launch is idempotent per (terminal, session_key), so
   // a fixed key would silently return the same terminal every time.
   const sessionKey = `u-${Math.random().toString(36).slice(2, 8)}`;
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/terminals`,
+    workspace
+      ? `/v1/workbench-workspaces/${encodeURIComponent(workspace.id)}/terminals`
+      : `/v1/sessions/${encodeURIComponent(conversationId)}/resources/terminals`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -278,7 +283,8 @@ export async function createTerminal(
     }
     throw new Error(message);
   }
-  const info = terminalInfoFromResource((await res.json()) as Record<string, unknown>);
+  const raw = (await res.json()) as Record<string, unknown>;
+  const info = terminalInfoFromResource(workspace ? { ...raw, workspace_id: workspace.id } : raw);
   if (info === null) {
     throw new Error("terminal create returned an unrecognized resource shape");
   }
@@ -296,12 +302,23 @@ export async function createTerminal(
  * :param conversationId: Session/conversation identifier.
  * :returns: TanStack mutation taking the declared terminal name.
  */
-export function useCreateTerminal(conversationId: string) {
+export function useCreateTerminal(
+  conversationId: string,
+  explicitWorkspace?: WorkbenchWorkspace | null,
+) {
+  const workspace = useWorkbenchWorkspace(explicitWorkspace);
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (terminal: string) => createTerminal(conversationId, terminal),
-    onSuccess: (info) => {
-      const key = terminalsQueryKey(conversationId);
+    mutationFn: (terminal: string) => createTerminal(conversationId, terminal, workspace),
+    onMutate: async () => {
+      const key = workspace
+        ? ["workbench-terminals", workspace.id]
+        : terminalsQueryKey(conversationId);
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
+      return { key };
+    },
+    onSuccess: (info, _terminal, context) => {
+      const key = context.key;
       const current = queryClient.getQueryData<TerminalInfo[]>(key) ?? [];
       if (current.some((t) => t.id === info.id)) return;
       queryClient.setQueryData<TerminalInfo[]>(key, [...current, info]);
@@ -324,9 +341,15 @@ export function useCreateTerminal(conversationId: string) {
  * :raises Error: When the server rejects the delete (a 404 is treated as
  *     success — the goal state, "no such terminal", already holds).
  */
-export async function deleteTerminal(conversationId: string, terminalId: string): Promise<void> {
+export async function deleteTerminal(
+  conversationId: string,
+  terminalId: string,
+  workspace?: WorkbenchWorkspace | null,
+): Promise<void> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/terminals/${encodeURIComponent(terminalId)}`,
+    workspace
+      ? `/v1/workbench-workspaces/${encodeURIComponent(workspace.id)}/terminals/${encodeURIComponent(terminalId)}`
+      : `/v1/sessions/${encodeURIComponent(conversationId)}/resources/terminals/${encodeURIComponent(terminalId)}`,
     { method: "DELETE" },
   );
   if (!res.ok && res.status !== 404) {
@@ -345,12 +368,23 @@ export async function deleteTerminal(conversationId: string, terminalId: string)
  * :param conversationId: Session/conversation identifier.
  * :returns: TanStack mutation taking the terminal resource id.
  */
-export function useDeleteTerminal(conversationId: string) {
+export function useDeleteTerminal(
+  conversationId: string,
+  explicitWorkspace?: WorkbenchWorkspace | null,
+) {
+  const workspace = useWorkbenchWorkspace(explicitWorkspace);
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (terminalId: string) => deleteTerminal(conversationId, terminalId),
-    onSuccess: (_result, terminalId) => {
-      const key = terminalsQueryKey(conversationId);
+    mutationFn: (terminalId: string) => deleteTerminal(conversationId, terminalId, workspace),
+    onMutate: async () => {
+      const key = workspace
+        ? ["workbench-terminals", workspace.id]
+        : terminalsQueryKey(conversationId);
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
+      return { key };
+    },
+    onSuccess: (_result, terminalId, context) => {
+      const key = context.key;
       const current = queryClient.getQueryData<TerminalInfo[]>(key) ?? [];
       queryClient.setQueryData<TerminalInfo[]>(
         key,
@@ -392,11 +426,12 @@ export function useDeleteTerminal(conversationId: string) {
  */
 export function useTerminals(
   rawConversationId: string | null,
-  options?: UseTerminalsOptions,
+  options?: UseTerminalsOptions & { workspace?: WorkbenchWorkspace | null },
 ): UseTerminalsResult {
   // A `temp:*` id is a client-only routing token (navigate-first new-chat
   // window) with no server session — normalize it to null so no fetch/poll
   // hits `/v1/sessions/temp:*/resources/terminals`, by construction.
+  const workspace = useWorkbenchWorkspace(options?.workspace);
   const conversationId = isTempConvId(rawConversationId) ? null : rawConversationId;
   const queryClient = useQueryClient();
   const reconcileWhilePending = options?.reconcileWhilePending ?? false;
@@ -410,6 +445,34 @@ export function useTerminals(
   // continuous mask would read stale-`false` during a cold/relaunch boot and
   // wrongly hide a terminal the SSE just delivered.
   const runnerOnline = useSessionRunnerOnline(conversationId ?? undefined);
+  const workspaceList = useQuery<TerminalInfo[]>({
+    queryKey: ["workbench-terminals", workspace?.id],
+    queryFn: async ({ signal }) => {
+      const response = await authenticatedFetch(
+        `/v1/workbench-workspaces/${encodeURIComponent(workspace!.id)}/terminals`,
+        { signal },
+      );
+      if (!response.ok) throw await apiErrorFromResponse(response);
+      const payload = await response.json();
+      return (payload.data ?? [])
+        .filter(
+          (row: Record<string, unknown>) =>
+            !["exited", "stopped"].includes(
+              String(
+                row.state ?? (row.metadata as Record<string, unknown> | undefined)?.state ?? "",
+              ),
+            ),
+        )
+        .map((row: Record<string, unknown>) =>
+          terminalInfoFromResource({ ...row, workspace_id: workspace!.id }),
+        )
+        .filter((row: TerminalInfo | null): row is TerminalInfo => row !== null);
+    },
+    enabled: !!workspace,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+    retry: false,
+  });
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey:
       conversationId === null
@@ -428,7 +491,7 @@ export function useTerminals(
       for (const t of fetched) byId.set(t.id, t);
       return [...byId.values()];
     },
-    enabled: conversationId !== null,
+    enabled: !workspace && conversationId !== null,
     staleTime: Infinity,
     // One light retry covers a transient network blip during the
     // initial load without hammering an unreachable runner.
@@ -458,7 +521,7 @@ export function useTerminals(
   //     have arrived via SSE).
   const wasRunnerOnline = useRef<boolean | undefined>(undefined);
   useEffect(() => {
-    if (conversationId !== null) {
+    if (!workspace && conversationId !== null) {
       if (runnerOnline === true && wasRunnerOnline.current !== true) {
         void queryClient.invalidateQueries({ queryKey: terminalsQueryKey(conversationId) });
       } else if (runnerOnline === false && wasRunnerOnline.current === true) {
@@ -467,7 +530,15 @@ export function useTerminals(
       }
     }
     wasRunnerOnline.current = runnerOnline;
-  }, [conversationId, runnerOnline, queryClient]);
+  }, [conversationId, runnerOnline, queryClient, workspace]);
+  if (workspace)
+    return {
+      terminals: workspaceList.data ?? [],
+      isLoading: workspaceList.isLoading,
+      isFetching: workspaceList.isFetching,
+      error: workspaceList.error,
+      listCompleteAt: workspaceList.dataUpdatedAt,
+    };
   return {
     // SSE-primary: the list is whatever the cache holds (seed + live deltas,
     // corrected on poll edges above). No continuous runner-online mask.

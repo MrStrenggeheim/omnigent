@@ -78,14 +78,25 @@ interface SubagentsPanelProps {
    *  child it is the child's parent id. AppShell resolves this from
    *  ``activeSession.parentSessionId``. */
   rootSessionId: string;
+  /** Embed under the Activity header and let its body own scrolling. */
+  embedded?: boolean;
+  viewMode?: AgentsViewMode;
 }
 
-type ViewMode = "list" | "graph";
+export type AgentsViewMode = "list" | "graph";
 
-export function SubagentsPanel({ conversationId, rootSessionId }: SubagentsPanelProps) {
+export function SubagentsPanel({
+  conversationId,
+  rootSessionId,
+  embedded = false,
+  viewMode: controlledViewMode,
+}: SubagentsPanelProps) {
   const { children, isLoading, error } = useChildSessions(rootSessionId);
   const [addOpen, setAddOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [localViewMode, setViewMode] = useState<AgentsViewMode>("list");
+  const viewMode = controlledViewMode ?? localViewMode;
+  const panelClass = cn("flex min-h-0 flex-col bg-card", !embedded && "h-full overflow-hidden");
+  const header = !embedded && <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />;
   const [collapsedRows, setCollapsedRows] = useState<Record<string, boolean>>({});
   const toggleCollapsedRow = (id: string) => {
     setCollapsedRows((current) => ({ ...current, [id]: !current[id] }));
@@ -95,8 +106,8 @@ export function SubagentsPanel({ conversationId, rootSessionId }: SubagentsPanel
   // show alongside the "main" row.
   if (isLoading && children.length === 0) {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-card">
-        <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+      <div className={panelClass}>
+        {header}
         <div className="flex flex-1 items-center justify-center px-4 py-8 text-center text-sm text-muted-foreground">
           Loading…
         </div>
@@ -105,8 +116,8 @@ export function SubagentsPanel({ conversationId, rootSessionId }: SubagentsPanel
   }
   if (error && children.length === 0) {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-card">
-        <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+      <div className={panelClass}>
+        {header}
         <div className="flex flex-1 items-center justify-center px-4 py-8 text-center text-sm text-muted-foreground">
           Failed to load agents.
         </div>
@@ -116,24 +127,26 @@ export function SubagentsPanel({ conversationId, rootSessionId }: SubagentsPanel
 
   if (viewMode === "graph") {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-        <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-        <Suspense
-          fallback={
-            <div className="flex h-full flex-1 items-center justify-center text-sm text-muted-foreground">
-              Loading graph…
-            </div>
-          }
-        >
-          <SubagentsGraphView conversationId={conversationId} rootSessionId={rootSessionId} />
-        </Suspense>
+      <div className={panelClass}>
+        {header}
+        <div className={cn("flex min-h-0 flex-1 flex-col", embedded && "h-96 flex-none")}>
+          <Suspense
+            fallback={
+              <div className="flex h-full flex-1 items-center justify-center text-sm text-muted-foreground">
+                Loading graph…
+              </div>
+            }
+          >
+            <SubagentsGraphView conversationId={conversationId} rootSessionId={rootSessionId} />
+          </Suspense>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-      <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+    <div className={panelClass}>
+      {header}
       <button
         type="button"
         data-testid="add-agent-button"
@@ -143,7 +156,12 @@ export function SubagentsPanel({ conversationId, rootSessionId }: SubagentsPanel
         <PlusIcon className="size-3.5 shrink-0" />
         Add agent
       </button>
-      <ul className="relative flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 pb-2 pt-2">
+      <ul
+        className={cn(
+          "relative flex min-h-0 flex-col gap-px px-2 pb-2 pt-2",
+          !embedded && "flex-1 overflow-y-auto",
+        )}
+      >
         <MainRow rootSessionId={rootSessionId} isActive={conversationId === rootSessionId} />
         {children.map((child, index) => (
           <SubagentRow
@@ -170,34 +188,49 @@ function ViewModeToggle({
   viewMode,
   onViewModeChange,
 }: {
-  viewMode: ViewMode;
-  onViewModeChange: (mode: ViewMode) => void;
+  viewMode: AgentsViewMode;
+  onViewModeChange: (mode: AgentsViewMode) => void;
 }) {
   return (
     <div className="workspace-control-header flex items-center gap-0.5 border-b px-2">
       <h2 className="pl-1 font-medium text-ui">Agents</h2>
-      <div className="ml-auto flex items-center gap-0.5">
-        <Button
-          variant={viewMode === "list" ? "secondary" : "ghost"}
-          size="icon-xs"
-          onClick={() => onViewModeChange("list")}
-          aria-label="List view"
-          title="List view"
-          data-testid="view-mode-list"
-        >
-          <ListIcon className="size-3.5" />
-        </Button>
-        <Button
-          variant={viewMode === "graph" ? "secondary" : "ghost"}
-          size="icon-xs"
-          onClick={() => onViewModeChange("graph")}
-          aria-label="Graph view"
-          title="Graph view"
-          data-testid="view-mode-graph"
-        >
-          <NetworkIcon className="size-3.5" />
-        </Button>
+      <div className="ml-auto">
+        <AgentsViewModeControls viewMode={viewMode} onViewModeChange={onViewModeChange} />
       </div>
+    </div>
+  );
+}
+
+/** Shared controls for the standalone Agents and combined Activity headers. */
+export function AgentsViewModeControls({
+  viewMode,
+  onViewModeChange,
+}: {
+  viewMode: AgentsViewMode;
+  onViewModeChange: (mode: AgentsViewMode) => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <Button
+        variant={viewMode === "list" ? "secondary" : "ghost"}
+        size="icon-xs"
+        onClick={() => onViewModeChange("list")}
+        aria-label="List view"
+        title="List view"
+        data-testid="view-mode-list"
+      >
+        <ListIcon className="size-3.5" />
+      </Button>
+      <Button
+        variant={viewMode === "graph" ? "secondary" : "ghost"}
+        size="icon-xs"
+        onClick={() => onViewModeChange("graph")}
+        aria-label="Graph view"
+        title="Graph view"
+        data-testid="view-mode-graph"
+      >
+        <NetworkIcon className="size-3.5" />
+      </Button>
     </div>
   );
 }

@@ -20,6 +20,7 @@ def operation_paths(request: dict[str, Any]) -> list[tuple[str, bool]]:
     supported = {
         "mkdir",
         "create_file",
+        "edit_file",
         "move",
         "copy",
         "trash",
@@ -29,6 +30,9 @@ def operation_paths(request: dict[str, Any]) -> list[tuple[str, bool]]:
         "archive_begin",
         "archive_chunk",
         "archive_cancel",
+        "download_begin",
+        "download_read",
+        "download_cancel",
         "upload",
         "upload_begin",
         "upload_chunk",
@@ -55,13 +59,18 @@ def operation_paths(request: dict[str, Any]) -> list[tuple[str, bool]]:
         "archive_begin",
         "archive_chunk",
         "archive_cancel",
+        "download_begin",
+        "download_read",
+        "download_cancel",
         "delete",
         "trash",
     }:
         selected = request.get("paths")
         if not isinstance(selected, list) or not 1 <= len(selected) <= 200:
             raise ValueError("Choose between 1 and 200 paths")
-        paths.extend((path, not operation.startswith("archive")) for path in selected)
+        paths.extend(
+            (path, not operation.startswith(("archive", "download"))) for path in selected
+        )
         if operation == "trash":
             paths.append((request.get("path", ""), True))
     else:
@@ -334,7 +343,46 @@ def run_filesystem_operation(workspace: str, request: dict[str, Any]) -> dict[st
                     remove(target_fd, temporary)
 
     try:
-        if operation in {"mkdir", "create_file", "upload"}:
+        if operation == "edit_file":
+            path = request["path"]
+            old_text, new_text = request.get("old_text"), request.get("new_text")
+            if not isinstance(old_text, str) or not old_text or not isinstance(new_text, str):
+                raise ValueError("Expected nonempty old_text and string new_text")
+            descriptor, name, info = leaf(path)
+            if info is None:
+                raise FileNotFoundError(path)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("Text edits require a regular file")
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
+            with os.fdopen(fd, "r", encoding="utf-8") as stream:
+                original = stream.read()
+            if original.count(old_text) != 1:
+                raise ValueError("old_text must match exactly one location")
+            updated = original.replace(old_text, new_text, 1).encode("utf-8")
+            temporary = ".omnigent-upload-" + owner + "-edit-" + uuid.uuid4().hex
+            try:
+                fd = os.open(
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    stat.S_IMODE(info.st_mode),
+                    dir_fd=descriptor,
+                )
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(updated)
+                current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+                if fingerprint(current) != fingerprint(info):
+                    raise FileExistsError("File changed during edit; edit was not applied")
+                os.replace(temporary, name, src_dir_fd=descriptor, dst_dir_fd=descriptor)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(temporary, dir_fd=descriptor)
+            result.update(
+                replacements=1,
+                bytes_before=len(original.encode("utf-8")),
+                bytes_after=len(updated),
+            )
+            result["affected_paths"].append(path)
+        elif operation in {"mkdir", "create_file", "upload"}:
             path = request["path"]
             descriptor, name, info = leaf(path, create=True)
             if info is not None:
@@ -604,7 +652,7 @@ def run_filesystem_operation(workspace: str, request: dict[str, Any]) -> dict[st
                 else:
                     remove(descriptor, name)
                 result["affected_paths"].append(path)
-        elif operation.startswith("archive"):
+        elif operation.startswith(("archive", "download")):
             paths = sorted({absolute(path) for path in request["paths"]})
             paths = [
                 path
@@ -636,8 +684,8 @@ def run_filesystem_operation(workspace: str, request: dict[str, Any]) -> dict[st
                     or stat.S_IMODE(transfer_info.st_mode) & 0o077
                 ):
                     raise ValueError("Transfer storage must be private to this user")
-                archive_id = request.get("archive_id")
-                if operation == "archive_begin":
+                archive_id = request.get("download_id", request.get("archive_id"))
+                if operation in {"archive_begin", "download_begin"}:
                     archive_id = uuid.uuid4().hex
                     for name in os.listdir(transfer_fd):
                         if re.fullmatch(r"[a-f0-9]{32}(?:\.json|\.zip)", name):
@@ -650,6 +698,56 @@ def run_filesystem_operation(workspace: str, request: dict[str, Any]) -> dict[st
                     r"[a-f0-9]{32}", archive_id
                 ):
                     raise ValueError("Invalid archive identifier")
+                if operation.startswith("download"):
+                    if len(paths) != 1:
+                        raise ValueError("Raw downloads require one file")
+                    if operation == "download_cancel":
+                        metadata = read_json(transfer_fd, archive_id + ".json")
+                        if metadata.get("kind") != "raw_download" or metadata["paths"] != paths:
+                            raise ValueError("Download selection does not match")
+                        os.unlink(archive_id + ".json", dir_fd=transfer_fd)
+                        return result
+                    descriptor, name, info = leaf(paths[0])
+                    if info is None:
+                        raise FileNotFoundError(paths[0])
+                    if not stat.S_ISREG(info.st_mode):
+                        raise ValueError("Raw downloads require a regular file")
+                    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
+                    with os.fdopen(fd, "rb") as stream:
+                        current = os.fstat(stream.fileno())
+                        if operation == "download_begin":
+                            write_json(
+                                transfer_fd,
+                                archive_id + ".json",
+                                {
+                                    "kind": "raw_download",
+                                    "paths": paths,
+                                    "size": current.st_size,
+                                    "fingerprint": fingerprint(current),
+                                },
+                            )
+                            return {**result, "download_id": archive_id, "size": current.st_size}
+                        metadata = read_json(transfer_fd, archive_id + ".json")
+                        if metadata.get("kind") != "raw_download" or metadata["paths"] != paths:
+                            raise ValueError("Download selection does not match")
+                        if fingerprint(current) != metadata["fingerprint"]:
+                            raise FileExistsError("Download source changed; restart the download")
+                        offset = request.get("offset", 0)
+                        if (
+                            not isinstance(offset, int)
+                            or isinstance(offset, bool)
+                            or not 0 <= offset <= metadata["size"]
+                        ):
+                            raise ValueError("Invalid download offset")
+                        stream.seek(offset)
+                        data = stream.read(1024 * 1024)
+                        if fingerprint(os.fstat(stream.fileno())) != metadata["fingerprint"]:
+                            raise FileExistsError("Download source changed while reading")
+                    return {
+                        **result,
+                        "content_base64": base64.b64encode(data).decode("ascii"),
+                        "eof": offset + len(data) >= metadata["size"],
+                    }
                 if operation in {"archive_chunk", "archive_cancel"}:
                     metadata = read_json(transfer_fd, archive_id + ".json")
                     if metadata["paths"] != paths:

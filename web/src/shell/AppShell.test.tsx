@@ -233,8 +233,8 @@ vi.mock("./InlineTerminalsSection", () => ({
     </div>
   ),
 }));
-vi.mock("./SubagentsPanel", () => ({
-  SubagentsPanel: ({ conversationId }: { conversationId: string }) => (
+vi.mock("./ChatActivityPanel", () => ({
+  ChatActivityPanel: ({ conversationId }: { conversationId: string }) => (
     <div data-testid="subagents-panel" data-conversation-id={conversationId} />
   ),
 }));
@@ -2201,7 +2201,7 @@ describe("Subagents tab", () => {
 
     renderShell("/c/conv_abc");
 
-    const tab = screen.getByRole("tab", { name: /Agents\s*1/i });
+    const tab = screen.getByRole("tab", { name: /Activity\s*1/i });
     expect(within(tab).getByText("1")).toBeInTheDocument();
     // Files is the default tab, whose content slot mounts FilesPanel.
     expect(screen.getByRole("tab", { name: /Files/i })).toHaveAttribute("aria-selected", "true");
@@ -2219,7 +2219,7 @@ describe("Subagents tab", () => {
     renderShell("/c/conv_abc");
 
     // Agents is no longer the default tab — click to open it.
-    const subagentsTab = screen.getByRole("tab", { name: /Agents/i });
+    const subagentsTab = screen.getByRole("tab", { name: /Activity/i });
     expect(subagentsTab).toBeInTheDocument();
     fireEvent.mouseDown(subagentsTab);
     expect(screen.getByTestId("subagents-panel")).toHaveAttribute(
@@ -2250,7 +2250,7 @@ describe("Subagents tab", () => {
     // No Terminals tab — terminal renders inline in main.
     expect(screen.queryByRole("tab", { name: /Shells/i })).toBeNull();
     // Subagents tab is present.
-    const subagentsTab = screen.getByRole("tab", { name: /Agents/i });
+    const subagentsTab = screen.getByRole("tab", { name: /Activity/i });
     expect(subagentsTab).toBeInTheDocument();
     fireEvent.mouseDown(subagentsTab);
     expect(screen.getByTestId("subagents-panel")).toHaveAttribute(
@@ -2300,7 +2300,7 @@ describe("Subagents tab", () => {
     // ("1/3" — two children + the main agent) with the active green
     // (success) tint, so activity is visible without opening the
     // panel. "1/2" means the main agent was dropped from the total.
-    const tab = screen.getByRole("tab", { name: /Agents\s*1\/3/i });
+    const tab = screen.getByRole("tab", { name: /Activity\s*1\/3/i });
     expect(tab).toBeInTheDocument();
     expect(within(tab).getByText("1/3").className).toContain("text-success");
   });
@@ -2345,7 +2345,7 @@ describe("Subagents tab", () => {
     // No busy child → plain total "3" (two children + the main agent)
     // in the muted style (no success tint), so a settled fan-out
     // doesn't draw the eye.
-    const tab = screen.getByRole("tab", { name: /Agents\s*3/i });
+    const tab = screen.getByRole("tab", { name: /Activity\s*3/i });
     const badge = within(tab).getByText("3");
     expect(badge.className).toContain("text-muted-foreground");
     expect(badge.className).not.toContain("text-success");
@@ -2383,7 +2383,7 @@ describe("Subagents tab", () => {
     const { rerender } = render(makeTree());
 
     // 2 = one child + the main agent.
-    let badge = within(screen.getByRole("tab", { name: /Agents/i })).getByText("2");
+    let badge = within(screen.getByRole("tab", { name: /Activity/i })).getByText("2");
     expect(badge.className).toContain("text-muted-foreground");
     expect(badge.className).not.toContain("bg-destructive");
 
@@ -2418,14 +2418,14 @@ describe("Subagents tab", () => {
     });
     rerender(makeTree());
 
-    badge = within(screen.getByRole("tab", { name: /Agents/i })).getByText("3");
+    badge = within(screen.getByRole("tab", { name: /Activity/i })).getByText("3");
     expect(badge.className).toContain("text-muted-foreground");
     expect(badge.className).not.toContain("bg-destructive");
     expect(badge.className).not.toContain("text-white");
 
     // Opening the Agents tab keeps the idle count in the same neutral style.
-    fireEvent.mouseDown(screen.getByRole("tab", { name: /Agents/i }));
-    badge = within(screen.getByRole("tab", { name: /Agents/i })).getByText("3");
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Activity/i }));
+    badge = within(screen.getByRole("tab", { name: /Activity/i })).getByText("3");
     expect(badge.className).toContain("text-muted-foreground");
     expect(badge.className).not.toContain("bg-destructive");
   });
@@ -2476,7 +2476,7 @@ describe("Subagents tab", () => {
     rerender(makeTree());
 
     // 3 = two streamed-in children + the main agent.
-    const badge = within(screen.getByRole("tab", { name: /Agents/i })).getByText("3");
+    const badge = within(screen.getByRole("tab", { name: /Activity/i })).getByText("3");
     expect(badge.className).toContain("text-muted-foreground");
     expect(badge.className).not.toContain("bg-destructive");
     expect(badge.className).not.toContain("text-white");
@@ -2533,7 +2533,7 @@ describe("Subagents tab", () => {
 
     renderShell("/c/conv_child");
 
-    expect(screen.getByRole("tab", { name: /Agents/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Activity/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Files/i })).toBeInTheDocument();
   });
 
@@ -3073,7 +3073,7 @@ describe("Right workspace card visibility", () => {
     expect(screen.queryByRole("tab", { name: /Files/i })).toBeNull();
     expect(screen.queryByRole("tab", { name: /Shells/i })).toBeNull();
     // The tab-fallback effect lands on Agents (the only available tab).
-    expect(screen.getByRole("tab", { name: /Agents/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Activity/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: "Collapse right panel" })).toBeInTheDocument();
   });
 
@@ -3192,7 +3192,7 @@ describe("Right workspace card visibility", () => {
 
     renderShell("/c/conv_tabmem");
 
-    expect(screen.getByRole("tab", { name: /Agents/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Activity/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: /Files/i })).toHaveAttribute("aria-selected", "false");
   });
 
@@ -3206,7 +3206,7 @@ describe("Right workspace card visibility", () => {
 
     renderShell("/c/conv_default_tab");
 
-    expect(screen.getByRole("tab", { name: /Agents/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Activity/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: /Files/i })).toHaveAttribute("aria-selected", "false");
   });
 
@@ -3266,7 +3266,7 @@ describe("Right workspace card visibility", () => {
     } as ReturnType<typeof useWorkspaceEnvironment>);
     fireEvent.click(screen.getByTestId("rerender-shell"));
 
-    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
     expect(readSessionWorkspaceState("conv_workspace_unavailable").rightRailTab).toBe("subagents");
   });
 
@@ -3286,7 +3286,7 @@ describe("Right workspace card visibility", () => {
     );
     fireEvent.click(screen.getByTestId("nav-session"));
     expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("button", { name: "Close Agents" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close Activity" })).toBeInTheDocument();
     expect(readSessionWorkspaceState("conv_from").openPanels ?? []).toEqual([]);
     expect(readSessionWorkspaceState("conv_to").rightRailTab).toBe("changes");
 
@@ -3294,7 +3294,7 @@ describe("Right workspace card visibility", () => {
     renderShell("/c/conv_to");
     expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("button", { name: "Close Changes" }));
-    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("opens an unpinned Agents page from an explicit panel link", () => {
@@ -3302,8 +3302,8 @@ describe("Right workspace card visibility", () => {
     mockConversations([{ id: "conv_agents_link", permission_level: null }]);
     renderShell("/c/conv_agents_link?panel=agents");
 
-    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("button", { name: "Close Agents" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Close Activity" })).toBeInTheDocument();
   });
 
   it.each([false, true])(
@@ -3326,7 +3326,7 @@ describe("Right workspace card visibility", () => {
         }),
       );
       if (hasOpenPage) {
-        expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute(
+        expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute(
           "aria-selected",
           "true",
         );
@@ -3406,7 +3406,7 @@ describe("Right workspace card visibility", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     qc.setQueryData(["rootSessionId", "conv_child"], "conv_other_root");
     render(sessionShellTree(qc, "/c/conv_from", <SessionNavButton to="/c/conv_child" />));
-    expect(screen.getByRole("tab", { name: /Agents/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Activity/i })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.click(screen.getByTestId("nav-session"));
 
@@ -3505,7 +3505,7 @@ describe("Right workspace card visibility", () => {
 
     expect(screen.queryByRole("tab", { name: /Files/i })).toBeNull();
     expect(screen.queryByRole("tab", { name: /Changes/i })).toBeNull();
-    expect(screen.getByRole("tab", { name: /Agents/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Activity/i })).toHaveAttribute("aria-selected", "true");
   });
 
   it("reveals Agents from a sub-agent link even when the child's workspace was closed on a file", () => {
@@ -3525,7 +3525,7 @@ describe("Right workspace card visibility", () => {
     renderShell("/c/conv_linked_child?panel=agents");
 
     expect(screen.getByRole("complementary", { name: "Workspace" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Agents/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Activity/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByTestId("file-viewer-inline")).toBeNull();
     expect(screen.getByTestId("terminals-panel")).toHaveAttribute("data-state", "closed");
   });
@@ -4028,7 +4028,7 @@ describe("Right-rail tab switching — file viewer close", () => {
     expect(screen.getByTestId("file-viewer-inline")).toHaveAttribute("data-path", "README.md");
 
     // Switch to Agents (always present) — file viewer must close, its panel appears.
-    fireEvent.mouseDown(screen.getByRole("tab", { name: /Agents/i }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Activity/i }));
     // Failure: the tab-change handler did not close the viewer when leaving Files.
     expect(screen.queryByTestId("file-viewer-inline")).toBeNull();
     expect(screen.getByTestId("subagents-panel")).toBeInTheDocument();
@@ -4130,7 +4130,7 @@ describe("Mobile session menu", () => {
         name: /Shells/i,
       }),
     ).toBeNull();
-    expect(workspaceTab(/Agents/i)).toBeInTheDocument();
+    expect(workspaceTab(/Activity/i)).toBeInTheDocument();
   });
 
   it("keeps the Terminals entry in terminal-first SDK sessions (no native wrapper)", () => {
@@ -4234,7 +4234,7 @@ describe("Mobile session menu", () => {
     expect(within(drawer).queryByTestId("subagents-panel")).toBeNull();
 
     openWorkspace();
-    fireEvent.mouseDown(workspaceTab(/Agents/i));
+    fireEvent.mouseDown(workspaceTab(/Activity/i));
 
     // After selecting: drawer open, panel mounted against the active id.
     // Failure: openSubagentsPanel didn't set subagentsPanelOpen, or the
@@ -4300,7 +4300,7 @@ describe("Mobile session menu", () => {
     renderShell("/c/conv_abc");
 
     openWorkspace();
-    expect(workspaceTab(/^Agents$/i)).toHaveAttribute("aria-selected", "true");
+    expect(workspaceTab(/^Activity$/i)).toHaveAttribute("aria-selected", "true");
     expect(
       within(screen.getByRole("tablist", { name: "Workspace" })).queryByRole("tab", {
         name: /Files|Changes|Shells/i,

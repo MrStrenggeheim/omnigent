@@ -13,6 +13,7 @@ import type { ExplorerEntry, FilesystemOperationResult } from "@/lib/explorerOpe
 import type * as ExplorerOperationsModule from "@/lib/explorerOperations";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "@/lib/notifications";
+import { WorkbenchWorkspaceProvider, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   dismissExplorerTransfer,
@@ -53,23 +54,35 @@ function Tree() {
     </>
   );
 }
-function setup({ writable = true, base = "src", conversationId = "test" } = {}) {
+function setup({
+  writable = true,
+  base = "src",
+  conversationId = "test",
+  workspace,
+}: {
+  writable?: boolean;
+  base?: string;
+  conversationId?: string;
+  workspace?: WorkbenchWorkspace;
+} = {}) {
   return render(
     <TooltipProvider>
-      <ExplorerActionsProvider
-        conversationId={conversationId}
-        base={base}
-        workspaceRoot="/work"
-        hostId="host"
-        writable={writable}
-        onRefresh={refresh}
-      >
-        <div>
-          <ExplorerToolbar />
-          <Tree />
-        </div>
-      </ExplorerActionsProvider>
-      <Toaster />
+      <WorkbenchWorkspaceProvider value={workspace ?? null}>
+        <ExplorerActionsProvider
+          conversationId={conversationId}
+          base={base}
+          workspaceRoot="/work"
+          hostId="host"
+          writable={writable}
+          onRefresh={refresh}
+        >
+          <div>
+            <ExplorerToolbar />
+            <Tree />
+          </div>
+        </ExplorerActionsProvider>
+        <Toaster />
+      </WorkbenchWorkspaceProvider>
     </TooltipProvider>,
   );
 }
@@ -87,6 +100,73 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Explorer actions", () => {
+  it("shows only the trailing menu and preserves right-click actions and destructive trash styling", async () => {
+    setup();
+    const row = screen.getByTestId("row-a.txt");
+    expect(within(row).queryByRole("checkbox")).toBeNull();
+    expect(within(row).queryByRole("button", { name: /Download|Copy.*path/ })).toBeNull();
+    const actions = within(row).getByRole("button", { name: "Actions for a.txt" });
+    expect(actions.parentElement).not.toHaveClass("w-[104px]");
+    expect(actions).not.toHaveClass("opacity-0");
+    await rowMenu("a.txt");
+    expect(screen.getByRole("menuitem", { name: "Move to trash…" })).toHaveAttribute(
+      "data-variant",
+      "destructive",
+    );
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 30 });
+    expect(await screen.findByRole("menuitem", { name: "Move to trash…" })).toHaveAttribute(
+      "data-variant",
+      "destructive",
+    );
+  });
+
+  it("routes mutations and events to the workspace while retaining legacy chat provenance", async () => {
+    const workspace = {
+      id: "actions-workspace",
+      root: "/work",
+      host_id: "host",
+      target_kind: "host" as const,
+      capabilities: [],
+    };
+    const onSearch = vi.fn();
+    const onChange = vi.fn();
+    window.addEventListener("omnigent:open-content-search", onSearch);
+    window.addEventListener("omnigent:workspace-files-changed", onChange);
+    try {
+      setup({ workspace });
+      await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Search folder contents…" }));
+      expect((onSearch.mock.calls[0][0] as CustomEvent).detail).toEqual({
+        conversationId: "test",
+        workspaceId: workspace.id,
+        location: "src",
+      });
+      fireEvent.click(screen.getByRole("button", { name: "New file" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+        target: { value: "new.txt" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+      await waitFor(() =>
+        expect(operation).toHaveBeenCalledWith(
+          "test",
+          { operation: "create_file", path: "src/new.txt" },
+          undefined,
+          workspace,
+        ),
+      );
+      expect((onChange.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
+        conversationId: "test",
+        workspaceId: workspace.id,
+        moves: [],
+        removed: [],
+      });
+    } finally {
+      window.removeEventListener("omnigent:open-content-search", onSearch);
+      window.removeEventListener("omnigent:workspace-files-changed", onChange);
+    }
+  });
+
   it("creates files at the browsed location and reports collisions without closing the dialog", async () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "New file" }));
@@ -109,10 +189,10 @@ describe("Explorer actions", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("lets touch users select multiple rows and trash them through the toolbar", async () => {
+  it("selects multiple rows with Ctrl and trashes them through the toolbar", async () => {
     setup();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select a.txt" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select b.txt" }));
+    fireEvent.click(screen.getByRole("button", { name: "a.txt" }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "b.txt" }), { ctrlKey: true });
     expect(screen.getByText("2 selected")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move selected items to trash…" }));
@@ -130,7 +210,7 @@ describe("Explorer actions", () => {
     const search = vi.fn();
     window.addEventListener("omnigent:open-content-search", search);
     setup();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "folder" }), { ctrlKey: true });
     await userEvent.click(screen.getByRole("button", { name: "More file actions" }));
     expect(screen.getByRole("menuitem", { name: "Download selection as ZIP" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Rename…" })).toBeNull();
@@ -222,8 +302,8 @@ describe("Explorer actions", () => {
 
   it("moves a dragged selection into its target folder", async () => {
     setup();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select a.txt" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select b.txt" }));
+    fireEvent.click(screen.getByRole("button", { name: "a.txt" }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "b.txt" }), { ctrlKey: true });
     const payload = new Map<string, string>();
     const transfer = {
       get types() {
@@ -300,11 +380,16 @@ describe("Explorer actions", () => {
     await waitFor(() => expect(downloadBlob).toHaveBeenCalled());
     expect(vi.mocked(downloadBlob).mock.calls[0][0].size).toBe(4);
     expect(vi.mocked(downloadBlob).mock.calls[0][1]).toBe("folder.zip");
-    expect(operation).toHaveBeenLastCalledWith("test", {
-      operation: "archive_cancel",
-      paths: ["src/folder"],
-      archive_id: "zip",
-    });
+    expect(operation).toHaveBeenLastCalledWith(
+      "test",
+      {
+        operation: "archive_cancel",
+        paths: ["src/folder"],
+        archive_id: "zip",
+      },
+      undefined,
+      undefined,
+    );
   });
 
   it("uploads binary chunks with ordered offsets and only commits after completion", async () => {
@@ -328,6 +413,7 @@ describe("Explorer actions", () => {
         "test",
         { operation: "upload_finish", path: "src/binary.dat", upload_id: "upload" },
         expect.any(AbortSignal),
+        undefined,
       ),
     );
     const chunks = operation.mock.calls
@@ -381,11 +467,16 @@ describe("Explorer actions", () => {
     render(<Toaster />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel upload" }));
     await waitFor(() =>
-      expect(operation).toHaveBeenCalledWith("test", {
-        operation: "upload_cancel",
-        path: "src/cancel.txt",
-        upload_id: "cancelled",
-      }),
+      expect(operation).toHaveBeenCalledWith(
+        "test",
+        {
+          operation: "upload_cancel",
+          path: "src/cancel.txt",
+          upload_id: "cancelled",
+        },
+        undefined,
+        undefined,
+      ),
     );
     expect(operation.mock.calls.some((call) => call[1].operation === "upload_finish")).toBe(false);
     await screen.findByText("Upload cancelled. Completed files are kept.");
@@ -427,6 +518,7 @@ describe("Explorer actions", () => {
       "test",
       { operation: "upload_finish", path: "src/continue.txt", upload_id: "continuing" },
       expect.any(AbortSignal),
+      undefined,
     );
     expect(refresh).not.toHaveBeenCalled();
     expect(getExplorerTransfers().some(transferIsActive)).toBe(false);
@@ -455,11 +547,16 @@ describe("Explorer actions", () => {
     expect(screen.getByText("Cancelling and cleaning up…")).toBeInTheDocument();
     await act(async () => finishStarting());
     await screen.findByText("Upload cancelled. Completed files are kept.");
-    expect(operation).toHaveBeenCalledWith("test", {
-      operation: "upload_cancel",
-      path: "src/starting.txt",
-      upload_id: "late-id",
-    });
+    expect(operation).toHaveBeenCalledWith(
+      "test",
+      {
+        operation: "upload_cancel",
+        path: "src/starting.txt",
+        upload_id: "late-id",
+      },
+      undefined,
+      undefined,
+    );
     expect(
       operation.mock.calls.some(
         (call) => call[1].operation === "upload_chunk" || call[1].operation === "upload_finish",
@@ -491,11 +588,16 @@ describe("Explorer actions", () => {
     await act(async () => release());
     await screen.findByText("Download complete");
     expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "folder.zip");
-    expect(operation).toHaveBeenLastCalledWith("test", {
-      operation: "archive_cancel",
-      paths: ["src/folder"],
-      archive_id: "continuing",
-    });
+    expect(operation).toHaveBeenLastCalledWith(
+      "test",
+      {
+        operation: "archive_cancel",
+        paths: ["src/folder"],
+        archive_id: "continuing",
+      },
+      undefined,
+      undefined,
+    );
   });
 
   it("retains upload failures for the global status after navigation", async () => {
@@ -522,12 +624,33 @@ describe("Explorer actions", () => {
     render(<Toaster />);
     await act(async () => fail());
     expect(await screen.findByRole("alert")).toHaveTextContent("Connection lost");
-    expect(operation).toHaveBeenCalledWith("test", {
-      operation: "upload_cancel",
-      path: "src/failed.txt",
-      upload_id: "failed",
-    });
+    expect(operation).toHaveBeenCalledWith(
+      "test",
+      {
+        operation: "upload_cancel",
+        path: "src/failed.txt",
+        upload_id: "failed",
+      },
+      undefined,
+      undefined,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Hide notification" }));
     expect(screen.queryByRole("complementary", { name: "Notifications" })).not.toBeInTheDocument();
   });
+});
+
+it("enables explicit touch selection from the Explorer menu and removes checkboxes when done", async () => {
+  setup();
+  expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More file actions" }), { button: 0 });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Select files…" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select a.txt" }));
+  fireEvent.click(screen.getByRole("button", { name: "b.txt" }));
+  expect(screen.getByTestId("row-a.txt")).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByTestId("row-b.txt")).toHaveAttribute("aria-selected", "true");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More file actions" }), { button: 0 });
+  expect(await screen.findByRole("menuitem", { name: "Copy selected items" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Done selecting" }));
+  expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  expect(screen.getByTestId("row-a.txt")).toHaveAttribute("aria-selected", "false");
 });

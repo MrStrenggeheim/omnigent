@@ -61,7 +61,10 @@ it.each([
   expect(result.current.isChangedPath("unknown.md")).toBe(false);
   expect(result.current.openTerminals).toEqual(["terminal:terminal_tui_main", "terminal:shell"]);
   rerender({ sessionId: "second", terminalFirst: true });
-  expect(useTerminals).toHaveBeenLastCalledWith("second", { reconcileWhilePending: true });
+  expect(useTerminals).toHaveBeenLastCalledWith("second", {
+    reconcileWhilePending: true,
+    workspace: null,
+  });
   expect(result.current.agentTerminal?.id).toBe("terminal_tui_main");
   expect(result.current.openTerminals).toEqual(["terminal:shell"]);
 });

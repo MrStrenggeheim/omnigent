@@ -1,14 +1,10 @@
-import { useServerInfo } from "@/lib/CapabilitiesContext";
-import { isFeatureEnabled } from "@/lib/capabilities";
 // TanStack Query hooks for the comments API:
 // POST/GET/PATCH/DELETE /v1/sessions/{id}/comments
 // POST /v1/sessions/{id}/comments/send
 //
 // `useSendCommentsToAgent` calls `useChatStore.send()` directly on success
 // so the message is submitted immediately without requiring a manual send.
-// It requires a non-null `agentId`; for the FileViewer case where an
-// agent may not be registered, see `CommentSenderProvider` /
-// `useOptionalCommentSender` in `CommentSenderContext.tsx`.
+// A missing agent rejects the mutation before any request is sent.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authenticatedFetch } from "@/lib/identity";
@@ -148,21 +144,14 @@ export function useUpdateComment(sessionId: string) {
   });
 }
 
-/**
- * POST /v1/sessions/{id}/comments/send
- *
- * Requires a non-null `agentId` — without an agent there is nowhere to
- * dispatch the formatted message. Callers that may not have an agent
- * should mount this hook only inside `CommentSenderProvider`, which
- * skips the mutation entirely when no agent is registered. Consumers
- * then read the sender via `useOptionalCommentSender()` and treat
- * `null` as "no agent, hide the button".
- */
-export function useSendCommentsToAgent(sessionId: string, agentId: string) {
-  const gridEnabled = isFeatureEnabled(useServerInfo(), "grid_sessions_display_ui");
+/** Send comments to the session and agent captured when the mutation starts. */
+export function useSendCommentsToAgent(sessionId: string, agentId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: ["comments-send", sessionId, agentId],
     mutationFn: async (payload: { comment_ids: string[]; instruction?: string }) => {
+      if (agentId === null) throw new Error("No agent is available to receive comments");
+      const recipient = { sessionId, agentId };
       const res = await authenticatedFetch(
         `/v1/sessions/${encodeURIComponent(sessionId)}/comments/send`,
         {
@@ -172,19 +161,18 @@ export function useSendCommentsToAgent(sessionId: string, agentId: string) {
         },
       );
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      return (await res.json()) as {
+      const data = (await res.json()) as {
         formatted_message: string;
         sent_comment_ids: string[];
       };
+      return { ...data, recipient };
     },
-    onSuccess: (data) => {
-      if (gridEnabled)
-        void useChatStore
-          .getState()
-          .send(data.formatted_message, agentId, undefined, { pinnedConversationId: sessionId });
-      else void useChatStore.getState().send(data.formatted_message, agentId);
+    onSuccess: ({ formatted_message, recipient }) => {
+      void useChatStore.getState().send(formatted_message, recipient.agentId, undefined, {
+        pinnedConversationId: recipient.sessionId,
+      });
       void queryClient.invalidateQueries({
-        queryKey: ["comments", sessionId],
+        queryKey: ["comments", recipient.sessionId],
       });
     },
   });

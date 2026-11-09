@@ -1174,6 +1174,9 @@ class TerminalInstance:
     # ``#{pane_dead_status}``; see ``last_exit_status`` for ``None`` semantics.
     _last_exit_status: int | None = field(default=None, repr=False)
     _last_exit_signal: str | None = field(default=None, repr=False)
+    activity_observer: Callable[[str | None], None] | None = field(
+        default=None, repr=False, compare=False
+    )
     # Diagnostics for the "tmux unavailable" exit path: the stderr of the last
     # failed capture-pane probe, and of the has-session probe that then
     # confirmed the session gone. The has-session stderr is what separates a
@@ -1267,6 +1270,17 @@ class TerminalInstance:
         """Store a pane capture for later exit diagnostics."""
         self._last_pane_snapshot = snapshot
         self._last_capture_at = time.monotonic()
+        self._notify_activity()
+
+    def _notify_activity(self, state: str | None = None) -> None:
+        """Report captures without letting a journal failure break terminal I/O."""
+        if self.activity_observer is not None:
+            try:
+                self.activity_observer(state)
+            except Exception:
+                logger.exception(
+                    "Terminal activity capture failed for %s:%s", self.name, self.session_key
+                )
 
     def last_exit_text(self) -> str | None:
         """Return bounded recent exit history without changing the visible-screen cache."""
@@ -1324,6 +1338,7 @@ class TerminalInstance:
         # A competing failed or empty capture must not erase an earlier exit cause.
         if _strip_ansi(snapshot).strip():
             self._last_exit_snapshot = snapshot
+            self._notify_activity()
 
     async def _capture_exit_snapshot(self) -> None:
         """Retain recent output after confirmed exit, before cleanup removes tmux."""
@@ -1838,6 +1853,7 @@ class TerminalInstance:
             return {"error": str(exc)}
         except RuntimeError:
             self.running = False
+            self._notify_activity("unknown")
             return {
                 "error": (
                     f"Terminal {self.name}:{self.session_key} is no longer "
@@ -1870,6 +1886,7 @@ class TerminalInstance:
             return {"error": str(exc)}
         except RuntimeError:
             self.running = False
+            self._notify_activity("unknown")
             return {
                 "error": (
                     f"Terminal {self.name}:{self.session_key} is no longer "
@@ -2012,14 +2029,25 @@ class TerminalInstance:
         await self._stop_idle_watcher()
         self._stop_idle_watcher_thread()
 
+        if self.activity_observer is not None:
+            await self._capture_exit_snapshot()
+
         # The watcher and is_alive() both set ``running=False`` when they
         # observe a failure. A private socket can still belong to a live tmux
         # server (or a remain-on-exit pane), so cleanup must not trust that
         # advisory flag before issuing kill-server.
+        close_state = "unknown"
         if self.running or self.socket_path.exists():
-            with contextlib.suppress(RuntimeError):
+            try:
                 await self._tmux("kill-server")
+            except _TmuxTargetGoneError:
+                close_state = "exited"
+            except RuntimeError:
+                pass
+            else:
+                close_state = "exited"
         self.running = False
+        self._notify_activity(close_state)
 
         if self._clipboard_bridge is not None:
             await asyncio.to_thread(self._clipboard_bridge.close)
@@ -2151,6 +2179,7 @@ class TerminalInstance:
                     consecutive_capture_failures, exit_callback_present=on_exit is not None
                 )
                 self.running = False
+                self._notify_activity("exited")
                 if on_exit is not None:
                     await _fire(on_exit, "exit")
                 return
@@ -2170,11 +2199,14 @@ class TerminalInstance:
                     with contextlib.suppress(Exception):
                         await self._tmux_output("detach-client", "-s", self.tmux_target)
                 self.running = False
+                self._notify_activity("exited")
                 if on_exit is not None:
                     await _fire(on_exit, "exit")
                 return
-            if detector.tick(snapshot) and not await _fire(on_idle, "idle"):
-                return
+            if detector.tick(snapshot):
+                self._notify_activity("idle")
+                if not await _fire(on_idle, "idle"):
+                    return
 
     def start_idle_watcher_thread(
         self,
@@ -2358,6 +2390,7 @@ class TerminalInstance:
                     consecutive_capture_failures, exit_callback_present=on_exit is not None
                 )
                 self.running = False
+                self._notify_activity("exited")
                 if on_exit is not None:
                     self._fire_watch_callback(on_exit, "exit")
                 return
@@ -2377,6 +2410,7 @@ class TerminalInstance:
                     with contextlib.suppress(Exception):
                         self._tmux_output_sync("detach-client", "-s", self.tmux_target)
                 self.running = False
+                self._notify_activity("exited")
                 if on_exit is not None:
                     self._fire_watch_callback(on_exit, "exit")
                 return
@@ -2400,6 +2434,10 @@ class TerminalInstance:
             if detector.changed_this_tick:
                 self._screen_changed_at = watched_at
             self._screen_watched_at = watched_at
+            if detector.changed_this_tick:
+                self._notify_activity("running")
+            elif idle_fired:
+                self._notify_activity("idle")
             # Activity edge first: a tick can both change the pane and
             # (much later) cross the idle threshold, but never both in
             # the same tick — a change resets the idle timer.
@@ -2611,6 +2649,7 @@ class TerminalInstance:
                 )
                 return self.running
             self.running = False
+            self._notify_activity("unknown")
             return False
 
         try:
@@ -2628,6 +2667,7 @@ class TerminalInstance:
                     )
                     return self.running
                 self.running = False
+                self._notify_activity("exited")
                 return False
             # remain-on-exit can keep the session alive after its process exits.
             panes = stdout.decode().strip()
@@ -2644,10 +2684,12 @@ class TerminalInstance:
                         )
                     await self._capture_exit_snapshot()
                 self.running = False
+                self._notify_activity("exited")
                 return False
             return True
         except OSError:
             self.running = False
+            self._notify_activity("unknown")
             return False
 
     async def _pane_is_dead_async(self) -> bool | None:

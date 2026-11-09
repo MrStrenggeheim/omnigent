@@ -149,6 +149,22 @@ def register_resource_routes(
     async def _resolve_conversation_id(response_id: str) -> str | None:
         return _resp_to_conv.get(response_id)
 
+    @app.get("/v1/sessions/{session_id}/activity")
+    async def get_session_activity(session_id: str) -> JSONResponse:
+        from omnigent.terminals.history import activity_page
+
+        entries = (
+            await asyncio.to_thread(terminal_registry.activity_entries, session_id)
+            if terminal_registry is not None
+            else []
+        )
+        page = activity_page(
+            entries,
+            available=terminal_registry is not None
+            and not terminal_registry.activity_capture_failed,
+        )
+        return JSONResponse(content=page)
+
     @app.get("/v1/sessions/{session_id}/resources")
     async def list_session_resources(
         session_id: str,

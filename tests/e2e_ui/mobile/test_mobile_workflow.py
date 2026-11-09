@@ -191,6 +191,14 @@ def test_mobile_workspace_keeps_chat_actions_separate(
     assert abs(close_workspace.bounding_box()["x"] - workspace_bounds["x"]) < 2
     assert abs(close_workspace.bounding_box()["y"] - workspace_bounds["y"]) < 2
     tabs = page.get_by_role("tablist", name="Workspace", exact=True)
+    plus = page.get_by_role("button", name="Open workspace panel", exact=True)
+    expect(plus).to_be_visible()
+    plus.click()
+    expect(page.get_by_role("menuitem", name="Files", exact=True)).to_be_visible()
+    expect(page.get_by_role("menuitem", name="Activity", exact=True)).to_be_visible()
+    page.keyboard.press("Escape")
+    row = tabs.locator("..").locator("..")
+    assert row.evaluate("element => getComputedStyle(element).overflowY") in {"hidden", "clip"}
     expect(tabs.get_by_role("tab", name="Files", exact=True)).to_have_attribute(
         "aria-selected", "true"
     )
@@ -229,18 +237,18 @@ def test_mobile_workspace_keeps_chat_actions_separate(
     expect(page.get_by_test_id("content-search-panel-drawer")).to_have_attribute(
         "data-state", "open"
     )
-    tabs.get_by_role("tab", name="Agents", exact=True).click()
+    tabs.get_by_role("tab", name="Activity", exact=True).click()
     agents = page.get_by_test_id("subagents-panel-drawer")
     expect(agents).to_have_attribute("data-state", "open")
     expect(page.get_by_test_id("content-search-panel-drawer")).to_have_attribute(
         "data-state", "closed"
     )
-    expect(tabs.get_by_role("tab", name="Agents", exact=True)).to_be_focused()
+    expect(tabs.get_by_role("tab", name="Activity", exact=True)).to_be_focused()
     page.screenshot(path=str(output / f"mobile-workspace-{width}.png"), animations="disabled")
     page.get_by_role("button", name="Close workspace", exact=True).click()
     workspace.click()
     expect(agents).to_have_attribute("data-state", "open")
-    expect(tabs.get_by_role("tab", name="Agents", exact=True)).to_have_attribute(
+    expect(tabs.get_by_role("tab", name="Activity", exact=True)).to_have_attribute(
         "aria-selected", "true"
     )
     tabs.get_by_role("tab", name="Pull Requests", exact=True).click()
@@ -297,7 +305,7 @@ def test_mobile_kebab_shows_agents_entry_when_child_agents_exist(
     page.get_by_role("button", name="Open workspace").click()
 
     agents_entry = page.get_by_role("tablist", name="Workspace").get_by_role(
-        "tab", name="Agents", exact=True
+        "tab", name="Activity", exact=True
     )
     # 10s budget: the rail fetches child_sessions on load, so the entry
     # can take a fetch cycle (plus cold-start latency) to appear.
@@ -351,7 +359,7 @@ def test_mobile_files_drawer_opens_seeded_file(
     expect(file_viewer).to_contain_text(_SEEDED_FILE_PATH)
     expect(file_viewer.get_by_text(_SEEDED_FILE_CONTENT).first).to_be_visible(timeout=20_000)
     file_viewer.get_by_role("tablist", name="Workspace").get_by_role(
-        "tab", name="Agents", exact=True
+        "tab", name="Activity", exact=True
     ).click()
     agents = page.get_by_test_id("subagents-panel-drawer")
     expect(agents).to_have_attribute("data-state", "open")

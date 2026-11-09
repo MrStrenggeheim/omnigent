@@ -1,3 +1,4 @@
+import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
 // The Summary tab's Labels section: PR label chips and, for editors, a picker over
 // the repository's labels. Pending edits show at once and settle to what the provider reports.
 
@@ -164,8 +165,10 @@ export function PullRequestLabels({
   editable: boolean;
 }) {
   const update = useUpdatePullRequestLabels(conversationId);
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId)!;
   const pending = useMutationState({
-    filters: { mutationKey: pullRequestLabelsMutationKey(conversationId), status: "pending" },
+    filters: { mutationKey: pullRequestLabelsMutationKey(identity), status: "pending" },
     select: (mutation) => mutation.state.variables as PullRequestLabelChange | undefined,
   });
   const shown = useMemo(

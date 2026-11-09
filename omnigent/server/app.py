@@ -4541,12 +4541,35 @@ def create_app(
         tags=["runners"],
     )
 
-    # Host tunnel + REST endpoints (DAEMON_API.md). Mounted only when a
-    # host_store is configured: the routers call host_store on every
-    # request, so mounting them with host_store=None would fail each
-    # connection with an AttributeError swallowed by the tunnel's broad
-    # except (a hidden failure). No host_store = host support is simply
-    # not enabled (host connects get 404), rather than silently broken.
+    from omnigent.server.routes.workbench_terminals import create_workbench_terminals_router
+    from omnigent.server.routes.workbench_workspaces import create_workbench_workspaces_router
+    from omnigent.server.workbench_workspace_service import WorkbenchWorkspaceService
+    from omnigent.stores.workbench_workspace_store import WorkbenchWorkspaceStore
+
+    workbench_workspace_service = WorkbenchWorkspaceService(
+        tunnel_registry=tunnel_registry,
+        store=WorkbenchWorkspaceStore(conversation_store.storage_location),
+        host_store=host_store,
+        host_registry=host_registry,
+        conversation_store=conversation_store,
+        agent_store=agent_store,
+        agent_cache=agent_cache,
+        auth_provider=auth_provider,
+        permission_store=permission_store,
+    )
+    app.state.workbench_workspace_service = workbench_workspace_service
+    app.include_router(
+        create_workbench_workspaces_router(workbench_workspace_service),
+        prefix="/v1",
+        tags=["workbench-workspaces"],
+    )
+    app.include_router(
+        create_workbench_terminals_router(workbench_workspace_service),
+        prefix="/v1",
+        tags=["workbench-terminals"],
+    )
+
+    # Host tunnel + REST endpoints (DAEMON_API.md) need persistent host support.
     if host_store is not None:
         from omnigent.server.routes.harness_startup import create_harness_startup_router
         from omnigent.server.routes.host_tunnel import create_host_tunnel_router

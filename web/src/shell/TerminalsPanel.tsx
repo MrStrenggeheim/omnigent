@@ -1,3 +1,4 @@
+import { usePanelEscapeClose } from "@/hooks/usePanelEscapeClose";
 import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side panel that hosts the xterm.js views for the
 // conversation's open terminals. Triggered from `SessionRail` (or the
@@ -125,14 +126,7 @@ export function TerminalsPanel({
   }, [open, initialTerminalKey, setActiveKey]);
 
   // Esc dismisses — common panel convention.
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  usePanelEscapeClose(open, onClose);
 
   // Auto-close when there's nothing left to view.
   useEffect(() => {
@@ -258,6 +252,7 @@ export function TerminalsPanel({
                   terminalId={activeTerminal.id}
                   readOnly={readOnly}
                   directAttachUrl={activeTerminal.directAttachUrl}
+                  workspaceId={activeTerminal.workspaceId}
                   onStateChange={(state) => {
                     setTerminalConnectionState(activeTerminal.id, state);
                   }}

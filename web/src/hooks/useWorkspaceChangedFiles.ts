@@ -25,6 +25,13 @@ import { livenessRowFromSession, useSessionLiveness } from "@/hooks/useSessionLi
 import { authenticatedFetch } from "@/lib/identity";
 import { isTempConvId } from "@/lib/tempConversationId";
 import { useChatStore } from "@/store/chatStore";
+import {
+  useWorkbenchWorkspace,
+  queryIdentity,
+  resourceBase,
+  type WorkbenchWorkspace,
+  type WorkspaceResourceTarget,
+} from "@/lib/workbenchWorkspace";
 
 /** True while this session’s agent loop is live, including visible grid panes. */
 export function useSessionActive(conversationId: string | undefined): boolean {
@@ -50,9 +57,14 @@ export function useSessionActive(conversationId: string | undefined): boolean {
  * to let it run — matching the tri-state semantics the query `enabled`
  * gates expect.
  */
-export function useWorkspaceServeable(conversationId: string | undefined): boolean | undefined {
-  const runnerOnline = useSessionRunnerOnline(conversationId);
-  const hostOnline = useSessionHostOnline(conversationId);
+export function useWorkspaceServeable(
+  conversationId: string | undefined,
+  explicit?: WorkbenchWorkspace | null,
+): boolean | undefined {
+  const workspace = useWorkbenchWorkspace(explicit);
+  const runnerOnline = useSessionRunnerOnline(workspace ? undefined : conversationId);
+  const hostOnline = useSessionHostOnline(workspace ? undefined : conversationId);
+  if (workspace) return true;
   if (runnerOnline !== false) return runnerOnline; // online or unknown → serve
   // Runner known-offline: block only when the host is *known* unavailable
   // (`false` down, `null` not host-bound). While host liveness is still
@@ -99,6 +111,7 @@ const DEFAULT_ENVIRONMENT_ID = "default";
 interface WorkspaceQueryOptions {
   enabled?: boolean;
   source?: "agent";
+  workspace?: WorkbenchWorkspace | null;
 }
 
 // ── Changed files (flat, registry-backed) ────────────────────────────────────
@@ -183,13 +196,18 @@ export function shouldRetryRunnerOffline(failureCount: number, error: Error): bo
 /**
  * Whether retrying a runner-offline response can plausibly succeed.
  */
-function useRunnerRecovering(conversationId: string | undefined): boolean {
-  const { session, isLoading } = useSession(conversationId);
-  const turnActive = useSessionActive(conversationId);
-  const liveness = useSessionLiveness(conversationId, livenessRowFromSession(session), {
+function useRunnerRecovering(
+  conversationId: string | undefined,
+  explicit?: WorkbenchWorkspace | null,
+): boolean {
+  const workspace = useWorkbenchWorkspace(explicit);
+  const sessionId = workspace ? undefined : conversationId;
+  const { session, isLoading } = useSession(sessionId);
+  const turnActive = useSessionActive(sessionId);
+  const liveness = useSessionLiveness(sessionId, livenessRowFromSession(session), {
     turnActive,
   });
-  return isLoading || liveness.kind === "starting";
+  return !workspace && (isLoading || liveness.kind === "starting");
 }
 
 /**
@@ -215,12 +233,14 @@ export function useRunnerOfflineRetry(allowed: boolean) {
  * wakes it.
  */
 export function useWorkspaceAsleep(conversationId: string | undefined): boolean {
-  const { session } = useSession(conversationId);
-  const turnActive = useSessionActive(conversationId);
-  const liveness = useSessionLiveness(conversationId, livenessRowFromSession(session), {
+  const workspace = useWorkbenchWorkspace();
+  const sessionId = workspace ? undefined : conversationId;
+  const { session } = useSession(sessionId);
+  const turnActive = useSessionActive(sessionId);
+  const liveness = useSessionLiveness(sessionId, livenessRowFromSession(session), {
     turnActive,
   });
-  return liveness.kind === "host_asleep";
+  return !workspace && liveness.kind === "host_asleep";
 }
 
 /** Whether `res` is the app's runner-offline 503 response. */
@@ -254,9 +274,10 @@ async function fetchWorkspaceChangedFiles(
   conversationId: string,
   signal?: AbortSignal,
   source?: "agent",
+  workspace?: WorkspaceResourceTarget,
 ): Promise<WorkspaceChangedFilesResult> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/${DEFAULT_ENVIRONMENT_ID}/changes${source ? "?source=agent" : ""}`,
+    `${resourceBase(workspace, conversationId)}/environments/${DEFAULT_ENVIRONMENT_ID}/changes${source ? "?source=agent" : ""}`,
     { signal },
   );
   if (res.status === 404 && source !== "agent") {
@@ -310,30 +331,33 @@ export function useWorkspaceChangedFiles(
   conversationId: string | undefined,
   options: WorkspaceQueryOptions = {},
 ) {
+  const contextWorkspace = useWorkbenchWorkspace(options.workspace);
+  const workspace = options.source === "agent" ? null : contextWorkspace;
+  const identity = queryIdentity(workspace, conversationId);
   const queryEnabled = options.enabled ?? true;
-  const serveable = useWorkspaceServeable(conversationId);
-  const retry = useRunnerOfflineRetry(useRunnerRecovering(conversationId));
+  const serveable = useWorkspaceServeable(conversationId, workspace);
+  const retry = useRunnerOfflineRetry(useRunnerRecovering(conversationId, workspace));
   const environmentQuery = useWorkspaceEnvironment(conversationId, {
     enabled: queryEnabled,
+    workspace,
   });
-  const sessionActive = useSessionActive(conversationId);
-  useTrailingInvalidate(conversationId, sessionActive, "workspace-changed-files");
+  const sessionActive = useSessionActive(workspace ? undefined : conversationId);
+  useTrailingInvalidate(identity, sessionActive, "workspace-changed-files");
   return useQuery({
     queryKey: options.source
-      ? ["workspace-changed-files", conversationId, options.source]
-      : ["workspace-changed-files", conversationId],
-    queryFn: ({ signal }) => fetchWorkspaceChangedFiles(conversationId!, signal, options.source),
+      ? ["workspace-changed-files", identity, options.source]
+      : ["workspace-changed-files", identity],
+    queryFn: ({ signal }) =>
+      fetchWorkspaceChangedFiles(conversationId!, signal, options.source, workspace),
     enabled:
       queryEnabled &&
-      !!conversationId &&
+      !!identity &&
       serveable !== false &&
       environmentQuery.data?.available === true,
     retry,
     retryDelay: runnerOfflineRetryDelay,
-    // No polling: the SSE ``session.changed_files.invalidated`` event
-    // (runner-emitted after file-mutating tools, throttled) drives
-    // refetches via chatStore, and ``useTrailingInvalidate`` backstops
-    // the final state at end-of-turn. The cold GET on mount bootstraps.
+    // Independent workspaces poll because they have no chat invalidation stream.
+    refetchInterval: workspace ? 5_000 : false,
     staleTime: 5_000,
   });
 }
@@ -341,6 +365,7 @@ export function useWorkspaceChangedFiles(
 // ── All files (directory listing, on-disk state) ──────────────────────────────
 
 export interface WorkspaceGitOptions {
+  workspace?: WorkbenchWorkspace | null;
   path?: string;
   directories?: string[];
   enabled?: boolean;
@@ -350,14 +375,20 @@ export function useWorkspaceGitChanges(
   conversationId: string | undefined,
   options: WorkspaceGitOptions = {},
 ) {
-  const serveable = useWorkspaceServeable(conversationId);
-  const environment = useWorkspaceEnvironment(conversationId, { enabled: options.enabled });
+  const contextWorkspace = useWorkbenchWorkspace(options.workspace);
+  const workspace = contextWorkspace;
+  const identity = queryIdentity(workspace, conversationId);
+  const serveable = useWorkspaceServeable(conversationId, workspace);
+  const environment = useWorkspaceEnvironment(conversationId, {
+    enabled: options.enabled,
+    workspace,
+  });
   const path = options.path ?? "";
   const directories = [...new Set(options.directories ?? [])].sort().slice(0, 128);
   return useQuery<
     WorkspaceChangedFilesResult & { repositories: string[]; root_is_repository?: boolean }
   >({
-    queryKey: ["workspace-git-changes", conversationId, path, directories],
+    queryKey: ["workspace-git-changes", identity, path, directories],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({
         operation: "changes",
@@ -365,7 +396,7 @@ export function useWorkspaceGitChanges(
         directories: JSON.stringify(directories),
       });
       const response = await authenticatedFetch(
-        `/v1/sessions/${encodeURIComponent(conversationId!)}/resources/environments/default/git?${params}`,
+        `${resourceBase(workspace, conversationId)}/environments/default/git?${params}`,
         { signal },
       );
       const payload = await response.json();
@@ -381,15 +412,15 @@ export function useWorkspaceGitChanges(
     },
     enabled:
       options.enabled !== false &&
-      !!conversationId &&
-      !isTempConvId(conversationId) &&
+      !!identity &&
+      (!!workspace || !isTempConvId(conversationId)) &&
       serveable !== false &&
       environment.data?.available === true,
     staleTime: 5_000,
     refetchInterval: 5_000,
     retry: false,
     placeholderData: (previous, query) =>
-      query?.queryKey[1] === conversationId && query?.queryKey[2] === path ? previous : undefined,
+      query?.queryKey[1] === identity && query?.queryKey[2] === path ? previous : undefined,
   });
 }
 
@@ -461,13 +492,14 @@ function mapFilesystemEntries(
 async function fetchWorkspaceAllFiles(
   conversationId: string,
   location = "",
+  workspace?: WorkspaceResourceTarget,
 ): Promise<WorkspaceAllFilesResult> {
   const segment = browseLocationSegment(location);
   const params = new URLSearchParams({ limit: "1000", order: "asc" });
   const base = browseLocationBase(location);
   if (base) params.set("base", base);
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/${DEFAULT_ENVIRONMENT_ID}/filesystem${segment ? `/${segment}` : ""}?${params}`,
+    `${resourceBase(workspace, conversationId)}/environments/${DEFAULT_ENVIRONMENT_ID}/filesystem${segment ? `/${segment}` : ""}?${params}`,
   );
   if (res.status === 404) {
     return { available: false, data: [] };
@@ -509,20 +541,24 @@ export function useWorkspaceAllFiles(
   options: WorkspaceQueryOptions = {},
   location = "",
 ) {
+  const contextWorkspace = useWorkbenchWorkspace(options.workspace);
+  const workspace = contextWorkspace;
+  const identity = queryIdentity(workspace, conversationId);
   const queryEnabled = options.enabled ?? true;
-  const serveable = useWorkspaceServeable(conversationId);
-  const retry = useRunnerOfflineRetry(useRunnerRecovering(conversationId));
+  const serveable = useWorkspaceServeable(conversationId, workspace);
+  const retry = useRunnerOfflineRetry(useRunnerRecovering(conversationId, workspace));
   const environmentQuery = useWorkspaceEnvironment(conversationId, {
     enabled: queryEnabled,
+    workspace,
   });
-  const sessionActive = useSessionActive(conversationId);
-  useTrailingInvalidate(conversationId, sessionActive, "workspace-all-files");
+  const sessionActive = useSessionActive(workspace ? undefined : conversationId);
+  useTrailingInvalidate(identity, sessionActive, "workspace-all-files");
   return useQuery({
-    queryKey: ["workspace-all-files", conversationId, location],
-    queryFn: () => fetchWorkspaceAllFiles(conversationId!, location),
+    queryKey: ["workspace-all-files", identity, location],
+    queryFn: () => fetchWorkspaceAllFiles(conversationId!, location, workspace),
     enabled:
       queryEnabled &&
-      !!conversationId &&
+      !!identity &&
       serveable !== false &&
       environmentQuery.data?.available === true,
     retry,
@@ -534,6 +570,7 @@ export function useWorkspaceAllFiles(
     // previous conversation's tree under a new conversation's key fed stale
     // files into the folder tree's default-expansion cache; virtualization
     // already keeps the per-switch render cheap, so the warm-carry isn't needed.
+    refetchInterval: workspace ? 5_000 : false,
     staleTime: 30_000,
   });
 }
@@ -635,6 +672,7 @@ async function fetchWorkspaceFileSearch(
   include: string,
   exclude: string,
   location: string,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<WorkspaceFileSearchResult> {
   const params = new URLSearchParams({ limit: "500" });
   if (query) params.set("q", query);
@@ -644,7 +682,7 @@ async function fetchWorkspaceFileSearch(
   const base = browseLocationBase(location);
   if (base) params.set("base", base);
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/${DEFAULT_ENVIRONMENT_ID}/search${segment ? `/${segment}` : ""}?${params}`,
+    `${resourceBase(workspace, conversationId)}/environments/${DEFAULT_ENVIRONMENT_ID}/search${segment ? `/${segment}` : ""}?${params}`,
   );
   // 404 means the runner has no OS environment for this session (cloud-only
   // agent).  Mirror the behaviour of useWorkspaceAllFiles: return empty
@@ -680,25 +718,35 @@ export function useWorkspaceFileSearch(
   options: WorkspaceQueryOptions = {},
   location = "",
 ) {
-  const serveable = useWorkspaceServeable(conversationId);
+  const contextWorkspace = useWorkbenchWorkspace(options.workspace);
+  const workspace = contextWorkspace;
+  const identity = queryIdentity(workspace, conversationId);
+  const serveable = useWorkspaceServeable(conversationId, workspace);
   const trimmed = query.trim();
   const trimmedInclude = include?.trim() ?? "";
   const trimmedExclude = exclude?.trim() ?? "";
   return useQuery({
     queryKey: [
       "workspace-file-search",
-      conversationId,
+      identity,
       trimmed,
       trimmedInclude,
       trimmedExclude,
       location,
     ],
     queryFn: () =>
-      fetchWorkspaceFileSearch(conversationId!, trimmed, trimmedInclude, trimmedExclude, location),
-    enabled:
-      (options.enabled ?? true) && !!conversationId && trimmed.length > 0 && serveable !== false,
+      fetchWorkspaceFileSearch(
+        conversationId!,
+        trimmed,
+        trimmedInclude,
+        trimmedExclude,
+        location,
+        workspace,
+      ),
+    enabled: (options.enabled ?? true) && !!identity && trimmed.length > 0 && serveable !== false,
     staleTime: 5_000,
-    placeholderData: (prev) => prev,
+    placeholderData: (prev, previousQuery) =>
+      previousQuery?.queryKey[1] === identity ? prev : undefined,
   });
 }
 
@@ -708,6 +756,7 @@ async function fetchWorkspaceDirectory(
   conversationId: string,
   dirPath: string,
   location = "",
+  workspace?: WorkspaceResourceTarget,
 ): Promise<WorkspaceFile[]> {
   const target = joinBrowseLocation(location, dirPath);
   const encodedPath = browseLocationSegment(target);
@@ -715,7 +764,7 @@ async function fetchWorkspaceDirectory(
   const base = browseLocationBase(target);
   if (base) params.set("base", base);
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/${DEFAULT_ENVIRONMENT_ID}/filesystem/${encodedPath}?${params}`,
+    `${resourceBase(workspace, conversationId)}/environments/${DEFAULT_ENVIRONMENT_ID}/filesystem/${encodedPath}?${params}`,
   );
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   // The tree addresses children relative to the location it is rooted at, one
@@ -969,7 +1018,7 @@ export function useWorkspaceFileExists(
   path: string | null,
   trusted = false,
 ): WorkspaceFileExistence {
-  const serveable = useWorkspaceServeable(conversationId);
+  const serveable = useWorkspaceServeable(conversationId, null);
   const candidate = path && (trusted || looksLikeWorkspaceFilePath(path)) ? path : null;
   // Parent of a root-level file (no slash) is "" — the workspace root
   // listing. For an absolute candidate the parent keeps its leading slash
@@ -1043,9 +1092,12 @@ export interface WorkspaceReach {
   roots: WorkspaceReachRoot[];
 }
 
-async function fetchWorkspaceEnvironment(conversationId: string): Promise<WorkspaceEnvironment> {
+async function fetchWorkspaceEnvironment(
+  conversationId: string,
+  workspace?: WorkspaceResourceTarget,
+): Promise<WorkspaceEnvironment> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/${DEFAULT_ENVIRONMENT_ID}`,
+    `${resourceBase(workspace, conversationId)}/environments/${DEFAULT_ENVIRONMENT_ID}`,
   );
   if (res.status === 404) {
     return { available: false, root: null, home: null, reachable: null };
@@ -1055,12 +1107,12 @@ async function fetchWorkspaceEnvironment(conversationId: string): Promise<Worksp
   }
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const json = (await res.json()) as {
-    metadata?: { root?: string; home?: string; reachable?: WorkspaceReach };
+    metadata?: { root?: string; home?: string; reachable?: WorkspaceReach; available?: boolean };
   };
   const root = json.metadata?.root ?? null;
   const home = json.metadata?.home ?? null;
   return {
-    available: root !== null,
+    available: root !== null && json.metadata?.available !== false,
     root,
     home,
     reachable: json.metadata?.reachable ?? null,
@@ -1078,18 +1130,25 @@ export function useWorkspaceEnvironment(
   rawConversationId: string | undefined,
   options: WorkspaceQueryOptions = {},
 ) {
+  const contextWorkspace = useWorkbenchWorkspace(options.workspace);
+  const workspace = contextWorkspace;
+  const identity = queryIdentity(
+    workspace,
+    isTempConvId(rawConversationId) ? undefined : rawConversationId,
+  );
   // A `temp:*` id (navigate-first new-chat window) has no server workspace —
   // normalize to undefined so nothing (env, and the changed/all-files queries
   // that gate on its result) hits `/v1/sessions/temp:*/resources/*`.
   const conversationId = isTempConvId(rawConversationId) ? undefined : rawConversationId;
-  const serveable = useWorkspaceServeable(conversationId);
-  const retry = useRunnerOfflineRetry(useRunnerRecovering(conversationId));
+  const serveable = useWorkspaceServeable(conversationId, workspace);
+  const retry = useRunnerOfflineRetry(useRunnerRecovering(conversationId, workspace));
   return useQuery({
-    queryKey: ["workspace-environment", conversationId],
-    queryFn: () => fetchWorkspaceEnvironment(conversationId!),
-    enabled: (options.enabled ?? true) && !!conversationId && serveable !== false,
+    queryKey: ["workspace-environment", identity],
+    queryFn: () => fetchWorkspaceEnvironment(conversationId!, workspace),
+    enabled: (options.enabled ?? true) && !!identity && serveable !== false,
     retry,
     retryDelay: runnerOfflineRetryDelay,
+    refetchInterval: workspace ? 5_000 : false,
     staleTime: 60_000,
   });
 }
@@ -1106,11 +1165,15 @@ export function useWorkspaceDirectory(
   dirPath: string | null,
   location = "",
 ) {
-  const serveable = useWorkspaceServeable(conversationId);
+  const contextWorkspace = useWorkbenchWorkspace(undefined);
+  const workspace = contextWorkspace;
+  const identity = queryIdentity(workspace, conversationId);
+  const serveable = useWorkspaceServeable(conversationId, workspace);
   return useQuery({
-    queryKey: ["workspace-dir", conversationId, dirPath, location],
-    queryFn: () => fetchWorkspaceDirectory(conversationId!, dirPath!, location),
-    enabled: !!conversationId && !!dirPath && serveable !== false,
+    queryKey: ["workspace-dir", identity, dirPath, location],
+    queryFn: () => fetchWorkspaceDirectory(conversationId!, dirPath!, location, workspace),
+    enabled: !!identity && !!dirPath && serveable !== false,
+    refetchInterval: workspace ? 5_000 : false,
     staleTime: 5_000,
   });
 }
@@ -1138,8 +1201,11 @@ export function useWorkspaceDirectories(
   dirPaths: string[],
   location = "",
 ): Map<string, DirectoryResult> {
-  const serveable = useWorkspaceServeable(conversationId);
-  const enabled = !!conversationId && serveable !== false;
+  const contextWorkspace = useWorkbenchWorkspace(undefined);
+  const workspace = contextWorkspace;
+  const identity = queryIdentity(workspace, conversationId);
+  const serveable = useWorkspaceServeable(conversationId, workspace);
+  const enabled = !!identity && serveable !== false;
   // `combine` lets TanStack memoize the assembled Map. Its recompute gate is a
   // reference check on the combine fn (`combine !== lastCombine`), so the
   // callback must be stable — an inline closure is a fresh fn every render and
@@ -1162,9 +1228,10 @@ export function useWorkspaceDirectories(
   );
   return useQueries({
     queries: dirPaths.map((dirPath) => ({
-      queryKey: ["workspace-dir", conversationId, dirPath, location],
-      queryFn: () => fetchWorkspaceDirectory(conversationId!, dirPath, location),
+      queryKey: ["workspace-dir", identity, dirPath, location],
+      queryFn: () => fetchWorkspaceDirectory(conversationId!, dirPath, location, workspace),
       enabled,
+      refetchInterval: workspace ? 5_000 : false,
       staleTime: 5_000,
     })),
     combine,

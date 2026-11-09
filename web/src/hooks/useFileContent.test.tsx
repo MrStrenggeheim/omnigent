@@ -1,5 +1,10 @@
+import {
+  WorkbenchWorkspaceProvider,
+  queryIdentity,
+  type WorkbenchWorkspace,
+} from "@/lib/workbenchWorkspace";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type * as HostModule from "@/lib/host";
@@ -622,4 +627,36 @@ describe("useFileContent trailing invalidation", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+});
+
+it("reads the selected workspace without a chat and shares its cache across chat navigation", async () => {
+  const workspace: WorkbenchWorkspace = {
+    id: "selected",
+    root: "/selected",
+    host_id: "host",
+    target_kind: "host",
+    capabilities: ["files"],
+  };
+  onlineMock.mockReturnValue(false);
+  hostOnlineMock.mockReturnValue(false);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { result, rerender } = renderHook(
+    ({ sessionId }: { sessionId?: string }) => useFileContent(sessionId, "same.txt"),
+    {
+      initialProps: { sessionId: undefined as string | undefined },
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <WorkbenchWorkspaceProvider value={workspace}>{children}</WorkbenchWorkspaceProvider>
+        </QueryClientProvider>
+      ),
+    },
+  );
+  await waitFor(() => expect(result.current.data?.content).toBe("hi"));
+  expect(fetchMock.mock.calls[0][0]).toBe(
+    "/v1/workbench-workspaces/selected/resources/environments/default/filesystem/same.txt",
+  );
+  rerender({ sessionId: "different-chat" });
+  expect(result.current.data?.content).toBe("hi");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(client.getQueryData(["file-content", queryIdentity(workspace), "same.txt"])).toBeDefined();
 });

@@ -1,7 +1,7 @@
 # Workspace Explorer
 
-Users manage files on the selected session's host or sandbox from the Files tree, filename search results and Changes list, using the same filesystem operations and permissions across desktop and mobile.
-Git supplies change status by default, while an optional agent-change overlay exposes the session's observed edit history.
+Users manage files in the independently selected workspace from the Files tree, filename search results and Changes list, using the same filesystem operations and permissions across desktop and mobile.
+Git supplies change status by default; explicit captured comparisons retain the originating chat.
 
 ## Sub-features
 
@@ -9,25 +9,25 @@ Git supplies change status by default, while an optional agent-change overlay ex
 
 - `create`: create a file or folder with a name dialog; existing destinations produce an error.
 - `organize`: rename, move, duplicate, cut, copy and paste files or folders, with explicit overwrite selection.
-- `selection`: Ctrl/Cmd-click and Shift-click select entries for bulk operations; keyboard navigation and shortcuts operate on tree rows.
-- `row-controls`: show only size at rest; hover or keyboard focus reveals checkbox, download, copy and menu in one trailing column; selecting a checkbox keeps the other checkboxes visible.
+- `selection`: Ctrl/Cmd-click and Shift-click select entries for bulk operations; More file actions → Select files… enables explicit checkbox/tap selection on touch, and Done selecting or Escape exits.
+- `row-controls`: retain file size and a compact trailing three-dot menu with right-click actions; no hover checkbox/download/copy cluster reserves space.
 - `transfer`: upload files or directory structures and download folders or selected entries as ZIP, with shared [notification center](notifications.md) progress and cancellation.
 - `recovery`: move selected entries to recoverable trash and restore them without overwriting newer files.
-- `navigation`: collapse folders, reveal the most recently active file and search within a folder.
+- `navigation`: collapse folders, browse the selected root and search within a folder.
 - `compact-toolbar`: narrow Explorer columns keep folder navigation, comparison and the menu visible; folder actions remain in the menu, and host-served status sits below the control row.
 - `freshness`: update active directory listings after operations and external changes, including idle-host refresh.
 - `stable-refresh`: preserve expanded folders, loaded children and selection while background requests update existing directory queries.
 - `git-status`: show current Git status from the nearest repository for explicitly browsed directories, including nested repositories and repositories with a Git directory or Git file.
-- `agent-overlay`: enable the shared comparison dropdown from More file actions; the preference is global in this browser, persists across reloads and defaults to off.
-- `existing-files`: with the agent overlay off, Files lists existing paths without reconstructing missing historical paths; Git deletions remain reviewable from Changes.
-- `scope`: host, default root, remembered browse location and open file tabs still belong to the selected session; browsing elsewhere does not create an independent workspace.
+- `comparison`: Files and Changes keep independent comparison choices; filter and hidden-file controls remain beside the filename field.
+- `existing-files`: Files lists existing paths for every comparison without reconstructing missing historical paths; deletions remain reviewable from Changes.
+- `scope`: host, root, browse location and open files belong to the selected [independent workspace](workbench-workspaces.md), while agent comparisons name their source chat.
 - `states`: empty folders, unavailable host, permission denial, conflicting destinations, partial failures and cancelled transfers retain actionable feedback.
 
 ## How to get to it (user POV)
 
 - Desktop web and desktop app: open Workspace → Files for the tree or Changes for the changed-file list; filename search uses the Files search field.
 - Combined path/header: Up, current folder, comparison, New file, New folder, Refresh, Search folder contents, Collapse all folders, More file actions.
-- More file actions → the shared comparison dropdown toggles the optional session overlay in both the desktop rail and phone Files/Changes drawer.
+- Files and Changes each expose their comparison dropdown in the path row; filter and dot-file toggles stay beside quick search.
 - Changes lists Git deletions for review; file comparisons use the shared [workspace diffs](workspace-diffs.md) viewer.
 - Rows: right-click a file/folder for its actions; use the row action menu on touch devices.
 - Keyboard: arrows and Home/End move through visible rows; F2 renames; Delete moves selections to trash; Ctrl/Cmd+C, X and V copy, cut and paste.
@@ -51,7 +51,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Filename search and directory reveal: `tests/e2e_ui/files/test_file_search.py`.
 - Desktop and phone More file actions → the shared comparison dropdown, nested repository status, retained parent status during delayed discovery, absent historical paths and reload persistence: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_shared_comparison_keeps_files_live_and_gates_mixed_revisions`.
 - The same browser scenario checks Git deletions in Changes on desktop; on a phone, close Files, choose Workspace → Changes and open a deleted text file for review as a separate manual check.
-- For the overlay check, expand a nested repository under the session root, verify current Git markers with the shared comparison dropdown off, enable the checkbox to reveal retained agent history, disable it to remove absent historical paths and reload to confirm the preference remains off.
+- Select different comparison modes in Files and Changes, switch between them and reload; each view should retain its choice and Files should never reconstruct a removed path.
 - Nearest-repository discovery, explicit directory scopes, Git-file worktrees, nested repository boundaries and current status are covered by `tests/test_workspace_git.py`.
 - Overlay preferences and live tree behavior have component coverage in `web/src/lib/filesPanelPreferences.test.ts`, `web/src/shell/FilesPanel.test.tsx` and `web/src/shell/FolderTree.test.tsx`.
 - Expanded-directory invalidation: `web/src/store/chatStore.test.ts`.
@@ -59,17 +59,17 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Keyboard rename, bulk ZIP selection, drag auto-expansion/move, external expanded-folder updates: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_keyboard_bulk_drag_reveal_and_external_refresh`.
 - For keyboard, bulk selection and drag-and-drop, create two folders and three files; select adjacent and nonadjacent rows, copy/paste into another folder, rename using F2, and drop onto a collapsed folder to check auto-expansion.
 - Upload a directory containing a nested binary file and an empty folder; verify both structure and downloaded bytes, then cancel an in-progress transfer and confirm the unfinished destination was not installed.
-- Open a file, return to Files, press confirm its ancestors expand and the row scrolls into view; press Collapse all folders and confirm expansion clears.
+- Open a file, return to Files and confirm its ancestors remain expanded; press Collapse all folders and confirm expansion clears.
 - Modify a temporary expanded folder outside the UI while it is visible and confirm the listing updates; repeat with an idle runner and connected host.
 - Exercise denied permissions, existing destination errors and offline failures; verify that they do not appear as successful operations.
 
 ## Gotchas
 
-- This Explorer remains attached to the selected chat's host, default workspace root, browse location and open file tabs; this change does not provide an independent host/workspace chooser.
+- Independent workspace selection applies to the main right panel; legacy session endpoints remain available for existing authorized session-resource consumers.
 - Git discovery considers at most 128 explicitly browsed directories and deduplicates their nearest repositories; it does not recursively scan home for repositories or claim coverage of unopened repositories.
 - A nested repository owns status for its subtree, whether its Git metadata is a directory or a Git file.
-- the shared comparison dropdown defaults to off and is independent of the viewer's comparison selector; selecting an agent comparison does not enable the Explorer overlay.
-- Missing historical paths are absent from Files when the overlay is off, including deleted Git paths; use Changes to review Git deletions.
+- Files and Changes default to Git and retain separate selections; opening a file retains the originating comparison scope.
+- Missing historical paths are absent from Files, including deleted Git paths; use Changes to review deletions.
 - Agent history can be incomplete or stale and must not be read as current Git status; unavailable Git status is an error rather than a successful empty result.
 - Filename search searches names and paths; content search and replacement use the separate search surface.
 - Uploading a chat attachment does not choose a destination in the Explorer.

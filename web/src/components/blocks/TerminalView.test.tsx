@@ -200,6 +200,77 @@ describe("buildAttachPath", () => {
   });
 });
 
+describe("workspace terminal attachment", () => {
+  it.each([false, true])(
+    "uses the encoded workspace endpoint with readOnly=%s",
+    async (readOnly) => {
+      vi.mocked(resolveInitialAttachUrl).mockImplementation(async (_direct, relay) => relay);
+      render(
+        <TerminalView
+          sessionId="unrelated-chat"
+          workspaceId="workspace a/#"
+          terminalId="terminal/a"
+          readOnly={readOnly}
+        />,
+      );
+      await waitFor(() => expect(terminalSessionMock.instances).toHaveLength(1));
+      const url = new URL(terminalSessionMock.instances[0].url);
+      expect(url.pathname).toBe(
+        "/v1/workbench-workspaces/workspace%20a%2F%23/terminals/terminal%2Fa/attach",
+      );
+      expect(url.searchParams.get("read_only")).toBe(readOnly ? "true" : null);
+      expect(url.pathname).not.toContain("/sessions/");
+    },
+  );
+
+  it("retains the workspace target when the visible chat changes and disposes on workspace change", async () => {
+    vi.mocked(resolveInitialAttachUrl).mockImplementation(async (_direct, relay) => relay);
+    const view = render(
+      <TerminalView sessionId="chat-a" workspaceId="workspace-a" terminalId="manual" />,
+    );
+    await waitFor(() => expect(terminalSessionMock.instances).toHaveLength(1));
+    view.rerender(
+      <TerminalView sessionId="chat-b" workspaceId="workspace-a" terminalId="manual" />,
+    );
+    await waitFor(() => expect(terminalSessionMock.instances).toHaveLength(2));
+    expect(new URL(terminalSessionMock.instances[1].url).pathname).toBe(
+      "/v1/workbench-workspaces/workspace-a/terminals/manual/attach",
+    );
+    view.rerender(
+      <TerminalView sessionId="chat-b" workspaceId="workspace-b" terminalId="manual" />,
+    );
+    await waitFor(() => expect(terminalSessionMock.instances).toHaveLength(3));
+    expect(terminalSessionMock.instances[1].dispose).toHaveBeenCalledOnce();
+    expect(new URL(terminalSessionMock.instances[2].url).pathname).toBe(
+      "/v1/workbench-workspaces/workspace-b/terminals/manual/attach",
+    );
+  });
+
+  it("discards a delayed attachment for the previous workspace", async () => {
+    let finishOld!: (url: string) => void;
+    vi.mocked(resolveInitialAttachUrl)
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            finishOld = resolve;
+          }),
+      )
+      .mockImplementation(async (_direct, relay) => relay);
+    const view = render(
+      <TerminalView sessionId="chat" workspaceId="workspace-a" terminalId="manual" />,
+    );
+    await waitFor(() => expect(resolveInitialAttachUrl).toHaveBeenCalledOnce());
+    const oldRelay = vi.mocked(resolveInitialAttachUrl).mock.calls[0][1];
+    view.rerender(<TerminalView sessionId="chat" workspaceId="workspace-b" terminalId="manual" />);
+    await waitFor(() => expect(terminalSessionMock.instances).toHaveLength(1));
+    await act(async () => finishOld(oldRelay));
+    expect(terminalSessionMock.instances).toHaveLength(1);
+    expect(new URL(terminalSessionMock.instances[0].url).pathname).toBe(
+      "/v1/workbench-workspaces/workspace-b/terminals/manual/attach",
+    );
+  });
+});
+
 describe("control-mode terminal", () => {
   it.each([
     ["terminal_codex_main", true],

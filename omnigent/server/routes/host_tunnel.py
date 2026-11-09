@@ -63,6 +63,8 @@ from omnigent.host.frames import (
     HostStatResultFrame,
     HostStopRunnerResultFrame,
     HostStoreSecretResultFrame,
+    HostTerminalResultFrame,
+    HostTerminalStreamFrame,
     ImportLocalSessionChunkAssembler,
     decode_host_frame,
     encode_host_frame,
@@ -998,6 +1000,29 @@ async def _receive_loop(
             detect_future = conn.pending_credential_detects.pop(frame.request_id, None)
             if detect_future is not None and not detect_future.done():
                 detect_future.set_result({"credentials": frame.credentials})
+            continue
+
+        if isinstance(frame, HostTerminalResultFrame):
+            terminal_future = conn.pending_terminals.pop(frame.request_id, None)
+            if terminal_future is not None and not terminal_future.done():
+                terminal_future.set_result(frame)
+            continue
+
+        if isinstance(frame, HostTerminalStreamFrame):
+            channel = conn.terminal_channels.get(frame.channel_id)
+            if channel is not None:
+                if channel.full():
+                    # Backpressure belongs to this viewer, never the host's control loop.
+                    while not channel.empty():
+                        channel.get_nowait()
+                    channel.put_nowait(
+                        HostTerminalStreamFrame(
+                            frame.channel_id, "close", "terminal viewer too slow", 1013
+                        )
+                    )
+                    conn.terminal_channels.pop(frame.channel_id, None)
+                else:
+                    channel.put_nowait(frame)
             continue
 
         if isinstance(frame, HostFsResultFrame):

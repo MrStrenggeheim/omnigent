@@ -107,10 +107,12 @@ from omnigent.server.schemas import (
     SessionResourceObject,
     SessionResourcePaginatedList,
 )
+from omnigent.server.session_activity import SessionActivityService, merge_activity_pages
 from omnigent.stores import AgentStore, ConversationStore
 from omnigent.stores.artifact_store import ArtifactStore
 from omnigent.stores.file_store import FileStore
 from omnigent.stores.permission_store import PermissionStore
+from omnigent.terminals.history import ActivityPage
 
 if TYPE_CHECKING:
     from omnigent.inner.native_attachments import FilesystemAttachmentPolicy
@@ -395,6 +397,76 @@ def register_resources_routes(
         if conv is None:
             raise _session_not_found()
         return conv
+
+    activity_service = SessionActivityService(artifact_store)
+
+    async def _activity_for_conversation(conv: Conversation) -> ActivityPage:
+        runner_client = None
+        local_registry = None
+        try:
+            runner_client = await _get_runner_client_for_resource_access(
+                conv.id, conversation=conv
+            )
+        except OmnigentError as exc:
+            if exc.code not in (ErrorCode.RUNNER_UNAVAILABLE, ErrorCode.CONFLICT):
+                raise
+        else:
+            if runner_client is None:
+                from omnigent.runtime import get_terminal_registry
+
+                with contextlib.suppress(RuntimeError):
+                    local_registry = get_terminal_registry()
+        return await activity_service.page(
+            conv.id,
+            runner_client=runner_client,
+            local_registry=local_registry,
+            parent_agent_id=conv.id if conv.parent_conversation_id is not None else None,
+            conversation_store=conversation_store,
+        )
+
+    @router.get("/sessions/{session_id}/activity", response_model=None)
+    async def get_session_activity(
+        request: Request,
+        session_id: str,
+        include_children: bool = True,
+    ) -> ActivityPage:
+        root = await _validate_session(session_id, request, LEVEL_READ)
+        conversations = [root]
+        seen = {root.id}
+        truncated = False
+        max_sessions = 32
+        list_children = getattr(conversation_store, "list_child_conversation_ids_page", None)
+        if include_children and list_children is not None:
+            for parent in conversations:
+                remaining = max_sessions - len(conversations)
+                children = await asyncio.to_thread(list_children, parent.id, limit=remaining + 1)
+                if len(children) > remaining:
+                    truncated = True
+                for child_id, _ in children:
+                    if child_id in seen:
+                        continue
+                    if len(conversations) == max_sessions:
+                        truncated = True
+                        break
+                    seen.add(child_id)
+                    try:
+                        child = await _validate_session(child_id, request, LEVEL_READ)
+                    except OmnigentError as exc:
+                        if exc.code in (ErrorCode.NOT_FOUND, ErrorCode.FORBIDDEN):
+                            continue
+                        raise
+                    if child.parent_conversation_id == parent.id:
+                        conversations.append(child)
+                if truncated:
+                    break
+        semaphore = asyncio.Semaphore(4)
+
+        async def read_activity(conv: Conversation) -> ActivityPage:
+            async with semaphore:
+                return await _activity_for_conversation(conv)
+
+        pages = await asyncio.gather(*(read_activity(conv) for conv in conversations))
+        return merge_activity_pages(pages, include_children=include_children, truncated=truncated)
 
     # Per-chunk read budget for a direct HTTP runner client; no total timeout,
     # since a large file legitimately outlives any. The WebSocket tunnel

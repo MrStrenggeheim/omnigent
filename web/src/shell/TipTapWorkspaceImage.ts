@@ -1,3 +1,4 @@
+import type { WorkspaceResourceTarget } from "@/lib/workbenchWorkspace";
 // Workspace-aware TipTap Image extension.
 //
 // The stock @tiptap/extension-image renders `<img src>` directly, which only
@@ -164,6 +165,7 @@ function formatMarkdownTitleSuffix(title: string | null | undefined): string {
 export function createWorkspaceImageExtension(
   conversationId: string,
   filePath: string,
+  workspace?: WorkspaceResourceTarget,
 ): AnyExtension {
   return Image.extend({
     // ProseMirror disallows all marks on inline atoms by default, which
@@ -265,7 +267,7 @@ export function createWorkspaceImageExtension(
           const pathPart = src.split(/[?#]/)[0];
           const resolved = pathPart === "" ? "" : resolveWorkspacePath(filePath, src);
           if (resolved !== "") {
-            fetchFileContent(conversationId, resolved)
+            fetchFileContent(conversationId, resolved, workspace)
               .then((data) => {
                 if (cancelled) return;
                 objectUrl = URL.createObjectURL(fileContentToBlob(data));

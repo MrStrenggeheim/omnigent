@@ -1,3 +1,8 @@
+import { getFileComparisonScope, setFileComparisonScope } from "@/lib/workspaceComparison";
+import { WorkbenchWorkspaceProvider, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
+import { useWorkbenchSelection } from "@/hooks/useWorkbenchSelection";
+import { WorkbenchSelector } from "./WorkbenchSelector";
+import { ChatActivityPanel, type ChatActivityTerminalTarget } from "./ChatActivityPanel";
 import {
   BotIcon,
   FileIcon,
@@ -22,6 +27,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -106,6 +112,7 @@ import {
   terminalTabKey,
   terminalDisplayLabel,
   useCreateTerminal,
+  useTerminals,
   useDeleteTerminal,
 } from "@/hooks/useTerminals";
 import { useWorkspaceResources } from "./useWorkspaceResources";
@@ -144,7 +151,6 @@ import { MobilePanelDrawer } from "./MobilePanelDrawer";
 import { isMobileViewport, Sidebar } from "./Sidebar";
 import { SidebarHeaderActions } from "./SidebarHeaderActions";
 import { useSettingsRoute } from "./settingsNav";
-import { SubagentsPanel } from "./SubagentsPanel";
 import { useRootSessionId, useSession } from "@/hooks/useSession";
 import { useSessionActionRestrictions } from "@/hooks/useSessionActionRestrictions";
 import {
@@ -246,6 +252,10 @@ function GridSessionMain(props: ComponentProps<"main">) {
   return <main {...props} data-grid-session={grids?.enabled ? grids.conversationId : undefined} />;
 }
 
+const TerminalView = lazy(() =>
+  import("@/components/blocks/TerminalView").then((module) => ({ default: module.TerminalView })),
+);
+
 function AppShellImpl() {
   // Cmd/Ctrl+Enter accepts the pending harness approval prompt. Bound once
   // here so it works on every chat route, regardless of where focus sits.
@@ -302,6 +312,42 @@ function AppShellImpl() {
   // create window (or on a stale temp reload, before ChatPage redirects).
   const serverConversationId = isTempConvId(conversationId) ? undefined : conversationId;
   const pendingConversation = conversationId != null && serverConversationId == null;
+  const workbench = useWorkbenchSelection(
+    serverConversationId,
+    true,
+    new URLSearchParams(location.search).get("workspace"),
+  );
+  const selectWorkbench = workbench.select;
+  const chatWorkspace = workbench.chatWorkspace;
+  const workspaceScope = useMemo<WorkbenchWorkspace | null>(
+    () =>
+      workbench.workspace
+        ? {
+            ...workbench.workspace,
+            chatSessionId:
+              workbench.chatWorkspace?.id === workbench.workspace.id ? serverConversationId : null,
+          }
+        : workbench.selectedId
+          ? {
+              id: workbench.selectedId,
+              root: "",
+              host_id: null,
+              target_kind: "host",
+              capabilities: [],
+              permission_level: 0,
+              available: false,
+              chatSessionId: null,
+            }
+          : null,
+    [workbench.workspace, workbench.selectedId, workbench.chatWorkspace?.id, serverConversationId],
+  );
+  const workspaceStateId = workspaceScope ? `workbench:${workspaceScope.id}` : null;
+  const mobileSearchScopeId = workspaceStateId ?? conversationId;
+  const currentWorkspaceRef = useRef(workspaceScope?.id);
+  currentWorkspaceRef.current = workspaceScope?.id;
+  const workspaceTerminals = useTerminals(null, { workspace: workspaceScope });
+  const [activityTerminal, setActivityTerminal] = useState<ChatActivityTerminalTarget | null>(null);
+
   const [fileViewerCommentsOpen, setFileViewerCommentsOpen] = useState(false);
   const [mobileFileTarget, setMobileFileTarget] = useState<HTMLDivElement | null>(null);
   const [rightRailTab, setRightRailTab] = useState<RightRailTab | null>(() =>
@@ -671,9 +717,9 @@ function AppShellImpl() {
   );
   const terminalFirst = sessionLabels["omnigent.ui"] === "terminal";
   const {
-    terminals,
+    terminals: sessionTerminals,
     agentTerminal,
-    openTerminals,
+    openTerminals: sessionOpenTerminals,
     environmentQuery,
     showFilesPanel,
     changedCount,
@@ -684,7 +730,12 @@ function AppShellImpl() {
     shareWorkspaceFiles: activeSession?.shareWorkspaceFiles,
     terminalFirst,
     terminalPending,
+    workspace: workspaceScope,
   });
+  const terminals = workspaceScope ? workspaceTerminals.terminals : sessionTerminals;
+  const openTerminals = workspaceScope
+    ? workspaceTerminals.terminals.map(terminalTabKey)
+    : sessionOpenTerminals;
   const isClaudeNative = sessionLabels["omnigent.wrapper"] === "claude-code-native-ui";
   // Native-CLI wrapper of either family. Keys harness behavior gates
   // (composer slash commands, `/model`); terminal-first SDK sessions
@@ -836,7 +887,7 @@ function AppShellImpl() {
   // vendor pane is excluded from the inventory like the SDK REPL (see
   // ``inventoryTerminals``).
   const hideTerminalsTab = isClaudeNativeSubagent;
-  const deleteTerminalMutation = useDeleteTerminal(conversationId ?? "");
+  const deleteTerminalMutation = useDeleteTerminal(conversationId ?? "", workspaceScope);
   // Tab key awaiting a close confirmation, or null. Closing a tab kills the
   // terminal, so a user-initiated close routes through a confirm modal first.
   const [terminalPendingClose, setTerminalPendingClose] = useState<string | null>(null);
@@ -866,7 +917,9 @@ function AppShellImpl() {
   // via the tab-strip "+" menu), but the MOBILE Shells drawer — which has no
   // "+" menu — must be reachable at zero shells so its "+ New shell" row is the
   // create entry point. So mobile gates on declared access too.
-  const agentSupportsShells = (boundAgent?.terminals ?? []).length > 0;
+  const agentSupportsShells = workspaceScope
+    ? workspaceScope.capabilities.includes("terminals")
+    : (boundAgent?.terminals ?? []).length > 0;
   // The "root" session for the Subagents tab. The rail renders the whole
   // spawn tree from the top-level session, so when the user is inside a
   // descendant we walk the parent chain to the top via ``useRootSessionId``
@@ -929,10 +982,10 @@ function AppShellImpl() {
     handleProps: inlinePanelHandleProps,
     isDragging: inlinePanelResizing,
   } = useResizableInlinePanel(
-    rootSessionId,
+    workspaceStateId ?? rootSessionId,
     inlinePanelMinWidth,
     (sidebarOpen ? sidebarWidth : 0) + (canvasMode ? canvasReservedWidth : 0),
-    rootSessionResolved,
+    workspaceStateId !== null || rootSessionResolved,
     canvasMode ? CANVAS_CONVERSATION_MIN_WIDTH : undefined,
   );
   // How many children are actively working — surfaced in the tab badge so
@@ -965,12 +1018,12 @@ function AppShellImpl() {
         browser: supportsBrowser(),
         // Agents tab is unconditional: the panel always lists at least
         // the main agent (its "main" row), so there's never a dead end.
-        subagents: true,
+        subagents: !!conversationId,
         // Shells have no nav tab — they open as closable soft tabs in the
         // rail's tab strip (see WorkspacePanel's TerminalTabsStrip / "+"
         // menu). Mobile keeps a shells drawer (see ``showShellsTab`` below).
       }) as const,
-    [showFilesPanel, serverInfo],
+    [showFilesPanel, serverInfo, conversationId],
   );
   // Whether the rail has anything at all to show. When false the workspace
   // card doesn't mount and the header hides its collapse toggle — a
@@ -1139,12 +1192,14 @@ function AppShellImpl() {
   // also honor URL search params so shared links open to the right view.
   useEffect(() => {
     setExecutionLogsKey(null);
-    setFilesPanelOpen(false);
+    if (!workspaceScope) {
+      setFilesPanelOpen(false);
+      setShellsPanelOpen(false);
+      setGithubPanelOpen(false);
+      setFilesPanelShowHidden(true);
+    }
     setSubagentsPanelOpen(false);
-    setShellsPanelOpen(false);
-    setGithubPanelOpen(false);
     setSideChatsPanelOpen(false);
-    setFilesPanelShowHidden(true);
     // Drop shell interaction state carried from the outgoing session: a
     // still-armed create ref would otherwise auto-focus an unrelated shell in
     // the new session, and an open "Close shell?" dialog would target a
@@ -1152,6 +1207,10 @@ function AppShellImpl() {
     pendingShellCreateRef.current = null;
     setTerminalPendingClose(null);
     setFileNavigation(undefined);
+    if (!conversationId && workspaceScope) {
+      setPanelInitialKeyState(null);
+      return;
+    }
     if (!conversationId) {
       // No session → no rail; false (not the open default) so rail-gated
       // effects stay quiet on non-session routes.
@@ -1184,6 +1243,15 @@ function AppShellImpl() {
             ? null
             : (stored ?? (defaultToTerminal ? terminalKey : null)),
     );
+
+    if (workspaceScope) {
+      if (showAgents) {
+        setRightRailTab("subagents");
+        setSubagentsPanelOpen(isMobileViewport());
+      }
+      stateConvRef.current = conversationId;
+      return;
+    }
 
     // A remembered per-session tab wins; otherwise use the Appearance default.
     // Navigating within the visible Agents tree is one continuous rail action,
@@ -1271,6 +1339,38 @@ function AppShellImpl() {
 
     stateConvRef.current = conversationId;
   }, [conversationId, canvasMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const restoredWorkspaceStateRef = useRef<string | null>(null);
+  const skipWorkspacePersistRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!workspaceStateId || restoredWorkspaceStateRef.current === workspaceStateId) return;
+    restoredWorkspaceStateRef.current = workspaceStateId;
+    skipWorkspacePersistRef.current = true;
+    const saved = readSessionWorkspaceState(workspaceStateId);
+    const stored = Object.keys(saved).length
+      ? saved
+      : stateConvRef.current
+        ? readSessionWorkspaceState(stateConvRef.current)
+        : {};
+    const cited = searchParams.get("file");
+    const citationBelongsHere =
+      searchParams.get("workspace") === workbench.workspace?.id ||
+      workbench.chatWorkspace?.id === workbench.workspace?.id;
+    const file = citationBelongsHere && cited ? cited : (stored.selectedFilePath ?? null);
+    const files = stored.openFiles ?? [];
+    setOpenFiles(file && !files.includes(file) ? [...files, file] : files);
+    setSelectedFilePath(file);
+    setSelectedTerminalKey(file ? null : (stored.selectedTerminalKey ?? null));
+    setRightRailTab(stored.rightRailTab ?? "files");
+    setOpenPanels(stored.openPanels ?? []);
+    setRightPanelOpenImmediately(stored.open ?? true);
+  }, [
+    workspaceStateId,
+    workbench.chatWorkspace?.id,
+    workbench.workspace?.id,
+    searchParams,
+    setRightPanelOpenImmediately,
+  ]);
 
   // Record the incoming root after restoration compares it with the outgoing tree.
   useEffect(() => {
@@ -1365,7 +1465,11 @@ function AppShellImpl() {
       workspacePersistHydrated.current = true;
       return;
     }
-    const id = stateConvRef.current;
+    if (workspaceStateId && skipWorkspacePersistRef.current) {
+      skipWorkspacePersistRef.current = false;
+      return;
+    }
+    const id = workspaceStateId ?? stateConvRef.current;
     if (!id) return;
     writeSessionWorkspaceState(id, {
       rightRailTab,
@@ -1374,7 +1478,14 @@ function AppShellImpl() {
       selectedFilePath,
       selectedTerminalKey,
     });
-  }, [rightRailTab, openPanels, openFiles, selectedFilePath, selectedTerminalKey]);
+  }, [
+    rightRailTab,
+    openPanels,
+    openFiles,
+    selectedFilePath,
+    selectedTerminalKey,
+    workspaceStateId,
+  ]);
 
   const handleFilesSortChange = useCallback((s: ChangedSort) => {
     setFilesPanelSort(s);
@@ -1385,6 +1496,19 @@ function AppShellImpl() {
     (path: string, options?: OpenFileOptions) => {
       const position = citedFilePosition(options);
       setSelectedFilePath(path);
+      const identity = { workspaceId: workspaceScope?.id, conversationId };
+      const openingView =
+        options?.comparisonScope ??
+        (isMobileViewport() && filesPanelOpen
+          ? filesDrawerFlatView
+            ? "changes"
+            : "files"
+          : rightRailTab === "changes"
+            ? "changes"
+            : rightRailTab === "files"
+              ? "files"
+              : (getFileComparisonScope(identity, path) ?? "files"));
+      setFileComparisonScope(identity, path, openingView);
       setFileNavigation({ conversationId, path, position });
       // A file and a shell tab can't both own the rail's content slot —
       // opening a file deselects any active shell tab (its tab stays in the
@@ -1420,7 +1544,8 @@ function AppShellImpl() {
       // open=true so the rail stays in sync with the open file on the next
       // visit (mirroring the header toggle's persistence).
       setRightPanelOpenAnimated(true);
-      if (conversationId) writeSessionWorkspaceState(conversationId, { open: true });
+      if (workspaceStateId ?? conversationId)
+        writeSessionWorkspaceState((workspaceStateId ?? conversationId)!, { open: true });
       // Set URL in the callback (not a useEffect) to avoid racing with
       // FileViewer's diff-sync effect which can clobber it on mount.
       setSearchParams(
@@ -1441,7 +1566,18 @@ function AppShellImpl() {
         { replace: true },
       );
     },
-    [setPanelInitialKey, terminalFirst, setSearchParams, conversationId, setRightPanelOpenAnimated],
+    [
+      setPanelInitialKey,
+      terminalFirst,
+      setSearchParams,
+      conversationId,
+      workspaceStateId,
+      setRightPanelOpenAnimated,
+      rightRailTab,
+      workspaceScope?.id,
+      filesPanelOpen,
+      filesDrawerFlatView,
+    ],
   );
 
   const fileNavigationGuardsRef = useRef(new Set<FileNavigationGuard>());
@@ -1464,7 +1600,72 @@ function AppShellImpl() {
     [commitFileNavigation],
   );
 
-  useUiOpenFile(serverConversationId, showFilesPanel, openFileViewer);
+  const selectWorkspace = useCallback(
+    (nextWorkspace: WorkbenchWorkspace) => {
+      if (nextWorkspace.id === workspaceScope?.id) return;
+      const guards = [...fileNavigationGuardsRef.current];
+      const navigate = (index: number) => {
+        const guard = guards[index];
+        if (guard)
+          guard(selectedFilePath ?? "", { workspaceId: nextWorkspace.id }, () =>
+            navigate(index + 1),
+          );
+        else {
+          setActivityTerminal(null);
+          selectWorkbench(nextWorkspace);
+          setSearchParams(
+            (previous) => {
+              const next = new URLSearchParams(previous);
+              next.set("workspace", nextWorkspace.id);
+              next.delete("file");
+              next.delete("comment");
+              return next;
+            },
+            { replace: true },
+          );
+        }
+      };
+      navigate(0);
+    },
+    [workspaceScope?.id, selectedFilePath, selectWorkbench, setSearchParams],
+  );
+  const openChatFile = useCallback(
+    (path: string, options?: OpenFileOptions) => {
+      const target = chatWorkspace;
+      if (!target || target.id === workspaceScope?.id) {
+        openFileViewer(path, options);
+        return;
+      }
+      const guards = [...fileNavigationGuardsRef.current];
+      const navigate = (index: number) => {
+        const guard = guards[index];
+        if (guard) guard(path, { ...options, workspaceId: target.id }, () => navigate(index + 1));
+        else {
+          writeSessionWorkspaceState(`workbench:${target.id}`, {
+            openFiles: [path],
+            selectedFilePath: path,
+            rightRailTab: "files",
+            open: true,
+          });
+          selectWorkbench(target);
+          setSearchParams(
+            (previous) => {
+              const next = new URLSearchParams(previous);
+              next.set("workspace", target.id);
+              next.set("file", path);
+              next.delete("comment");
+              return next;
+            },
+            { replace: true },
+          );
+        }
+      };
+      navigate(0);
+    },
+    [chatWorkspace, workspaceScope?.id, openFileViewer, selectWorkbench, setSearchParams],
+  );
+
+  useUiOpenFile(serverConversationId, showFilesPanel, openChatFile);
 
   // Strip the file-viewer URL params (file/diff/comment). Memoized on
   // ``setSearchParams`` so it always closes over react-router's *current*
@@ -1488,7 +1689,13 @@ function AppShellImpl() {
   useEffect(() => {
     const handleFilesChanged = (event: Event) => {
       const changes = (event as CustomEvent<WorkspaceFilesChanged>).detail;
-      if (!changes || changes.conversationId !== conversationId) return;
+      if (
+        !changes ||
+        (changes.workspaceId
+          ? changes.workspaceId !== workspaceScope?.id
+          : changes.conversationId !== conversationId)
+      )
+        return;
       setOpenFiles((paths) => [
         ...new Set(
           paths.flatMap((path) => {
@@ -1521,7 +1728,7 @@ function AppShellImpl() {
     };
     window.addEventListener("omnigent:workspace-files-changed", handleFilesChanged);
     return () => window.removeEventListener("omnigent:workspace-files-changed", handleFilesChanged);
-  }, [conversationId, selectedFilePath, clearFileViewerUrl, setSearchParams]);
+  }, [conversationId, workspaceScope?.id, selectedFilePath, clearFileViewerUrl, setSearchParams]);
   const restoreSelectedFileUrl = useCallback(() => {
     if (!selectedFilePath) return;
     setSearchParams(
@@ -1539,20 +1746,30 @@ function AppShellImpl() {
       const detail = (
         event as CustomEvent<{
           conversationId: string;
+          workspaceId?: string;
           location: string;
           replace?: boolean;
         }>
       ).detail;
-      if (detail?.conversationId !== conversationId) return;
+      if (
+        detail?.workspaceId
+          ? detail.workspaceId !== workspaceScope?.id
+          : detail?.conversationId !== conversationId
+      )
+        return;
       setFilesPanelOpen(false);
       setSelectedFilePath(null);
       clearFileViewerUrl();
-      setMobileSearch({ ...detail, replace: detail.replace === true });
+      setMobileSearch({
+        ...detail,
+        conversationId: workspaceStateId ?? conversationId ?? "",
+        replace: detail.replace === true,
+      });
     };
     window.addEventListener("omnigent:open-content-search", openMobileSearch);
     return () => window.removeEventListener("omnigent:open-content-search", openMobileSearch);
-  }, [conversationId, railTabsAvailable, clearFileViewerUrl]);
-  useEffect(() => setMobileSearch(null), [conversationId]);
+  }, [conversationId, workspaceStateId, workspaceScope?.id, railTabsAvailable, clearFileViewerUrl]);
+  useEffect(() => setMobileSearch(null), [mobileSearchScopeId]);
 
   // Toggle the right (Workspace) sidebar — shared by the header's collapse
   // button and the ⌘⌥]/Ctrl+Alt+] hotkey so they can't drift. Beyond flipping the
@@ -1562,8 +1779,8 @@ function AppShellImpl() {
   // advertises a panel that isn't shown.
   const toggleRightPanel = useCallback(() => {
     const next = !rightPanelOpen;
-    if (conversationId) {
-      writeSessionWorkspaceState(conversationId, { open: next });
+    if (workspaceStateId ?? conversationId) {
+      writeSessionWorkspaceState((workspaceStateId ?? conversationId)!, { open: next });
       // Remember the choice app-wide as well, so a collapsed rail stays
       // collapsed in the next chat the user opens (and on reload) until they
       // reopen it. Sessions with their own saved open-state still win over
@@ -1586,6 +1803,7 @@ function AppShellImpl() {
   }, [
     rightPanelOpen,
     conversationId,
+    workspaceStateId,
     clearFileViewerUrl,
     restoreSelectedFileUrl,
     setRightPanelOpenAnimated,
@@ -1599,16 +1817,17 @@ function AppShellImpl() {
     (visibleSelectedTab ?? tabList)?.focus();
   }, []);
   const revealRightPanel = useCallback(() => {
-    if (!conversationId) return;
+    if (!(workspaceStateId ?? conversationId)) return;
     if (!terminalFirst) setPanelInitialKey(null);
     setExecutionLogsKey(null);
     setFilesPanelOpen(false);
     if (rightPanelOpen) return;
-    writeSessionWorkspaceState(conversationId, { open: true });
+    writeSessionWorkspaceState((workspaceStateId ?? conversationId)!, { open: true });
     writeDefaultWorkspacePanelOpen(true);
     setRightPanelOpenAnimated(true);
   }, [
     conversationId,
+    workspaceStateId,
     rightPanelOpen,
     setPanelInitialKey,
     setRightPanelOpenAnimated,
@@ -2023,9 +2242,10 @@ function AppShellImpl() {
       setSubagentsPanelOpen(false);
       setShellsPanelOpen(false);
       setRightPanelOpenAnimated(true);
-      if (conversationId) writeSessionWorkspaceState(conversationId, { open: true });
+      if (workspaceStateId ?? conversationId)
+        writeSessionWorkspaceState((workspaceStateId ?? conversationId)!, { open: true });
     },
-    [clearFileViewerUrl, conversationId, setRightPanelOpenAnimated],
+    [clearFileViewerUrl, conversationId, workspaceStateId, setRightPanelOpenAnimated],
   );
 
   // ⌘⌥T (Ctrl+Alt+T) opens a new shell — the keyboard path for the tab-strip
@@ -2036,23 +2256,27 @@ function AppShellImpl() {
   // matching the menu item's disabled state. Also inert while a create is in
   // flight, so two quick presses can't spawn two shells (the menu disables its
   // item on create.isPending for the same reason).
-  const createTerminal = useCreateTerminal(conversationId ?? "");
+  const createTerminal = useCreateTerminal(conversationId ?? "", workspaceScope);
   const shellLaunchable =
     agentSupportsShells &&
-    !!conversationId &&
+    !!(conversationId || workspaceScope) &&
     !createTerminal.isPending &&
-    liveness?.kind !== "host_offline" &&
-    liveness?.kind !== "local_stranded";
+    (workspaceScope
+      ? workspaceScope.available !== false
+      : liveness?.kind !== "host_offline" && liveness?.kind !== "local_stranded");
   const launchDefaultShell = useCallback(() => {
-    const name = resolveDefaultShell(boundAgent?.terminals ?? []);
+    const name = resolveDefaultShell(workspaceScope ? ["shell"] : (boundAgent?.terminals ?? []));
     if (name === null) return;
     markShellCreateStarted();
     createTerminal.mutate(name, {
-      onSuccess: (info) => openTerminalTab(terminalTabKey(info)),
+      onSuccess: (info) => {
+        if (info.workspaceId === currentWorkspaceRef.current) openTerminalTab(terminalTabKey(info));
+      },
       onError: () => clearShellCreatePending(),
     });
   }, [
     boundAgent,
+    workspaceScope,
     createTerminal,
     markShellCreateStarted,
     clearShellCreatePending,
@@ -2097,8 +2321,8 @@ function AppShellImpl() {
       return remaining[idx - 1] ?? remaining[idx] ?? remaining[0];
     });
     const info = terminals.find((t) => terminalTabKey(t) === key);
-    if (info && conversationId) deleteTerminalMutation.mutate(info.id);
-  }, [terminalPendingClose, openTerminals, terminals, conversationId, deleteTerminalMutation]);
+    if (info) deleteTerminalMutation.mutate(info.id);
+  }, [terminalPendingClose, openTerminals, terminals, deleteTerminalMutation]);
 
   // The active shell selection is sticky: it changes only on explicit user
   // action (opening a shell/file, switching a nav tab, closing the active
@@ -2200,9 +2424,11 @@ function AppShellImpl() {
     setSubagentsPanelOpen(false);
     selectRightRailTab("github");
     setRightPanelOpenAnimated(true);
-    if (conversationId) writeSessionWorkspaceState(conversationId, { open: true });
+    if (workspaceStateId ?? conversationId)
+      writeSessionWorkspaceState((workspaceStateId ?? conversationId)!, { open: true });
   }, [
     conversationId,
+    workspaceStateId,
     terminalFirst,
     setPanelInitialKey,
     openGithubPanel,
@@ -2219,11 +2445,16 @@ function AppShellImpl() {
   // Workspace root + runner home let chat path-links collapse absolute or
   // ``~``-relative paths the agent mentions onto workspace-relative ones.
   // Sourced from the same environment query that gates the files panel.
-  const workspaceRoot = environmentQuery.data?.root ?? null;
-  const workspaceHome = environmentQuery.data?.home ?? null;
+  const workspaceRoot =
+    activeSession?.workspace ??
+    activeConv?.workspace ??
+    (workspaceScope ? null : environmentQuery.data?.root) ??
+    null;
+  const workspaceHome =
+    workspaceScope && workbench.mismatch ? null : (environmentQuery.data?.home ?? null);
   const fileViewerContextValue = useMemo(
     () => ({
-      openFile: openFileViewer,
+      openFile: openChatFile,
       registerNavigationGuard,
       openGithubTab,
       isChangedPath,
@@ -2239,7 +2470,7 @@ function AppShellImpl() {
         null,
     }),
     [
-      openFileViewer,
+      openChatFile,
       registerNavigationGuard,
       openGithubTab,
       isChangedPath,
@@ -2438,7 +2669,7 @@ function AppShellImpl() {
     [canClone, forkDisabledReason, queryClient, serverConversationId],
   );
   const workspacePanelVisible = Boolean(
-    conversationId &&
+    (conversationId || workspaceScope) &&
     hasRailContent &&
     rightPanelOpen &&
     (terminalFirst || !panelOpen) &&
@@ -2452,7 +2683,7 @@ function AppShellImpl() {
   }, [workspacePanelVisible, focusWorkspaceTabs]);
 
   const mobileWorkspaceActive =
-    mobileSearch?.conversationId === conversationId
+    mobileSearch?.conversationId === (workspaceStateId ?? conversationId)
       ? "search"
       : filesPanelOpen
         ? filesDrawerFlatView
@@ -2494,7 +2725,7 @@ function AppShellImpl() {
       },
     });
   };
-  if (conversationId && !pendingConversation) {
+  if ((conversationId || workspaceScope) && !pendingConversation) {
     if (showFilesPanel) {
       addWorkspaceTab("files", "Files", <FileIcon className="size-4" />, openFilesPanel);
       addWorkspaceTab(
@@ -2508,7 +2739,11 @@ function AppShellImpl() {
         addWorkspaceTab("search", "Search", <SearchIcon className="size-4" />, () => {
           openFilesPanel();
           setFilesPanelOpen(false);
-          setMobileSearch({ conversationId, location: "", replace: false });
+          setMobileSearch({
+            conversationId: workspaceStateId ?? conversationId ?? "",
+            location: "",
+            replace: false,
+          });
         });
     }
     if (!hideTerminalsTab && (openTerminals.length > 0 || agentSupportsShells))
@@ -2522,7 +2757,7 @@ function AppShellImpl() {
     if (rootSessionId)
       addWorkspaceTab(
         "agents",
-        "Agents",
+        "Activity",
         <BotIcon className="size-4" />,
         openSubagentsPanel,
         subagentsWorking > 0 ? `${subagentsWorking}/${agentCount}` : agentCount,
@@ -2547,7 +2782,27 @@ function AppShellImpl() {
 
   return (
     <MobileWorkspaceProvider
-      sessionId={conversationId}
+      headerControl={<WorkbenchSelector selection={workbench} onSelect={selectWorkspace} />}
+      onNewShell={
+        agentSupportsShells
+          ? () => {
+              const name = resolveDefaultShell(
+                workspaceScope ? ["shell"] : (boundAgent?.terminals ?? []),
+              );
+              if (!name) return;
+              handleSidebarClose();
+              createTerminal.mutate(name, {
+                onSuccess: (info) => {
+                  if (info.workspaceId === currentWorkspaceRef.current)
+                    openTerminalsPanel(terminalTabKey(info));
+                },
+              });
+            }
+          : undefined
+      }
+      newShellDisabled={!shellLaunchable}
+
+      sessionId={workspaceStateId ?? conversationId}
       tabs={mobileWorkspaceTabs}
       active={mobileWorkspaceActive}
       covered={isMobileViewport() && (sidebarOpen || sidebarPeek)}
@@ -2773,81 +3028,123 @@ function AppShellImpl() {
               rectangle (e.g. a no-filesystem agent with no terminals).
               Sits inside the group so the header overlay spans it; the
               push panels below sit outside the group. */}
-                    {conversationId && (hasRailContent || selectedFilePath !== null) && (
-                      <WorkspacePanel
-                        conversationId={conversationId}
-                        pending={pendingConversation}
-                        width={inlinePanelWidth}
-                        inert={!workspacePanelVisible || inlinePanelWidth === 0}
-                        open={workspacePanelVisible}
-                        resizing={inlinePanelResizing}
-                        animateVisibility={rightPanelVisibilityAnimating}
-                        handleProps={inlinePanelHandleProps}
-                        rightRailTab={rightRailTab}
-                        tabListRef={workspaceTabListRef}
-                        onRightRailTabChange={handleRightRailTabChange}
-                        openPanels={openPanels}
-                        onClosePanel={closeWorkspacePanel}
-                        showFilesPanel={showFilesPanel}
-                        showGithubTab={railTabsAvailable.github}
-                        showContentSearch={railTabsAvailable["content-search"]}
-                        showBrowserTab={railTabsAvailable.browser}
-                        onReveal={revealRightPanel}
-                        changedCount={changedCount}
-                        subagentsWorking={subagentsWorking}
-                        agentCount={agentCount}
-                        rootSessionId={rootSessionId}
-                        selectedFilePath={selectedFilePath}
-                        filePosition={filePosition}
-                        mobileFileTarget={mobileFileTarget}
-                        onMobileFileClose={closeFileViewer}
-                        openFiles={openFiles}
-                        openFileViewer={openFileViewer}
-                        onCloseFile={closeFile}
-                        onShowScopeView={showScopeView}
-                        onCommentsOpenChange={setFileViewerCommentsOpen}
-                        openTerminalTab={openTerminalTab}
-                        openTerminals={openTerminals}
-                        selectedTerminalKey={selectedTerminalKey}
-                        autoFocusSelectedTerminal={
-                          autoFocusTerminalKeyRef.current !== null &&
-                          autoFocusTerminalKeyRef.current === selectedTerminalKey
-                        }
-                        closingTerminalKey={closingTerminalKey}
-                        onCloseTerminal={requestCloseTerminal}
-                        maximized={rightPanelMaximized}
-                        onToggleMaximized={toggleRightPanelMaximized}
-                        permissionLevel={permissionLevel}
-                        filesPanelSort={filesPanelSort}
-                        onSortChange={handleFilesSortChange}
-                        filesPanelShowHidden={filesPanelShowHidden}
-                        onShowHiddenChange={setFilesPanelShowHidden}
-                        liveness={liveness}
-                        onShellCreateStart={markShellCreateStarted}
-                        onShellCreateFailed={clearShellCreatePending}
-                        mobileSideChatsOpen={sideChatsPanelOpen}
-                        onMobileSideChatsOpenChange={setSideChatsPanelOpen}
-                      />
-                    )}
+                    {(conversationId || workspaceScope) &&
+                      (hasRailContent || selectedFilePath !== null) && (
+                        <WorkbenchWorkspaceProvider value={workspaceScope}>
+                          <WorkspacePanel
+                            conversationId={conversationId ?? ""}
+                            pending={
+                              pendingConversation ||
+                              (!!workbench.selectedId && !workbench.workspace)
+                            }
+                            width={inlinePanelWidth}
+                            inert={!workspacePanelVisible || inlinePanelWidth === 0}
+                            open={workspacePanelVisible}
+                            resizing={inlinePanelResizing}
+                            animateVisibility={rightPanelVisibilityAnimating}
+                            handleProps={inlinePanelHandleProps}
+                            rightRailTab={rightRailTab}
+                            tabListRef={workspaceTabListRef}
+                            onRightRailTabChange={handleRightRailTabChange}
+                            openPanels={openPanels}
+                            onClosePanel={closeWorkspacePanel}
+                            showFilesPanel={showFilesPanel}
+                            showGithubTab={railTabsAvailable.github}
+                            showContentSearch={railTabsAvailable["content-search"]}
+                            showBrowserTab={railTabsAvailable.browser}
+                            onReveal={revealRightPanel}
+                            changedCount={changedCount}
+                            subagentsWorking={subagentsWorking}
+                            agentCount={agentCount}
+                            rootSessionId={rootSessionId}
+                            workspaceUnavailable={workbench.error?.message}
+                            workspaceControl={
+                              <WorkbenchSelector selection={workbench} onSelect={selectWorkspace} />
+                            }
+                            workspaceMismatch={
+                              workbench.mismatch ? (
+                                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-2 py-1 text-xs text-muted-foreground">
+                                  <span>Chat uses another workspace</span>
+                                  <button
+                                    type="button"
+                                    className="underline"
+                                    onClick={() =>
+                                      workbench.chatWorkspace &&
+                                      selectWorkspace(workbench.chatWorkspace)
+                                    }
+                                  >
+                                    Open chat workspace
+                                  </button>
+                                </div>
+                              ) : null
+                            }
+                            onOpenActivityTerminal={setActivityTerminal}
+                            fileComparisonScope={
+                              selectedFilePath
+                                ? getFileComparisonScope(
+                                    { workspaceId: workspaceScope?.id, conversationId },
+                                    selectedFilePath,
+                                  )
+                                : undefined
+                            }
+                            selectedFilePath={selectedFilePath}
+                            filePosition={filePosition}
+                            mobileFileTarget={mobileFileTarget}
+                            onMobileFileClose={closeFileViewer}
+                            openFiles={openFiles}
+                            openFileViewer={openFileViewer}
+                            onCloseFile={closeFile}
+                            onShowScopeView={showScopeView}
+                            onCommentsOpenChange={setFileViewerCommentsOpen}
+                            openTerminalTab={openTerminalTab}
+                            openTerminals={openTerminals}
+                            selectedTerminalKey={selectedTerminalKey}
+                            autoFocusSelectedTerminal={
+                              autoFocusTerminalKeyRef.current !== null &&
+                              autoFocusTerminalKeyRef.current === selectedTerminalKey
+                            }
+                            closingTerminalKey={closingTerminalKey}
+                            onCloseTerminal={requestCloseTerminal}
+                            maximized={rightPanelMaximized}
+                            onToggleMaximized={toggleRightPanelMaximized}
+                            permissionLevel={permissionLevel}
+                            filesPanelSort={filesPanelSort}
+                            onSortChange={handleFilesSortChange}
+                            filesPanelShowHidden={filesPanelShowHidden}
+                            onShowHiddenChange={setFilesPanelShowHidden}
+                            liveness={liveness}
+                            onShellCreateStart={markShellCreateStarted}
+                            onShellCreateFailed={clearShellCreatePending}
+                            mobileSideChatsOpen={sideChatsPanelOpen}
+                            onMobileSideChatsOpenChange={setSideChatsPanelOpen}
+                          />
+                        </WorkbenchWorkspaceProvider>
+                      )}
                   </div>
 
                   {/* Push panels — flex siblings to main, animate width. Only one is open at a time.
           Terminal-first sessions render the terminal inline inside main
           (via MainTerminalView in ChatPage) and never mount the drawer. */}
-                  {conversationId && !terminalFirst && (
-                    <TerminalsPanel
-                      open={panelOpen}
-                      conversationId={conversationId}
-                      initialTerminalKey={panelInitialKey}
-                      // No neighbor to resize against (chat is hidden, FilesPanel
-                      // owns its own width) — grow via flex-1.
-                      fluid={panelOpen}
-                      // Non-owners attach read-only: a shared PTY can't attribute
-                      // input per-user, so only the owner may type (server-enforced).
-                      readOnly={!isOwnerLevel(permissionLevel)}
-                      onClose={() => setPanelInitialKey(null)}
-                    />
-                  )}
+                  {(conversationId || workspaceScope) &&
+                    (!terminalFirst ||
+                      (workspaceScope &&
+                        panelOpen &&
+                        !isAgentTerminalKey(panelInitialKey ?? ""))) && (
+                      <WorkbenchWorkspaceProvider value={workspaceScope}>
+                        <TerminalsPanel
+                          open={panelOpen}
+                          conversationId={conversationId ?? ""}
+                          initialTerminalKey={panelInitialKey}
+                          // No neighbor to resize against (chat is hidden, FilesPanel
+                          // owns its own width) — grow via flex-1.
+                          fluid={panelOpen}
+                          // Non-owners attach read-only: a shared PTY can't attribute
+                          // input per-user, so only the owner may type (server-enforced).
+                          readOnly={!isOwnerLevel(permissionLevel)}
+                          onClose={() => setPanelInitialKey(null)}
+                        />
+                      </WorkbenchWorkspaceProvider>
+                    )}
                   {conversationId && (
                     <ExecutionLogsPanel
                       open={executionLogsOpen}
@@ -2856,35 +3153,38 @@ function AppShellImpl() {
                       onClose={() => setExecutionLogsKey(null)}
                     />
                   )}
-                  {conversationId && showFilesPanel && (
-                    <FilesPanelDrawer
-                      open={filesPanelOpen}
-                      onClose={() => setFilesPanelOpen(false)}
-                      onFileSelect={openFileViewer}
-                      flatView={filesDrawerFlatView}
-                      showHidden={filesPanelShowHidden}
-                      onShowHiddenChange={setFilesPanelShowHidden}
-                      sort={filesPanelSort}
-                      onSortChange={handleFilesSortChange}
-                    />
+                  {(conversationId || workspaceScope) && showFilesPanel && (
+                    <WorkbenchWorkspaceProvider value={workspaceScope}>
+                      <FilesPanelDrawer
+                        open={filesPanelOpen}
+                        onClose={() => setFilesPanelOpen(false)}
+                        onFileSelect={openFileViewer}
+                        flatView={filesDrawerFlatView}
+                        showHidden={filesPanelShowHidden}
+                        onShowHiddenChange={setFilesPanelShowHidden}
+                        sort={filesPanelSort}
+                        onSortChange={handleFilesSortChange}
+                      />
+                    </WorkbenchWorkspaceProvider>
                   )}
-                  {conversationId && railTabsAvailable["content-search"] && (
+                  {(conversationId || workspaceScope) && railTabsAvailable["content-search"] && (
                     <MobilePanelDrawer
-                      open={mobileSearch?.conversationId === conversationId}
+                      open={mobileSearch?.conversationId === (workspaceStateId ?? conversationId)}
                       title="Search and replace"
                       onClose={() => setMobileSearch(null)}
                       testId="content-search-panel-drawer"
                     >
-                      <ContentSearchPanel
-                        key={conversationId}
-                        conversationId={conversationId}
-                        scope={mobileSearch?.location ?? ""}
-                        replaceOpen={mobileSearch?.replace}
-                        onFileSelect={(path, options) => {
-                          setMobileSearch(null);
-                          openFileViewer(path, options);
-                        }}
-                      />
+                      <WorkbenchWorkspaceProvider value={workspaceScope}>
+                        <ContentSearchPanel
+                          conversationId={conversationId ?? ""}
+                          scope={mobileSearch?.location ?? ""}
+                          replaceOpen={mobileSearch?.replace}
+                          onFileSelect={(path, options) => {
+                            setMobileSearch(null);
+                            openFileViewer(path, options);
+                          }}
+                        />
+                      </WorkbenchWorkspaceProvider>
                     </MobilePanelDrawer>
                   )}
                   {/* Mobile-only full-screen drawers for the rail tabs that have no
@@ -2894,13 +3194,14 @@ function AppShellImpl() {
                   {conversationId && rootSessionId && (
                     <MobilePanelDrawer
                       open={subagentsPanelOpen}
-                      title="Agents"
+                      title="Activity"
                       onClose={() => setSubagentsPanelOpen(false)}
                       testId="subagents-panel-drawer"
                     >
-                      <SubagentsPanel
+                      <ChatActivityPanel
                         conversationId={conversationId}
                         rootSessionId={rootSessionId}
+                        onOpenTerminal={setActivityTerminal}
                       />
                     </MobilePanelDrawer>
                   )}
@@ -2911,28 +3212,56 @@ function AppShellImpl() {
                       onClose={() => setShellsPanelOpen(false)}
                       testId="shells-panel-drawer"
                     >
-                      <InlineTerminalsSection
-                        conversationId={conversationId}
-                        onExpand={openTerminalsPanel}
-                        // Mobile has no tab strip "+" menu, so the drawer carries
-                        // the "+ New shell" create row.
-                        showNewShell
-                      />
+                      <WorkbenchWorkspaceProvider value={workspaceScope}>
+                        <InlineTerminalsSection
+                          conversationId={conversationId ?? ""}
+                          onExpand={openTerminalsPanel}
+                          // Mobile has no tab strip "+" menu, so the drawer carries
+                          // the "+ New shell" create row.
+                          showNewShell
+                        />
+                      </WorkbenchWorkspaceProvider>
                     </MobilePanelDrawer>
                   )}
-                  {conversationId && showFilesPanel && (
+                  {(conversationId || workspaceScope) && showFilesPanel && (
                     <MobilePanelDrawer
                       open={githubPanelOpen}
                       title="Pull Requests"
                       onClose={() => setGithubPanelOpen(false)}
                       testId="github-panel-drawer"
                     >
-                      <PullRequestPanel conversationId={conversationId} />
+                      <WorkbenchWorkspaceProvider value={workspaceScope}>
+                        <PullRequestPanel conversationId={conversationId ?? ""} />
+                      </WorkbenchWorkspaceProvider>
                     </MobilePanelDrawer>
                   )}
                   <div ref={setMobileFileTarget} className="md:hidden" />
                 </GridWorkspace>
               </div>
+              <Dialog
+                open={activityTerminal !== null}
+                onOpenChange={(open) => {
+                  if (!open) setActivityTerminal(null);
+                }}
+              >
+                <DialogContent className="flex h-[min(80vh,50rem)] max-w-[min(90vw,75rem)] flex-col">
+                  <DialogHeader>
+                    <DialogTitle>Chat shell session</DialogTitle>
+                    <DialogDescription>Terminal used by this agent conversation.</DialogDescription>
+                  </DialogHeader>
+                  {activityTerminal && (
+                    <div className="min-h-0 flex-1">
+                      <Suspense fallback={null}>
+                        <TerminalView
+                          sessionId={activityTerminal.sessionId}
+                          terminalId={activityTerminal.terminalId}
+                          readOnly={!isOwnerLevel(permissionLevel)}
+                        />
+                      </Suspense>
+                    </div>
+                  )}
+                </DialogContent>
+              </Dialog>
               {conversationId && (
                 <PermissionsModal
                   sessionId={conversationId}

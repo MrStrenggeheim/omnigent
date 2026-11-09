@@ -4,10 +4,8 @@ Host-specific frame kinds, all JSON (see :class:`HostFrameKind`),
 plus reuse of ``PingFrame``/``PongFrame`` from the runner tunnel
 for keepalive.
 
-Host frames carry only control messages (launch/stop runner
-requests and their results). They do NOT carry HTTP
-request/response traffic — runners connect directly to the server
-with their own tunnels.
+Host frames carry typed runner and workspace operations, including terminal attachment channels.
+Runners carry HTTP request/response traffic over their own separate tunnels.
 
 This module is intentionally separate from the runner tunnel's
 ``frames.py`` to keep the two protocols partitioned. The runner
@@ -74,9 +72,11 @@ CAP_SKILL_CONTENT = "skill_content"
 CAP_MCP_TOOLS = "mcp_tools"
 CAP_REFRESH_HARNESSES = "refresh_harnesses"
 CAP_MCP_REGISTRY = "mcp_registry"
+CAP_WORKBENCH_TERMINALS = "workbench_terminals"
 
 # Every capability THIS build supports; reported verbatim in the hello frame.
 HOST_CAPABILITIES: list[str] = [
+    CAP_WORKBENCH_TERMINALS,
     CAP_CODEX_SIDE_CHAT,
     CAP_FILESYSTEM_ATTACHMENTS,
     CAP_FILESYSTEM_ATTACHMENT_DELIVERY,
@@ -168,6 +168,9 @@ class HostFrameKind(str, Enum):
     DETECT_CREDENTIALS = "host.detect_credentials"
     DETECT_CREDENTIALS_RESULT = "host.detect_credentials_result"
     FS_REQUEST = "host.fs_request"
+    TERMINAL_REQUEST = "host.terminal_request"
+    TERMINAL_RESULT = "host.terminal_result"
+    TERMINAL_STREAM = "host.terminal_stream"
     FS_RESULT = "host.fs_result"
     FS_WRITE_REQUEST = "host.fs_write_request"
     MODEL_OPTIONS = "host.model_options"
@@ -1320,6 +1323,37 @@ class HostImportLocalDoneFrame:
     failures: list[_JsonObject] = field(default_factory=list)
 
 
+@dataclass
+class HostTerminalRequestFrame:
+    """Workspace-owned terminal operation; never carries a conversation owner."""
+
+    request_id: str
+    workspace_id: str
+    workspace: str
+    op: str
+    params: _JsonObject = field(default_factory=dict)
+
+
+@dataclass
+class HostTerminalResultFrame:
+    """Reply to a workspace terminal operation."""
+
+    request_id: str
+    payload: _JsonObject = field(default_factory=dict)
+    error: str | None = None
+    error_status: int = 500
+
+
+@dataclass
+class HostTerminalStreamFrame:
+    """One bounded WS message on an authorized attachment channel."""
+
+    channel_id: str
+    event: str
+    data: str = ""
+    code: int = 1000
+
+
 HostFrame = (
     HostHelloFrame
     | HostConnectionErrorFrame
@@ -1373,6 +1407,9 @@ HostFrame = (
     | HostImportLocalSessionFrame
     | HostImportLocalSessionChunkFrame
     | HostImportLocalDoneFrame
+    | HostTerminalRequestFrame
+    | HostTerminalResultFrame
+    | HostTerminalStreamFrame
 )
 
 
@@ -1412,6 +1449,37 @@ def encode_host_frame(frame: HostFrame) -> str:
     :returns: JSON string for the WebSocket text message.
     :raises TypeError: If ``frame`` is not a known host frame type.
     """
+    if isinstance(frame, HostTerminalRequestFrame):
+        return _encode_payload(
+            {
+                "kind": HostFrameKind.TERMINAL_REQUEST.value,
+                "request_id": frame.request_id,
+                "workspace_id": frame.workspace_id,
+                "workspace": frame.workspace,
+                "op": frame.op,
+                "params": frame.params,
+            }
+        )
+    if isinstance(frame, HostTerminalResultFrame):
+        return _encode_payload(
+            {
+                "kind": HostFrameKind.TERMINAL_RESULT.value,
+                "request_id": frame.request_id,
+                "payload": frame.payload,
+                "error": frame.error,
+                "error_status": frame.error_status,
+            }
+        )
+    if isinstance(frame, HostTerminalStreamFrame):
+        return _encode_payload(
+            {
+                "kind": HostFrameKind.TERMINAL_STREAM.value,
+                "channel_id": frame.channel_id,
+                "event": frame.event,
+                "data": frame.data,
+                "code": frame.code,
+            }
+        )
     if isinstance(frame, HostHelloFrame):
         return _encode_payload(
             {
@@ -2168,6 +2236,35 @@ def _decode_known_host_frame(
     :raises ValueError: If the kind is unexpectedly unhandled.
     """
     match kind:
+        case HostFrameKind.TERMINAL_REQUEST:
+            params = msg.get("params", {})
+            if not isinstance(params, dict):
+                raise ValueError("terminal params must be an object")
+            return HostTerminalRequestFrame(
+                _required_str(msg, "request_id"),
+                _required_str(msg, "workspace_id"),
+                _required_str(msg, "workspace"),
+                _required_str(msg, "op"),
+                params,
+            )
+        case HostFrameKind.TERMINAL_RESULT:
+            payload = msg.get("payload", {})
+            if not isinstance(payload, dict):
+                raise ValueError("terminal payload must be an object")
+            return HostTerminalResultFrame(
+                _required_str(msg, "request_id"),
+                payload,
+                _optional_nullable_str(msg, "error"),
+                _required_int(msg, "error_status"),
+            )
+        case HostFrameKind.TERMINAL_STREAM:
+            event = _required_str(msg, "event")
+            data = _required_str(msg, "data")
+            if event not in {"bytes", "text", "close"} or len(data) > 100_000:
+                raise ValueError("invalid terminal stream message")
+            return HostTerminalStreamFrame(
+                _required_str(msg, "channel_id"), event, data, _required_int(msg, "code")
+            )
         case HostFrameKind.HELLO:
             return _decode_host_hello(msg)
         case HostFrameKind.CONNECTION_ERROR:

@@ -6,6 +6,19 @@ import {
 } from "./explorerGitScope";
 
 describe("Explorer Git scopes", () => {
+  it("shares browse scope across views and chats of one workspace, keeping workspaces separate", () => {
+    const scope = {
+      workspaceId: "workspace-one",
+      conversationId: "chat-a",
+      view: "files" as const,
+    };
+    setExplorerGitScope(scope, { path: "repo", directories: ["repo/src"] });
+    expect(getExplorerGitScope({ ...scope, view: "changes", conversationId: "chat-b" })).toBe(
+      getExplorerGitScope(scope),
+    );
+    expect(getExplorerGitScope({ ...scope, workspaceId: "workspace-two" }).path).toBe("");
+    expect(getExplorerGitScope("workspace-one").path).toBe("");
+  });
   it("returns one stable root scope before publication and ignores missing sessions", () => {
     const initial = getExplorerGitScope(undefined);
     expect(initial).toEqual({ path: "", directories: [] });

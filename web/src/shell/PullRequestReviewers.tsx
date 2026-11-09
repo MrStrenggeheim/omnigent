@@ -1,3 +1,4 @@
+import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
 // The Summary tab's Reviewers section: each reviewer's review state and, for editors,
 // a picker that requests reviews. An edit shows as in progress until the provider answers.
 
@@ -336,8 +337,10 @@ export function PullRequestReviewers({
   editable: boolean;
 }) {
   const update = useUpdatePullRequestReviewers(conversationId);
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId)!;
   const pending = useMutationState({
-    filters: { mutationKey: pullRequestReviewersMutationKey(conversationId), status: "pending" },
+    filters: { mutationKey: pullRequestReviewersMutationKey(identity), status: "pending" },
     select: (mutation) => mutation.state.variables as PullRequestReviewerChange | undefined,
   });
   const changes = useMemo(

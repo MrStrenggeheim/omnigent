@@ -1,3 +1,5 @@
+import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
+import { isEditorLevel } from "@/lib/permissionsApi";
 // Serves every git provider. Runtime names (query keys, routes, test ids) keep
 // the `github` prefix because they are stable wire ids.
 //
@@ -1018,6 +1020,18 @@ function pullRequestLabel(pr: PullRequestAssociation, sessionProvider?: string |
 }
 
 export function PullRequestPanel({ conversationId }: { conversationId: string }) {
+  const workspace = useWorkbenchWorkspace();
+  return (
+    <PullRequestPanelContent
+      key={queryIdentity(workspace, conversationId)}
+      conversationId={conversationId}
+    />
+  );
+}
+
+function PullRequestPanelContent({ conversationId }: { conversationId: string }) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId)!;
   const isMobileViewport = useIsMobileViewport();
   const [selection, setSelection] = useState<{ sessionId: string; url?: string }>();
   const [prPickerOpen, setPrPickerOpen] = useState(false);
@@ -1026,7 +1040,7 @@ export function PullRequestPanel({ conversationId }: { conversationId: string })
   const [focusedPrUrl, setFocusedPrUrl] = useState<string>();
   const [linking, setLinking] = useState(false);
   const [url, setUrl] = useState("");
-  const selected = selection?.sessionId === conversationId ? selection.url : undefined;
+  const selected = selection?.sessionId === identity ? selection.url : undefined;
   const info = usePullRequestInfo(conversationId, { poll: true, prUrl: selected });
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
@@ -1035,7 +1049,7 @@ export function PullRequestPanel({ conversationId }: { conversationId: string })
     try {
       await Promise.all(
         ["github-info", "github-changed-files", "github-pr-diff"].map((key) =>
-          queryClient.invalidateQueries({ queryKey: [key, conversationId] }),
+          queryClient.invalidateQueries({ queryKey: [key, identity] }),
         ),
       );
     } finally {
@@ -1062,15 +1076,14 @@ export function PullRequestPanel({ conversationId }: { conversationId: string })
     if (info.data) {
       const { prs, tracking_available, selected_pr_url, provider, provider_display } = info.data;
       setKnownAssociations({
-        sessionId: conversationId,
+        sessionId: identity,
         data: { prs, tracking_available, selected_pr_url, provider, provider_display },
       });
     }
-  }, [conversationId, info.data]);
+  }, [identity, info.data]);
   // Switching the metadata query must not unmount the session's PR controls.
   const associations =
-    info.data ??
-    (knownAssociations?.sessionId === conversationId ? knownAssociations.data : undefined);
+    info.data ?? (knownAssociations?.sessionId === identity ? knownAssociations.data : undefined);
   const panelState = derivePullRequestPanelState(info);
   // No provider is known without a payload, or in a non-git workspace (older hosts omit it).
   const copy = gitProviderCopy(
@@ -1081,10 +1094,10 @@ export function PullRequestPanel({ conversationId }: { conversationId: string })
   const update = useUpdateSessionPr(conversationId);
   useEffect(() => {
     if (!selected && info.data?.selected_pr_url) {
-      setSelection({ sessionId: conversationId, url: info.data.selected_pr_url });
+      setSelection({ sessionId: identity, url: info.data.selected_pr_url });
     }
-  }, [conversationId, selected, info.data?.selected_pr_url]);
-  const changeSelection = (next?: string) => setSelection({ sessionId: conversationId, url: next });
+  }, [identity, selected, info.data?.selected_pr_url]);
+  const changeSelection = (next?: string) => setSelection({ sessionId: identity, url: next });
   const prs = associations?.prs ?? [];
   const selectedPr = prs.find((pr) => pr.url === (selected ?? associations?.selected_pr_url));
   const linkInEmptyState = prs.length === 0 && panelState.kind === "no-pr";
@@ -1281,7 +1294,7 @@ export function PullRequestPanel({ conversationId }: { conversationId: string })
       ) : null}
       <div className="min-h-0 flex-1">
         <PullRequestPanelDetails
-          key={`${conversationId}:${selected ?? ""}`}
+          key={`${identity}:${selected ?? ""}`}
           conversationId={conversationId}
           info={info}
           showProviderIcon={!showTrackingControls}
@@ -1315,6 +1328,8 @@ function PullRequestPanelDetails({
   refreshButton?: React.ReactNode;
   emptyStateAction?: React.ReactNode;
 }) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId)!;
   const baseRef = info.data?.base_ref ?? undefined;
   const prUrl = info.data?.selected_pr_url;
   const headSha = info.data?.pr?.head_sha;
@@ -1324,7 +1339,8 @@ function PullRequestPanelDetails({
   const changes = usePullRequestChangedFiles(conversationId, hasPr, prUrl, revision);
   const prDiff = usePullRequestDiff(conversationId, hasPr, prUrl, revision);
   const sandboxAsleep = useWorkspaceAsleep(conversationId);
-  const canEdit = useCanEdit(conversationId);
+  const sessionCanEdit = useCanEdit(workspace ? "" : conversationId);
+  const canEdit = workspace ? isEditorLevel(workspace.permission_level ?? null) : sessionCanEdit;
 
   // Summary (checks + PR body), Comments, and Changes (the stacked diff).
   // Summary is the landing tab — like GitHub's PR page opening on the
@@ -1413,19 +1429,31 @@ function PullRequestPanelDetails({
   const loadDiffFiles = useCallback(
     async (fd: FileDiffMetadata) => {
       const { before, after } = prUrl
-        ? await fetchPullRequestFileContents(conversationId, fd.name, baseRef, {
-            pr_url: prUrl,
-            previous_path: fd.prevName,
-            head_sha: headSha,
-            base_sha: baseSha,
-          })
-        : await fetchPullRequestFileContents(conversationId, fd.name, baseRef);
+        ? await fetchPullRequestFileContents(
+            conversationId,
+            fd.name,
+            baseRef,
+            {
+              pr_url: prUrl,
+              previous_path: fd.prevName,
+              head_sha: headSha,
+              base_sha: baseSha,
+            },
+            workspace,
+          )
+        : await fetchPullRequestFileContents(
+            conversationId,
+            fd.name,
+            baseRef,
+            undefined,
+            workspace,
+          );
       return {
         oldFile: { name: fd.prevName ?? fd.name, contents: before ?? "" },
         newFile: { name: fd.name, contents: after ?? "" },
       };
     },
-    [conversationId, baseRef, prUrl, headSha, baseSha],
+    [conversationId, workspace, baseRef, prUrl, headSha, baseSha],
   );
 
   const diffOptions = useMemo<DiffOptions>(
@@ -1792,7 +1820,7 @@ function PullRequestPanelDetails({
           </div>
           {canPostComment && data.selected_pr_url && (
             <PullRequestCommentComposer
-              key={`${conversationId}:${data.selected_pr_url}`}
+              key={`${identity}:${data.selected_pr_url}`}
               conversationId={conversationId}
               prUrl={data.selected_pr_url}
               account={data.auth.selected_account}

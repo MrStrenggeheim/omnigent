@@ -14,8 +14,10 @@
 //  12. Comments are marked seen (inbox-clearing registry) only while the
 //      comments panel is open — never from merely opening the file.
 
+import type * as CommentSenderModule from "@/hooks/CommentSenderContext";
 import type * as TerminalsModule from "@/hooks/useTerminals";
 import { useMemo } from "react";
+import { WorkbenchWorkspaceProvider } from "@/lib/workbenchWorkspace";
 import userEvent from "@testing-library/user-event";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -161,6 +163,7 @@ vi.mock("@/hooks/useComments", () => ({
   useAddComment: vi.fn(() => ({ mutate: vi.fn() })),
   useUpdateComment: vi.fn(() => ({ mutate: vi.fn() })),
   useDeleteComment: vi.fn(() => ({ mutate: vi.fn() })),
+  useSendCommentsToAgent: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
 
 vi.mock("@/hooks/useFileContent", () => ({
@@ -218,8 +221,8 @@ vi.mock("@/hooks/useResizablePanel", () => ({
   })),
 }));
 
-vi.mock("@/hooks/CommentSenderContext", () => ({
-  CommentSenderProvider: ({ children }: { children: React.ReactNode }) => children,
+vi.mock("@/hooks/CommentSenderContext", async (original) => ({
+  ...(await original<typeof CommentSenderModule>()),
   useOptionalCommentSender: vi.fn(() => null),
 }));
 
@@ -292,6 +295,11 @@ function LocationDisplay() {
 }
 
 interface RenderProps {
+  workspaceId?: string;
+  comparisonScope?: "files" | "changes";
+  recipientValid?: boolean;
+  conversationId?: string;
+  agentId?: string | null;
   syncUrl?: boolean;
   frameless?: boolean;
   mobileOverlay?: boolean;
@@ -321,6 +329,11 @@ interface RenderProps {
  * the current params after state changes.
  */
 function viewerTree({
+  workspaceId,
+  comparisonScope,
+  recipientValid,
+  conversationId = "conv_1",
+  agentId,
   syncUrl,
   frameless,
   mobileOverlay,
@@ -346,7 +359,11 @@ function viewerTree({
           position={position}
           open={open}
           mediaActive={mediaActive}
-          conversationId="conv_1"
+          workspaceId={workspaceId}
+          comparisonScope={comparisonScope}
+          recipientValid={recipientValid}
+          agentId={agentId}
+          conversationId={conversationId}
           path={path}
           onClose={onClose}
           sort={sort}
@@ -432,6 +449,76 @@ async function chooseRevisionType(label: string) {
 
 describe("FileViewer comparison sources", () => {
   beforeEach(() => useCommentsMock.mockReturnValue(makeCommentsQuery([])));
+
+  it("follows the opening panel's selection and updates only that panel", async () => {
+    const files = {
+      workspaceId: "viewer-origin",
+      conversationId: "conv_1",
+      view: "files" as const,
+    };
+    const changes = { ...files, view: "changes" as const };
+    setWorkspaceComparison(files, {
+      ...DEFAULT_WORKSPACE_COMPARISON,
+      source: "agent",
+      sourceChatId: "captured-chat",
+    });
+    setWorkspaceComparison(changes, DEFAULT_WORKSPACE_COMPARISON);
+    const { rerender } = renderViewer({
+      open: true,
+      initialSearch: "diff=1",
+      workspaceId: files.workspaceId,
+      comparisonScope: "files",
+    });
+    expect(await screen.findByTestId("diff-viewer")).toHaveAttribute(
+      "data-before",
+      JSON.stringify("turn-before"),
+    );
+    expect(agentFileDiffMock).toHaveBeenLastCalledWith(
+      "captured-chat",
+      "file1.py",
+      expect.objectContaining({ enabled: true }),
+    );
+    expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
+    rerender(
+      viewerTree({
+        open: true,
+        initialSearch: "diff=1",
+        workspaceId: files.workspaceId,
+        comparisonScope: "changes",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Git");
+    expect(screen.getByTestId("diff-viewer")).toHaveAttribute("data-before", JSON.stringify("old"));
+    await chooseComparison("Chat");
+    expect(getWorkspaceComparison(changes).sourceChatId).toBe("conv_1");
+    expect(getWorkspaceComparison(files).sourceChatId).toBe("captured-chat");
+    expect(useWorkspaceComparisonChanges).toHaveBeenLastCalledWith(
+      "conv_1",
+      expect.objectContaining({ workspaceId: "viewer-origin", view: "changes" }),
+    );
+  });
+
+  it("suppresses comments and captured diffs when Chat Activity belongs to another workspace", async () => {
+    setWorkspaceComparison(
+      { workspaceId: "mismatch", conversationId: "conv_1", view: "changes" },
+      { ...DEFAULT_WORKSPACE_COMPARISON, source: "agent" },
+    );
+    renderViewer({
+      open: true,
+      initialSearch: "diff=1",
+      workspaceId: "mismatch",
+      comparisonScope: "changes",
+      recipientValid: false,
+    });
+    expect(useComments).toHaveBeenLastCalledWith(undefined, "file1.py");
+    expect(agentFileDiffMock).toHaveBeenLastCalledWith(
+      "conv_1",
+      "file1.py",
+      expect.objectContaining({ enabled: false }),
+    );
+    expect(screen.queryByTestId("diff-viewer")).toBeNull();
+    expect(screen.queryByRole("button", { name: /comments/i })).toBeNull();
+  });
 
   it("synchronizes the list comparison, changed counter, and viewer navigation in both directions", async () => {
     const liveFiles = [
@@ -542,6 +629,7 @@ describe("FileViewer comparison sources", () => {
       ...DEFAULT_WORKSPACE_COMPARISON,
       source: "last-turn",
       turnId: "turn-2",
+      sourceChatId: "conv_1",
     });
     expect(agentFileDiffMock).toHaveBeenLastCalledWith("conv_1", "file1.py", {
       enabled: true,
@@ -1501,7 +1589,7 @@ describe("FileViewer addressed selection", () => {
     const comment = makeComment("c1");
     useCommentsMock.mockReturnValue(makeCommentsQuery([comment]));
 
-    renderViewer({ open: true, path: "file1.py" });
+    renderViewer({ open: true, path: "file1.py", agentId: "recipient-agent" });
     fireEvent.click(screen.getByRole("button", { name: "Show comments" }));
     fireEvent.click(screen.getByRole("button", { name: "comment c1" }));
     fireEvent.click(screen.getByRole("button", { name: "address all comments" }));
@@ -2843,6 +2931,70 @@ describe("file position navigation", () => {
     expect(screen.getByTestId("code-viewer")).toHaveAttribute("data-view-mode", "source");
     expect(screen.queryByTestId("diff-viewer")).toBeNull();
     expect(screen.getByTestId("url-params")).not.toHaveTextContent("diff=1");
+  });
+
+  it("guards a dirty same-path workspace switch and retains the draft when cancelled", () => {
+    let guard: FileNavigationGuard | undefined;
+    const contextValue = Object.freeze({
+      ...localDesktopContext(),
+      registerNavigationGuard: (next: FileNavigationGuard) => {
+        guard = next;
+        return () => {};
+      },
+    });
+    render(
+      <FileViewerContext.Provider value={contextValue}>
+        {viewerTree({ open: true, path: "file1.md", workspaceId: "original-workspace" })}
+      </FileViewerContext.Provider>,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Draft text" }), {
+      target: { value: "Unsaved workspace draft" },
+    });
+    const navigate = vi.fn();
+    act(() => guard!("file1.md", { workspaceId: "different-workspace" }, navigate));
+    expect(navigate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByRole("textbox", { name: "Draft text" })).toHaveValue(
+      "Unsaved workspace draft",
+    );
+    act(() => guard!("file1.md", { workspaceId: "original-workspace" }, navigate));
+    expect(navigate).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the editor and draft across chat and recipient changes in the same workspace", () => {
+    const workspace = {
+      id: "stable-editor",
+      root: "/repo",
+      host_id: "host",
+      target_kind: "host" as const,
+      capabilities: [],
+    };
+    function Tree({
+      conversationId,
+      agentId,
+      recipientValid,
+    }: {
+      conversationId: string;
+      agentId: string | null;
+      recipientValid: boolean;
+    }) {
+      return (
+        <WorkbenchWorkspaceProvider
+          value={{ ...workspace, chatSessionId: recipientValid ? conversationId : null }}
+        >
+          {viewerTree({ open: true, path: "file1.md", conversationId, agentId, recipientValid })}
+        </WorkbenchWorkspaceProvider>
+      );
+    }
+    const { rerender } = render(<Tree conversationId="chat-a" agentId="agent-a" recipientValid />);
+    const draft = screen.getByRole("textbox", { name: "Draft text" });
+    fireEvent.change(draft, { target: { value: "Workspace draft" } });
+    rerender(<Tree conversationId="chat-b" agentId={null} recipientValid={false} />);
+    expect(screen.getByRole("textbox", { name: "Draft text" })).toBe(draft);
+    expect(draft).toHaveValue("Workspace draft");
+    rerender(<Tree conversationId="chat-c" agentId="agent-c" recipientValid />);
+    expect(screen.getByRole("textbox", { name: "Draft text" })).toBe(draft);
+    expect(draft).toHaveValue("Workspace draft");
   });
 
   it("confirms external navigation before applying it, and does not confirm twice", () => {

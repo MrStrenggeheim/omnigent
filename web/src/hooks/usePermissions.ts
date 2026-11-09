@@ -1,3 +1,4 @@
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { useLoadedConversations } from "@/hooks/useSidebarData";
 /**
  * TanStack Query hooks for session permissions CRUD.
@@ -81,20 +82,23 @@ export function useRevokePermission(sessionId: string) {
  * `null` permission level (single-user mode) is treated as unrestricted.
  */
 export function useCanEdit(conversationId: string): boolean {
+  const workspace = useWorkbenchWorkspace();
   const { data: conversationsData } = useLoadedConversations();
   const { session: activeSession, isLoading: sessionLoading } = useSession(conversationId);
   return useMemo(() => {
     const conversations = conversationsData?.pages.flatMap((p) => p.data);
     const activeConv = conversations?.find((c) => c.id === conversationId) ?? null;
-    const permissionLevel = derivePermissionLevel(
-      activeSession,
-      sessionLoading,
-      activeConv,
-      conversationId,
-      conversationsData !== undefined,
-    );
+    const permissionLevel = workspace
+      ? (workspace.permission_level ?? null)
+      : derivePermissionLevel(
+          activeSession,
+          sessionLoading,
+          activeConv,
+          conversationId,
+          conversationsData !== undefined,
+        );
     return permissionLevel == null || permissionLevel >= 2;
-  }, [conversationsData, conversationId, activeSession, sessionLoading]);
+  }, [conversationsData, conversationId, activeSession, sessionLoading, workspace]);
 }
 
 export type { Permission };

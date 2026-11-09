@@ -1,3 +1,5 @@
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
+import { ChatActivityPanel, type ChatActivityTerminalTarget } from "./ChatActivityPanel";
 import type { FilePosition, OpenFileOptions } from "./FileViewerContext";
 import { FileViewerContext } from "./FileViewerContext";
 import {
@@ -23,6 +25,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type ReactElement,
+  type ReactNode,
   type RefObject,
   lazy,
   memo,
@@ -91,7 +94,6 @@ import { ResponsiveViewerSlot } from "./ResponsiveViewerSlot";
 import { AdaptiveFileWorkspace } from "./AdaptiveFileWorkspace";
 import { PullRequestPanel } from "./PullRequestPanel";
 import type { ChangedSort } from "./FlatFileList";
-import { SubagentsPanel } from "./SubagentsPanel";
 import { useTerminalStatuses } from "./useTerminalStatuses";
 import { type RightRailTab, TAB_BADGE_BASE } from "./railTabs";
 import { Button } from "../components/ui/button";
@@ -107,7 +109,7 @@ const workspacePanels = {
   files: { label: "Files", icon: FolderTreeIcon },
   changes: { label: "Changes", icon: FileDiffIcon },
   github: { label: "Pull Requests", icon: GitPullRequestIcon },
-  subagents: { label: "Agents", icon: BotIcon },
+  subagents: { label: "Activity", icon: BotIcon },
 };
 
 function WorkspaceMenuShortcut({
@@ -227,9 +229,16 @@ function NewTabMenu({
   /** Menu edge to line up with the trigger: "end" once "+" sits at the right edge. */
   menuAlign: "start" | "end";
 }) {
-  const { data: agent } = useSessionAgent(conversationId);
+  const { data: agent } = useSessionAgent(conversationId || null);
   const create = useCreateTerminal(conversationId);
-  const connectState = shellConnectState(liveness);
+  const workspace = useWorkbenchWorkspace();
+  const currentWorkspaceRef = useRef(workspace?.id);
+  currentWorkspaceRef.current = workspace?.id;
+  const connectState = workspace
+    ? workspace.available === false
+      ? "offline"
+      : "ready"
+    : shellConnectState(liveness);
   // Remembered shell type, persisted across remounts/reloads. Seeded from
   // localStorage so the "+" in either strip spot agrees on the current pick.
   const [preferred, setPreferred] = useState<string | null>(() => readPreferredShell());
@@ -237,7 +246,11 @@ function NewTabMenu({
   const [menuOpen, setMenuOpen] = useState(false);
   // Shell access mirrors NewTerminalButton's gate: the agent's spec must
   // declare a non-empty ``terminals:`` block.
-  const declaredTerminals = agent?.terminals ?? [];
+  const declaredTerminals = workspace
+    ? workspace.capabilities.includes("terminals")
+      ? ["shell"]
+      : []
+    : (agent?.terminals ?? []);
   const canOpenShell = declaredTerminals.length > 0;
   if (!canOpenShell && !onOpenBrowser && !onOpenSideChat && panels.length === 0) return null;
 
@@ -253,7 +266,9 @@ function NewTabMenu({
     // ``onOpenTerminal`` on success is a backstop for when it's already open.
     onCreateStart?.();
     create.mutate(name, {
-      onSuccess: (info) => onOpenTerminal(terminalTabKey(info)),
+      onSuccess: (info) => {
+        if (info.workspaceId === currentWorkspaceRef.current) onOpenTerminal(terminalTabKey(info));
+      },
       onError: () => onCreateError?.(),
     });
   };
@@ -657,6 +672,7 @@ function RailTerminalView({
           readOnly={readOnly}
           focusOnConnect={autoFocus}
           directAttachUrl={terminal.directAttachUrl}
+          workspaceId={terminal.workspaceId}
           onStateChange={(state) => setTerminalConnectionState(terminal.id, state)}
           onActivity={() => markTerminalActive(terminal.id)}
         />
@@ -676,7 +692,12 @@ interface WorkspacePanelProps {
   sessionHarness?: ReturnType<typeof useChatStore.getState>["sessionHarness"];
   agentId?: string | null;
 
-  /** Active session id — panels read the workspace against it. */
+  fileComparisonScope?: "files" | "changes";
+  workspaceUnavailable?: string;
+  workspaceControl?: ReactNode;
+  workspaceMismatch?: ReactNode;
+  onOpenActivityTerminal?: (target: ChatActivityTerminalTarget) => void;
+  /** Active chat for attribution; workspace resource identity comes from context. */
   conversationId: string;
   /** Show inert panel chrome while the server session id is still pending. */
   pending?: boolean;
@@ -813,6 +834,11 @@ interface WorkspacePanelProps {
  */
 function WorkspacePanelImpl({
   conversationId,
+  workspaceControl,
+  workspaceUnavailable,
+  fileComparisonScope,
+  workspaceMismatch,
+  onOpenActivityTerminal,
   contained = false,
   sessionHarness,
   agentId,
@@ -870,16 +896,19 @@ function WorkspacePanelImpl({
   const terminalShown = selectedTerminalKey !== null && openTerminals.includes(selectedTerminalKey);
   const contentSearchInputRef = useRef<HTMLInputElement>(null);
   const [contentSearchFocusSession, setContentSearchFocusSession] = useState<string | null>(null);
-  const workspaceRoot = useContext(FileViewerContext)?.workspaceRoot ?? null;
+  const workspace = useWorkbenchWorkspace();
+  const workspaceIdentity = workspace?.id ?? conversationId;
+  const fileContext = useContext(FileViewerContext);
+  const workspaceRoot = workspace?.root ?? fileContext?.workspaceRoot ?? null;
   const [contentSearchScope, setContentSearchScope] = useState(() =>
-    readBrowseLocation(conversationId, workspaceRoot),
+    readBrowseLocation(workspaceIdentity, workspaceRoot),
   );
   const [contentReplaceOpen, setContentReplaceOpen] = useState(false);
   const [contentReplaceFocusNonce, setContentReplaceFocusNonce] = useState(0);
   useEffect(() => {
-    setContentSearchScope(readBrowseLocation(conversationId, workspaceRoot));
+    setContentSearchScope(readBrowseLocation(workspaceIdentity, workspaceRoot));
     setContentReplaceOpen(false);
-  }, [conversationId, workspaceRoot]);
+  }, [workspaceIdentity, workspaceRoot]);
   const browsers = useBrowserTabs(conversationId);
   const closeBrowserTab = async (tabId: string) => {
     const closed = await browsers.close(tabId);
@@ -1028,11 +1057,18 @@ function WorkspacePanelImpl({
       const detail = (
         event as CustomEvent<{
           conversationId: string;
+          workspaceId?: string;
           location: string;
           replace?: boolean;
         }>
       ).detail;
-      if (!detail || detail.conversationId !== conversationId) return;
+      if (
+        !detail ||
+        (detail.workspaceId
+          ? detail.workspaceId !== workspace?.id
+          : detail.conversationId !== conversationId)
+      )
+        return;
       setContentSearchScope(detail.location);
       setContentReplaceOpen(detail.replace === true);
       setContentReplaceFocusNonce((nonce) => nonce + 1);
@@ -1041,8 +1077,15 @@ function WorkspacePanelImpl({
       setContentSearchFocusSession(conversationId);
     };
     const followBrowseLocation = (event: Event) => {
-      const detail = (event as CustomEvent<{ conversationId: string; location: string }>).detail;
-      if (detail?.conversationId === conversationId) setContentSearchScope(detail.location);
+      const detail = (
+        event as CustomEvent<{ conversationId: string; workspaceId?: string; location: string }>
+      ).detail;
+      if (
+        detail?.workspaceId
+          ? detail.workspaceId === workspace?.id
+          : detail?.conversationId === conversationId
+      )
+        setContentSearchScope(detail.location);
     };
     window.addEventListener("omnigent:open-content-search", openSearch);
     window.addEventListener("omnigent:browse-location-changed", followBrowseLocation);
@@ -1056,6 +1099,7 @@ function WorkspacePanelImpl({
     pending,
     isMobile,
     conversationId,
+    workspace?.id,
     onRightRailTabChange,
     onReveal,
   ]);
@@ -1388,7 +1432,7 @@ function WorkspacePanelImpl({
       </WorkspaceTabTooltip>
     ),
     subagents: (
-      <WorkspaceTabTooltip key="subagents" label="Agents" shortcut={shortcutFor("subagents")}>
+      <WorkspaceTabTooltip key="subagents" label="Activity" shortcut={shortcutFor("subagents")}>
         <TabsTrigger
           value="subagents"
           disabled={pending}
@@ -1396,13 +1440,13 @@ function WorkspacePanelImpl({
           data-workspace-tab="subagents"
           aria-label={
             subagentsWorking > 0
-              ? `Agents ${subagentsWorking}/${agentCount}`
-              : `Agents ${agentCount}`
+              ? `Activity ${subagentsWorking}/${agentCount}`
+              : `Activity ${agentCount}`
           }
           className="size-6 shrink-0 p-0 hover:border-1 hover:border-muted rounded-md!"
         >
           <BotIcon />
-          <span className="sr-only">Agents</span>
+          <span className="sr-only">Activity</span>
           <span
             className={cn(
               TAB_BADGE_BASE,
@@ -1484,8 +1528,9 @@ function WorkspacePanelImpl({
           aria-label="Workspace tabs"
           tabIndex={-1}
           onKeyDown={handlePermanentTabNumber}
-          className="workspace-control-header workspace-tab-strip flex items-center overflow-x-hidden border-b border-border px-2"
+          className="workspace-control-header workspace-tab-strip flex items-center overflow-x-hidden overflow-y-hidden border-b border-border px-2"
         >
+          {workspaceControl}
           <WorkspaceTabsScroller
             grow={showOpenTabs}
             onOverflowChange={setTabsOverflow}
@@ -1753,6 +1798,7 @@ function WorkspacePanelImpl({
             </WorkspaceTabTooltip>
           </div>
         </div>
+        {workspaceMismatch}
         {/* Tab content — single slot. An open shell tab holds its xterm; a
           file tab holds FileViewer; the Files/Changes tabs show FilesPanel
           (tree vs changed-only list); Subagents lists the root's children +
@@ -1769,7 +1815,6 @@ function WorkspacePanelImpl({
             >
               <ContentSearchPanel
                 inputRef={contentSearchInputRef}
-                key={conversationId}
                 conversationId={conversationId}
                 onFileSelect={openFileViewer}
                 scope={contentSearchScope}
@@ -1778,7 +1823,19 @@ function WorkspacePanelImpl({
               />
             </div>
           )}
-          {pending ? (
+          {workspaceUnavailable &&
+          rightRailTab !== "subagents" &&
+          rightRailTab !== "browser" &&
+          rightRailTab !== "sidechat" ? (
+            <div
+              role="status"
+              className="flex min-h-0 flex-1 flex-col justify-center gap-2 px-4 text-sm text-muted-foreground"
+            >
+              <p>Workspace unavailable</p>
+              <p>{workspaceUnavailable}</p>
+              <p>Choose a workspace from the header or reconnect its host.</p>
+            </div>
+          ) : pending ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
               <Spinner />
               <span className="text-ui">Starting workspace…</span>
@@ -1801,7 +1858,7 @@ function WorkspacePanelImpl({
               explorer={
                 showFilesPanel ? (
                   <FilesPanel
-                    conversationId={contained ? conversationId : undefined}
+                    conversationId={conversationId || undefined}
                     frameless
                     onFileSelect={openFileViewer}
                     flatView={rightRailTab === "changes"}
@@ -1817,6 +1874,12 @@ function WorkspacePanelImpl({
                 <FileViewer
                   syncUrl={!contained}
                   agentId={agentId}
+                  recipientValid={
+                    !workspace || (!!conversationId && workspace.chatSessionId === conversationId)
+                  }
+                  comparisonScope={
+                    fileComparisonScope ?? (rightRailTab === "changes" ? "changes" : "files")
+                  }
                   mobileOverlay={isMobile}
                   frameless
                   open
@@ -1826,7 +1889,12 @@ function WorkspacePanelImpl({
                   position={filePosition}
                   onClose={isMobile && onMobileFileClose ? onMobileFileClose : onShowScopeView}
                   onCloseTab={isMobile && onMobileFileClose ? onMobileFileClose : handleCloseTab}
-                  onNavigateTo={openFileViewer}
+                  onNavigateTo={(path) =>
+                    openFileViewer(path, {
+                      comparisonScope:
+                        fileComparisonScope ?? (rightRailTab === "changes" ? "changes" : "files"),
+                    })
+                  }
                   permissionLevel={permissionLevel}
                   onCommentsOpenChange={onCommentsOpenChange}
                   sort={filesPanelSort}
@@ -1851,7 +1919,11 @@ function WorkspacePanelImpl({
           ) : rightRailTab === "github" && showGithubTab ? (
             <PullRequestPanel conversationId={conversationId} />
           ) : rightRailTab === "subagents" && rootSessionId ? (
-            <SubagentsPanel conversationId={conversationId} rootSessionId={rootSessionId} />
+            <ChatActivityPanel
+              conversationId={conversationId}
+              rootSessionId={rootSessionId}
+              onOpenTerminal={onOpenActivityTerminal}
+            />
           ) : rightRailTab === null ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
               <PlusIcon className="size-6" />
@@ -1860,7 +1932,7 @@ function WorkspacePanelImpl({
           ) : rightRailTab === "content-search" && showContentSearch ? null : (
             showFilesPanel && (
               <FilesPanel
-                conversationId={contained ? conversationId : undefined}
+                conversationId={conversationId || undefined}
                 frameless
                 onFileSelect={openFileViewer}
                 flatView={rightRailTab === "changes"}
@@ -1892,7 +1964,7 @@ function WorkspacePanelImpl({
           <div
             role="tablist"
             aria-label="Side chats"
-            className="workspace-control-header flex items-center gap-1 overflow-x-auto border-border border-b px-2"
+            className="workspace-control-header flex items-center gap-1 overflow-x-auto overflow-y-hidden border-border border-b px-2"
           >
             {sideChats.tabs.map((childId, index) => {
               const active = sideChats.selected === childId;

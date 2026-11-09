@@ -8,6 +8,7 @@ import { FileViewerContext } from "./FileViewerContext";
 import { ImageLightboxProvider } from "@/components/ImageLightbox";
 import { HTML_PREVIEW_SANDBOX, MAX_RICH_MARKDOWN_BYTES } from "./codeViewerHelpers";
 import { highlightCode } from "@/components/ai-elements/code-block";
+import { WorkbenchWorkspaceProvider, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -186,6 +187,40 @@ afterEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("CodeViewer find-in-file shortcut", () => {
+  it("retains Monaco on chat switches and remounts it for a different workspace", async () => {
+    const workspace: WorkbenchWorkspace = {
+      id: "workspace-a",
+      root: "/a",
+      host_id: "host-a",
+      target_kind: "host",
+      capabilities: ["files"],
+    };
+    const element = (conversationId: string, selected = workspace) => (
+      <WorkbenchWorkspaceProvider value={selected}>
+        <CodeViewer
+          markdownSourceFallback={false}
+          conversationId={conversationId}
+          path="file.ts"
+          fileQuery={makeFileQuery("const draft = true;")}
+          comments={[]}
+          activeSelection={null}
+          onSetActiveSelection={() => {}}
+          panelOpen
+          searchOpen={false}
+          setSearchOpen={() => {}}
+          searchInputRef={noopRef}
+          viewMode="editor"
+        />
+      </WorkbenchWorkspaceProvider>
+    );
+    const view = render(element("chat-a"));
+    const original = await screen.findByTestId("monaco-editor-stub");
+    view.rerender(element("chat-b"));
+    expect(screen.getByTestId("monaco-editor-stub")).toBe(original);
+    view.rerender(element("chat-b", { ...workspace, id: "workspace-b" }));
+    expect(await screen.findByTestId("monaco-editor-stub")).not.toBe(original);
+  });
+
   function renderMarkdownViewer(
     viewMode: "editor" | "source",
     setSearchOpen: (open: boolean) => void,

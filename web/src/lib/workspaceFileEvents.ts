@@ -1,5 +1,6 @@
 export interface WorkspaceFilesChanged {
   conversationId: string;
+  workspaceId?: string;
   moves: { source: string; destination: string }[];
   removed: string[];
 }

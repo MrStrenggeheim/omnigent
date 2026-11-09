@@ -12,6 +12,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  WorkbenchWorkspaceProvider,
+  queryIdentity,
+  type WorkbenchWorkspace,
+} from "@/lib/workbenchWorkspace";
 
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
   useWorkspaceChangedFiles: vi.fn(),
@@ -78,6 +83,58 @@ function renderDiff(
 }
 
 describe("explicit comparison sources", () => {
+  it("routes Git through the selected workspace while agent diffs retain actual chat provenance", async () => {
+    const workspace: WorkbenchWorkspace = {
+      id: "selected",
+      root: "/selected",
+      host_id: "host",
+      target_kind: "host",
+      capabilities: ["git"],
+    };
+    setHooks({ serveable: true });
+    fetchMock.mockResolvedValue(mockResponse({ before: "old", after: "new" }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({
+        git: useGitFileDiff(undefined, "file.ts", {
+          enabled: true,
+          base: "HEAD",
+          target: "WORKTREE",
+        }),
+        agent: useAgentFileDiff("actual-chat", "file.ts", { enabled: true, lastTurn: false }),
+      }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(
+            QueryClientProvider,
+            { client },
+            createElement(WorkbenchWorkspaceProvider, { value: workspace }, children),
+          ),
+      },
+    );
+    await waitFor(() => {
+      expect(result.current.git.isSuccess).toBe(true);
+      expect(result.current.agent.isSuccess).toBe(true);
+    });
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "/v1/workbench-workspaces/selected/resources/environments/default/git?operation=diff&path=file.ts&base=HEAD&target=WORKTREE",
+      "/v1/sessions/actual-chat/resources/environments/default/agent-diff?path=file.ts&baseline=session",
+    ]);
+    expect(
+      client.getQueryData([
+        "git-file-diff",
+        queryIdentity(workspace),
+        "file.ts",
+        "HEAD",
+        "WORKTREE",
+        undefined,
+      ]),
+    ).toBeDefined();
+    expect(
+      client.getQueryData(["agent-file-diff", "actual-chat", "file.ts", false, undefined]),
+    ).toBeDefined();
+  });
+
   function createWrapper() {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return ({ children }: { children: ReactNode }) =>

@@ -9,6 +9,7 @@ import {
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { WorkbenchWorkspaceProvider, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   DEFAULT_WORKSPACE_COMPARISON,
@@ -94,8 +95,7 @@ function openFileMenu() {
   fireEvent.keyDown(screen.getByRole("button", { name: "More file actions" }), { key: "Enter" });
 }
 function showFilenameFilters() {
-  openFileMenu();
-  fireEvent.click(screen.getByRole("menuitem", { name: "Filename include/exclude filters" }));
+  fireEvent.click(screen.getByRole("button", { name: "Filename include/exclude filters" }));
 }
 
 const useAllFilesMock = vi.mocked(useWorkspaceAllFiles);
@@ -109,11 +109,15 @@ const allFilesRefetchMock = vi.fn(() => Promise.resolve());
 const gitChangesRefetchMock = vi.fn(() => Promise.resolve());
 const searchRefetchMock = vi.fn(() => Promise.resolve());
 
-function render(ui: ReactNode) {
+function render(ui: ReactNode, workspace: WorkbenchWorkspace | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderComponent(ui, {
     wrapper: ({ children }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        <TooltipProvider>
+          <WorkbenchWorkspaceProvider value={workspace}>{children}</WorkbenchWorkspaceProvider>
+        </TooltipProvider>
+      </QueryClientProvider>
     ),
   });
 }
@@ -230,6 +234,7 @@ function searchResult(
 }
 
 function renderPanel({
+  workspace,
   conversationId,
   flatView = false,
   showHidden = false,
@@ -247,6 +252,7 @@ function renderPanel({
   rootIsRepository = false,
   warning,
 }: {
+  workspace?: WorkbenchWorkspace;
   conversationId: string;
   flatView?: boolean;
   showHidden?: boolean;
@@ -304,7 +310,7 @@ function renderPanel({
       </Routes>
     </MemoryRouter>
   );
-  const view = render(panel());
+  const view = render(panel(), workspace);
   return { ...view, refreshPanel: () => view.rerender(panel()) };
 }
 
@@ -330,35 +336,37 @@ afterEach(() => {
 });
 
 describe("Explorer tree actions", () => {
-  it("downloads the file under the browsed folder rather than the workspace root", async () => {
-    const urls: string[] = [];
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
-      this: HTMLAnchorElement,
-    ) {
-      urls.push(this.getAttribute("href") ?? "");
-    });
-    useDirectoriesMock.mockReturnValue(new Map());
-    render(
-      <FolderTree
-        conversationId="conv_scoped_download"
-        browseLocation="src"
-        files={[file("a.ts")]}
-        changedFiles={[]}
-        isLoading={false}
-        isError={false}
-        error={null}
-        showHidden={false}
-        sort="alpha"
-        onFileSelect={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Download a.ts" }));
-    await waitFor(() => expect(urls).toHaveLength(1));
-    expect(urls[0]).toContain("/filesystem/src/a.ts?download=true");
-    click.mockRestore();
+  it("renders row menus without inline download, path-copy, or selection controls", () => {
+    renderPanel({ conversationId: "row-menus", files: [file("a.ts")] });
+    expect(screen.getByRole("button", { name: "Actions for a.ts" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Download a.ts|Copy path/ })).toBeNull();
   });
 
-  it("supports keyboard navigation, collapse all, and touch selection in the tree", async () => {
+  it.each([false, true])(
+    "keeps only a row menu in filename results and Changes (changes=%s)",
+    (flatView) => {
+      renderPanel({
+        conversationId: `menu-surfaces-${flatView}`,
+        files: [],
+        changedFiles: [changedFile("a.ts")],
+        treeSearchResults: [file("a.ts")],
+        flatView,
+      });
+      if (!flatView) {
+        vi.useFakeTimers();
+        fireEvent.change(screen.getByRole("searchbox", { name: "Search all files" }), {
+          target: { value: "a.ts" },
+        });
+        act(() => vi.advanceTimersByTime(300));
+      }
+      expect(screen.getByRole("button", { name: "Actions for a.ts" })).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Download a.ts|Copy path/ })).toBeNull();
+    },
+  );
+
+  it("supports keyboard navigation, collapse all, and modifier selection in the tree", async () => {
     renderPanel({
       conversationId: "conv_explorer_keyboard",
       files: [file("src/a.ts"), file("src/b.ts")],
@@ -367,7 +375,9 @@ describe("Explorer tree actions", () => {
     fireEvent.focus(folder);
     fireEvent.keyDown(folder, { key: "ArrowDown" });
     await waitFor(() =>
-      expect(screen.getByRole("checkbox", { name: "Select src/a.ts" })).toBeChecked(),
+      expect(
+        screen.getByRole("button", { name: /^a\.ts/ }).closest("[role=treeitem]"),
+      ).toHaveAttribute("aria-selected", "true"),
     );
     fireEvent.keyDown(screen.getByRole("treeitem", { selected: true }), {
       key: "ArrowDown",
@@ -505,11 +515,58 @@ describe("FilesPanel header role", () => {
 });
 
 describe("FilesPanel hidden-files menu", () => {
+  it("keeps quick filters and the dot-files toggle beside filename search, with working pressed state", () => {
+    renderPanel({ conversationId: "visible-controls", files: [file(".env")] }).unmount();
+    function Harness() {
+      const [showHidden, setShowHidden] = useState(false);
+      return (
+        <MemoryRouter>
+          <FilesPanel
+            conversationId="visible-controls"
+            flatView={false}
+            onFileSelect={vi.fn()}
+            sort="alpha"
+            onSortChange={vi.fn()}
+            showHidden={showHidden}
+            onShowHiddenChange={setShowHidden}
+          />
+        </MemoryRouter>
+      );
+    }
+    render(<Harness />);
+    const search = screen.getByRole("searchbox", { name: "Search all files" });
+    const filters = screen.getByRole("button", { name: "Filename include/exclude filters" });
+    const hidden = screen.getByRole("button", { name: "Show hidden files" });
+    expect(search.parentElement?.parentElement).toContainElement(filters);
+    expect(search.parentElement?.parentElement).toContainElement(hidden);
+    expect(filters).toHaveAttribute("data-variant", "ghost");
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(".env")).toBeNull();
+    fireEvent.click(hidden);
+    expect(screen.getByText(".env")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide hidden files" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(filters);
+    fireEvent.change(screen.getByRole("textbox", { name: "files to include" }), {
+      target: { value: "*.ts" },
+    });
+    expect(filters).toHaveAttribute("aria-expanded", "true");
+    expect(filters).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(filters);
+    expect(screen.queryByRole("textbox", { name: "files to include" })).toBeNull();
+    expect(filters).toHaveAttribute("aria-pressed", "true");
+  });
+
   it.each([true, false])(
     "shows hidden-file state and its action icon in overflow (%s)",
     (showHidden) => {
       renderPanel({ conversationId: `conv_eye_${showHidden}`, files: [], showHidden });
-      expect(screen.queryByRole("button", { name: /hidden files/ })).toBeNull();
+      expect(screen.getByRole("button", { name: /hidden files/ })).toHaveAttribute(
+        "aria-pressed",
+        String(showHidden),
+      );
       openFileMenu();
       const toggle = screen.getByRole("menuitemcheckbox", { name: "Show hidden files" });
       expect(toggle).toHaveAttribute("aria-checked", String(showHidden));
@@ -551,6 +608,8 @@ describe("FilesPanel scope (fixed by the caller's Files/Changes tab)", () => {
     });
 
     expect(useComparisonChangesMock).toHaveBeenCalledWith("conv_changed_only", {
+      workspaceId: undefined,
+      view: "changes",
       path: "",
       directories: [""],
       enabled: true,
@@ -601,6 +660,110 @@ describe("FilesPanel scope (fixed by the caller's Files/Changes tab)", () => {
 });
 
 describe("Explorer shared comparisons", () => {
+  it("remembers Files and Changes independently and decorates rows from the active view", () => {
+    const conversationId = "panel-independent";
+    renderPanel({ conversationId, files: [file("live.ts")] }).unmount();
+    const workspaceId = "panel-workspace";
+    setWorkspaceComparison(
+      { workspaceId, conversationId, view: "changes" },
+      { ...DEFAULT_WORKSPACE_COMPARISON, source: "agent" },
+    );
+    useComparisonChangesMock.mockImplementation((id, options) =>
+      changedFilesResult([
+        changedFile(
+          "live.ts",
+          getWorkspaceComparison({
+            workspaceId: options?.workspaceId,
+            conversationId: id,
+            view: options?.view,
+          }).source === "git"
+            ? "modified"
+            : "created",
+        ),
+      ]),
+    );
+    function Harness() {
+      const [flatView, setFlatView] = useState(false);
+      const [hidden, setHidden] = useState(false);
+      return (
+        <MemoryRouter>
+          <button type="button" onClick={() => setFlatView((value) => !value)}>
+            Switch view
+          </button>
+          <FilesPanel
+            workspaceId={workspaceId}
+            conversationId={conversationId}
+            flatView={flatView}
+            onFileSelect={vi.fn()}
+            sort="alpha"
+            onSortChange={vi.fn()}
+            showHidden={hidden}
+            onShowHiddenChange={setHidden}
+          />
+        </MemoryRouter>
+      );
+    }
+    const first = render(<Harness />);
+    expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Git");
+    expect(screen.getByText("live.ts")).toHaveClass("text-amber-500");
+    fireEvent.click(screen.getByRole("button", { name: "Switch view" }));
+    expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
+    expect(screen.getByTitle("Added")).toHaveTextContent("A");
+    fireEvent.keyDown(screen.getByRole("button", { name: "Diff comparison" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Git/ }));
+    expect(getWorkspaceComparison({ workspaceId, view: "changes" }).source).toBe("git");
+    expect(getWorkspaceComparison({ workspaceId, view: "files" }).source).toBe("git");
+    fireEvent.keyDown(screen.getByRole("button", { name: "Diff comparison" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Chat/ }));
+    first.unmount();
+    render(<Harness />);
+    expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Git");
+    fireEvent.click(screen.getByRole("button", { name: "Switch view" }));
+    expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
+  });
+
+  it("uses Chat Activity provenance and publishes a workspace browse event independently of the active chat", () => {
+    const workspace = {
+      id: "panel-context",
+      root: "/work",
+      host_id: "workspace-host",
+      target_kind: "host" as const,
+      capabilities: [],
+      chatSessionId: "activity-chat",
+    };
+    setWorkspaceComparison(
+      { workspaceId: workspace.id, conversationId: "activity-chat", view: "changes" },
+      { source: "since", base: "old", target: "WORKTREE" },
+    );
+    const onBrowse = vi.fn();
+    window.addEventListener("omnigent:browse-location-changed", onBrowse);
+    try {
+      renderPanel({
+        conversationId: "unrelated-chat",
+        workspace,
+        workingDir: "/work",
+        files: [file("src/a.ts")],
+      });
+      fireEvent.keyDown(screen.getByRole("button", { name: "Diff comparison" }), { key: "Enter" });
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Chat/ }));
+      expect(
+        getWorkspaceComparison({ workspaceId: workspace.id, view: "files" }).sourceChatId,
+      ).toBe("activity-chat");
+      fireEvent.doubleClick(screen.getByRole("button", { name: "src/" }));
+      expect((onBrowse.mock.calls[0][0] as CustomEvent).detail).toEqual({
+        conversationId: "unrelated-chat",
+        workspaceId: workspace.id,
+        location: "src",
+      });
+      expect(getWorkspaceComparison({ workspaceId: workspace.id, view: "changes" }).source).toBe(
+        "git",
+      );
+      expect(screen.queryByText("Files served by host")).toBeNull();
+    } finally {
+      window.removeEventListener("omnigent:browse-location-changed", onBrowse);
+    }
+  });
+
   it("keeps Git deletions in Changes and refreshes the selected comparison", async () => {
     renderPanel({
       conversationId: "git_default_changes",
@@ -620,7 +783,10 @@ describe("Explorer shared comparisons", () => {
       changedFiles: [changedFile("live.ts"), changedFile("missing/gone.ts", "deleted")],
     });
     act(() =>
-      setWorkspaceComparison("comparison_shared", { source: "agent", base: "", target: "" }),
+      setWorkspaceComparison(
+        { conversationId: "comparison_shared", view: "files" },
+        { source: "agent", base: "", target: "" },
+      ),
     );
     expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
     expect(screen.getByText("live.ts")).toBeInTheDocument();
@@ -633,11 +799,14 @@ describe("Explorer shared comparisons", () => {
     "resets %s before querying an explicitly selected folder",
     (source) => {
       const conversationId = `revision_navigation_${source}`;
-      setWorkspaceComparison(conversationId, {
-        source,
-        base: "old-repository-hash",
-        target: "HEAD",
-      });
+      setWorkspaceComparison(
+        { conversationId, view: "files" },
+        {
+          source,
+          base: "old-repository-hash",
+          target: "HEAD",
+        },
+      );
       renderPanel({
         conversationId,
         files: [file("src/a.ts")],
@@ -646,11 +815,16 @@ describe("Explorer shared comparisons", () => {
       });
       const requests: { path: string | undefined; source: string }[] = [];
       useComparisonChangesMock.mockImplementation((id, options) => {
-        requests.push({ path: options?.path, source: getWorkspaceComparison(id).source });
+        requests.push({
+          path: options?.path,
+          source: getWorkspaceComparison({ conversationId: id, view: options?.view }).source,
+        });
         return changedFilesResult([]);
       });
       fireEvent.doubleClick(screen.getByRole("button", { name: "src/" }));
-      expect(getWorkspaceComparison(conversationId)).toEqual(DEFAULT_WORKSPACE_COMPARISON);
+      expect(getWorkspaceComparison({ conversationId, view: "files" })).toEqual(
+        DEFAULT_WORKSPACE_COMPARISON,
+      );
       expect(requests.filter((request) => request.path === "src")).not.toHaveLength(0);
       expect(
         requests
@@ -680,7 +854,7 @@ describe("Explorer shared comparisons", () => {
     expect(screen.getByText("a.ts")).toBeInTheDocument();
     expect(screen.queryByText("outside.ts")).toBeNull();
     expect(screen.queryByText("elsewhere.ts")).toBeNull();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/a.ts" }));
+    fireEvent.click(screen.getByRole("button", { name: /^a\.ts/ }), { ctrlKey: true });
     openFileMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: "Move selected items to trash…" }));
     fireEvent.click(screen.getByRole("button", { name: "Move to trash" }));
@@ -712,7 +886,7 @@ describe("Explorer shared comparisons", () => {
       workingDir: "/work",
       changedFiles: [changedFile("src/a.ts")],
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/a.ts" }));
+    fireEvent.click(screen.getByRole("button", { name: /^a\.ts/ }), { ctrlKey: true });
     const tree = screen.getByRole("tree", { name: "Workspace files" });
     tree.scrollTop = 40;
     fireEvent.scroll(tree);
@@ -788,6 +962,8 @@ describe("Explorer shared comparisons", () => {
     expect(screen.queryByText("gone.ts")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "absent/" })).not.toBeInTheDocument();
     expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_actual_tree", {
+      workspaceId: undefined,
+      view: "files",
       path: "",
       directories: ["", "repo"],
       enabled: true,
@@ -800,6 +976,8 @@ describe("Explorer shared comparisons", () => {
     );
     const tree = renderPanel({ conversationId: "git_visited", workingDir: "/work", files });
     expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_visited", {
+      workspaceId: undefined,
+      view: "files",
       path: "",
       directories: ["", ...files.slice(0, 127).map((f) => f.path.split("/")[0])],
       enabled: true,
@@ -824,6 +1002,8 @@ describe("Explorer shared comparisons", () => {
     );
     fireEvent.doubleClick(screen.getByRole("button", { name: "src/" }));
     expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
+      workspaceId: undefined,
+      view: "files",
       path: "src",
       directories: ["src", "src/nested"],
       enabled: true,
@@ -836,6 +1016,8 @@ describe("Explorer shared comparisons", () => {
       flatView: true,
     });
     expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_scoped_dirs", {
+      workspaceId: undefined,
+      view: "changes",
       path: "src",
       directories: ["src", "src/nested"],
       enabled: true,
@@ -852,6 +1034,8 @@ describe("Explorer shared comparisons", () => {
     fireEvent.click(screen.getByTestId("browse-location-path"));
     fireEvent.click(screen.getByTestId("stub-picker-confirm"));
     expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_absolute_scope", {
+      workspaceId: undefined,
+      view: "files",
       path: "/etc",
       directories: ["/etc", "/etc/nested"],
       enabled: true,

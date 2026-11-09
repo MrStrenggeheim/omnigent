@@ -11,6 +11,7 @@ import {
   removeNotification,
   updateNotification,
 } from "./notifications";
+import { queryIdentity, type WorkspaceResourceTarget } from "./workbenchWorkspace";
 import { formatBytes } from "@/shell/fileStatusUtils";
 
 /* eslint-disable no-await-in-loop -- Upload offsets and archive chunks depend on the previous response. */
@@ -123,7 +124,7 @@ function startTransfer(
 ): void {
   const previous = transfers.get(initial.conversationId);
   if (previous && transferIsActive(previous.value))
-    throw new Error("A file transfer is already running in this session.");
+    throw new Error("A file transfer is already running in this workspace.");
   const transfer: ActiveTransfer = {
     controller: new AbortController(),
     value: { ...initial, completed: 0, status: "running", message: null },
@@ -172,11 +173,17 @@ export interface ExplorerUpload {
 
 /** Transfer ownership belongs to this store, so changing views never cancels it. */
 export function startExplorerUpload(
-  conversationId: string,
+  conversationId: string | undefined,
   upload: ExplorerUpload,
   overwrite: boolean,
   refresh: () => Promise<void>,
+  workspace?: WorkspaceResourceTarget,
 ): void {
+  const identity = queryIdentity(workspace, conversationId);
+  if (!identity) throw new Error("A workspace or session resource target is required.");
+  const target = typeof workspace === "object" && workspace ? { id: workspace.id } : workspace;
+  const operation = (body: Record<string, unknown>, signal?: AbortSignal) =>
+    filesystemOperation(conversationId, body, signal, target);
   if (upload.files.some((item) => item.file.size > 1024 ** 3))
     throw new Error("Each uploaded file must be at most 1 GiB.");
   const pending: ExplorerUpload = {
@@ -186,7 +193,7 @@ export function startExplorerUpload(
   };
   const total = pending.files.reduce((sum, item) => sum + item.file.size, 0);
   startTransfer(
-    { conversationId, kind: "upload", name: `${pending.files.length} file(s)`, total },
+    { conversationId: identity, kind: "upload", name: `${pending.files.length} file(s)`, total },
     async (signal, progress) => {
       const checkCancelled = () => {
         if (signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
@@ -195,8 +202,7 @@ export function startExplorerUpload(
       try {
         for (const directory of pending.directories) {
           checkCancelled();
-          await filesystemOperation(
-            conversationId,
+          await operation(
             { operation: "mkdir", path: childPath(pending.destination, directory), exist_ok: true },
             signal,
           );
@@ -208,7 +214,7 @@ export function startExplorerUpload(
           let uploadId: string | undefined;
           try {
             // Obtain the staging id even after cancellation, so cleanup can name it.
-            const begun = await filesystemOperation(conversationId, {
+            const begun = await operation({
               operation: "upload_begin",
               path,
               size: item.file.size,
@@ -222,8 +228,7 @@ export function startExplorerUpload(
               const bytes = new Uint8Array(
                 await item.file.slice(offset, offset + chunkSize).arrayBuffer(),
               );
-              await filesystemOperation(
-                conversationId,
+              await operation(
                 {
                   operation: "upload_chunk",
                   path,
@@ -236,16 +241,12 @@ export function startExplorerUpload(
               progress(item.path, completed + offset + bytes.length, total);
             }
             checkCancelled();
-            await filesystemOperation(
-              conversationId,
-              { operation: "upload_finish", path, upload_id: uploadId },
-              signal,
-            );
+            await operation({ operation: "upload_finish", path, upload_id: uploadId }, signal);
             completed += item.file.size;
           } catch (cause) {
             if (uploadId) {
               try {
-                await filesystemOperation(conversationId, {
+                await operation({
                   operation: "upload_cancel",
                   path,
                   upload_id: uploadId,
@@ -267,15 +268,24 @@ export function startExplorerUpload(
   );
 }
 
-export function startExplorerArchive(conversationId: string, selection: string[]): void {
+export function startExplorerArchive(
+  conversationId: string | undefined,
+  selection: string[],
+  workspace?: WorkspaceResourceTarget,
+): void {
+  const identity = queryIdentity(workspace, conversationId);
+  if (!identity) throw new Error("A workspace or session resource target is required.");
+  const target = typeof workspace === "object" && workspace ? { id: workspace.id } : workspace;
+  const operation = (body: Record<string, unknown>, signal?: AbortSignal) =>
+    filesystemOperation(conversationId, body, signal, target);
   const paths = [...selection];
   startTransfer(
-    { conversationId, kind: "download", name: "Preparing ZIP…", total: 1 },
+    { conversationId: identity, kind: "download", name: "Preparing ZIP…", total: 1 },
     async (signal, progress) => {
       let archiveId: string | undefined;
       try {
         // Keep the creation response to clean up its id if cancellation arrives.
-        const begun = await filesystemOperation(conversationId, {
+        const begun = await operation({
           operation: "archive_begin",
           paths,
         });
@@ -285,8 +295,7 @@ export function startExplorerArchive(conversationId: string, selection: string[]
         const parts: BlobPart[] = [];
         let offset = 0;
         while (offset < begun.size) {
-          const part = await filesystemOperation(
-            conversationId,
+          const part = await operation(
             { operation: "archive_chunk", paths, archive_id: archiveId, offset },
             signal,
           );
@@ -300,7 +309,7 @@ export function startExplorerArchive(conversationId: string, selection: string[]
         downloadBlob(new Blob(parts, { type: "application/zip" }), begun.filename ?? "files.zip");
       } finally {
         if (archiveId)
-          await filesystemOperation(conversationId, {
+          await operation({
             operation: "archive_cancel",
             paths,
             archive_id: archiveId,

@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -49,6 +50,7 @@ from omnigent.debug_logging import debug_event
 from omnigent.inner.datamodel import OSEnvSpec, TerminalEnvSpec
 from omnigent.inner.os_env import OSEnvironment
 from omnigent.inner.terminal import TerminalInstance, create_terminal_instance
+from omnigent.terminals.history import ActivityEntry, TerminalHistory, bounded_output
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +204,12 @@ class TerminalRegistry:
     map-level consistency.
     """
 
-    def __init__(self, *, conversation_link_base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        conversation_link_base_url: str | None = None,
+        history: TerminalHistory | None = None,
+    ) -> None:
         """
         Construct an empty registry.
 
@@ -211,6 +218,8 @@ class TerminalRegistry:
             ``None`` keeps links relative.
         """
         self._conversation_link_base_url = conversation_link_base_url
+        self.history = history if history is not None else TerminalHistory()
+        self.activity_capture_failed = False
         # Two-level dict: conversation_id -> (name, key) -> instance.
         # Per-conversation maps make ``cleanup_conversation`` cheap
         # (one pop) and ``list_for_conversation`` direct.
@@ -230,6 +239,64 @@ class TerminalRegistry:
         # Protects both ``_by_conversation`` and ``_instance_locks``.
         self._lock = threading.Lock()
         self.environment_resolver: Callable[[str, OSEnvSpec], OSEnvironment] | None = None
+
+    def _watch_activity(self, conversation_id: str, instance: TerminalInstance) -> None:
+        """Bind captured evidence to a usage session without changing the creator."""
+        from omnigent.entities.session_resources import terminal_resource_id
+
+        trace = instance.lifecycle_trace
+        entry = ActivityEntry(
+            id=f"activity_{trace.launch_id}",
+            session_id=conversation_id,
+            terminal_id=terminal_resource_id(instance.name, instance.session_key),
+            name=f"{instance.name}:{instance.session_key}",
+            state="running" if instance.running else "unknown",
+            started_at=trace.launched_at or time.time(),
+            owner_id=trace.launch_session_id or conversation_id,
+        )
+        write_lock = threading.Lock()
+        last_write = 0.0
+
+        def observe(state: str | None = None) -> None:
+            nonlocal last_write
+            with write_lock:
+                now = time.monotonic()
+                if state != "exited" and state in (None, entry.state) and now - last_write < 2:
+                    return
+                if state is not None and entry.state != "exited":
+                    # Only a terminal lifecycle observation can supply an end.
+                    entry.state = state  # type: ignore[assignment]
+                    if state == "exited":
+                        entry.ended_at = time.time()
+                        entry.exit_status = instance.last_exit_status()
+                entry.output = bounded_output(
+                    instance.last_exit_text() or instance.last_pane_text()
+                )
+                try:
+                    self.history.record(entry)
+                except Exception:
+                    self.activity_capture_failed = True
+                    logger.exception("Could not retain terminal activity for %s", conversation_id)
+                else:
+                    last_write = now
+
+        instance.activity_observer = observe
+        observe()
+
+    def activity_entries(self, conversation_id: str) -> list[ActivityEntry]:
+        """Return captured launches; stale persisted liveness is disconnected."""
+        instances = self.list_for_conversation(conversation_id)
+        live_ids = {f"activity_{entry.instance.lifecycle_trace.launch_id}" for entry in instances}
+        for entry in instances:
+            entry.instance._notify_activity()
+        entries = self.history.list(conversation_id)
+        for entry in entries:
+            if entry.id not in live_ids and entry.state in ("running", "idle", "unknown"):
+                entry.state = "disconnected"
+        entries.sort(
+            key=lambda entry: (entry.state not in ("running", "idle"), -(entry.started_at or 0))
+        )
+        return entries
 
     def conversation_link_for_id(self, conversation_id: str) -> str:
         """
@@ -338,12 +405,15 @@ class TerminalRegistry:
             created.instance.program_status_app = program_status_app
             created.instance.lifecycle_trace.transfer_session(conversation_id)
             await created.instance.launch(cwd=created.cwd)
+            self._watch_activity(conversation_id, created.instance)
             stage = "terminal_liveness"
             if not await created.instance.is_alive():
                 created.instance.lifecycle_trace.note_exit()
                 raise TerminalExitedDuringLaunch(created.instance)
         except (Exception, asyncio.CancelledError) as exc:
             # Until registration, no shutdown sweep can discover this instance.
+            if created.instance.activity_observer is None:
+                self._watch_activity(conversation_id, created.instance)
             cleanup = await _close_unregistered_instance(created.instance)
             cancelled = isinstance(exc, asyncio.CancelledError)
             logger.log(
@@ -555,6 +625,8 @@ class TerminalRegistry:
 
             lock = self._instance_locks.pop(source_lock_key, None)
             self._instance_locks[target_lock_key] = lock or threading.Lock()
+        instance._notify_activity("disconnected")
+        self._watch_activity(target_conversation_id, instance)
         return True
 
     async def close(

@@ -113,6 +113,9 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 ## Features
 
+- [Independent workspaces](./workbench-workspaces.md) covers selected resource targets, persistent file/search state and independently owned manual terminals.
+- [Chat activity](./chat-activity.md) covers agents, live shell sessions and retained command/shell history.
+
 - [Mobile Workspace](./mobile-workspace.md) covers the separate chat menu and Workspace button, shared tool tabs and remembered mobile navigation.
 
 - [Notifications](./notifications.md) covers shared popups, retained history, required prompts, archive recovery and transfer activity from conversation, file-viewer and Files drawer bells.

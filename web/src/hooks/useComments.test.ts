@@ -4,7 +4,7 @@
 // send-to-agent dispatch that calls useChatStore.send().
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CapabilitiesContext } from "@/lib/CapabilitiesContext";
@@ -292,13 +292,77 @@ describe("useSendCommentsToAgent", () => {
     result.current.mutate({ comment_ids: ["c1"] });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    if (gridEnabled)
-      expect(sendMock).toHaveBeenCalledWith("please address these", "ag_1", undefined, {
-        pinnedConversationId: "conv_1",
-      });
-    else expect(sendMock).toHaveBeenCalledWith("please address these", "ag_1");
+    expect(sendMock).toHaveBeenCalledWith("please address these", "ag_1", undefined, {
+      pinnedConversationId: "conv_1",
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["comments", "conv_1"] });
   });
+
+  it("rejects a null agent before fetching, including a retained imperative sender", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const { result, rerender } = renderHook(
+      ({ agentId }) => useSendCommentsToAgent("conv_1", agentId),
+      { initialProps: { agentId: "ag_1" as string | null }, wrapper: wrapperWith(queryClient) },
+    );
+    const sendBeforeUnbinding = result.current.mutate;
+    rerender({ agentId: null });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ comment_ids: ["c1"] })).rejects.toThrow(
+        "No agent is available",
+      );
+    });
+    act(() => sendBeforeUnbinding({ comment_ids: ["c1"] }));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "keeps the in-flight recipient pinned through rebinding with grid %s",
+    async (gridEnabled) => {
+      let resolveRequest!: (response: Response) => void;
+      fetchMock.mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolveRequest = resolve;
+        }),
+      );
+      const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+      const { result, rerender } = renderHook(
+        ({ sessionId, agentId }) => useSendCommentsToAgent(sessionId, agentId),
+        {
+          initialProps: { sessionId: "conv_1", agentId: "ag_1" as string | null },
+          wrapper: wrapperWith(queryClient, gridEnabled),
+        },
+      );
+      act(() => result.current.mutate({ comment_ids: ["c1"] }));
+      // Rebind before mutationFn's first microtask, then again while fetching.
+      rerender({ sessionId: "conv_2", agentId: null });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(fetchMock.mock.calls[0][0]).toBe("/v1/sessions/conv_1/comments/send");
+      rerender({ sessionId: "conv_3", agentId: "ag_3" });
+      await act(async () =>
+        resolveRequest(
+          mockResponse({ formatted_message: "old comments", sent_comment_ids: ["c1"] }),
+        ),
+      );
+      await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+      expect(sendMock).toHaveBeenLastCalledWith("old comments", "ag_1", undefined, {
+        pinnedConversationId: "conv_1",
+      });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["comments", "conv_1"] });
+      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["comments", "conv_3"] });
+      fetchMock.mockResolvedValueOnce(
+        mockResponse({ formatted_message: "new comments", sent_comment_ids: ["c3"] }),
+      );
+      act(() => result.current.mutate({ comment_ids: ["c3"] }));
+      await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(2));
+      expect(fetchMock.mock.calls[1][0]).toBe("/v1/sessions/conv_3/comments/send");
+      expect(sendMock).toHaveBeenLastCalledWith("new comments", "ag_3", undefined, {
+        pinnedConversationId: "conv_3",
+      });
+    },
+  );
 
   it("throws on non-2xx and never dispatches to the agent", async () => {
     // A failed send must NOT call the chat store, or the user sees a

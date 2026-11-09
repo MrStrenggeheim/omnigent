@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { useChatStore } from "@/store/chatStore";
 import { nativeCodingAgentForHarness } from "@/lib/nativeCodingAgents";
+import { queryIdentity, useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import type { BundledLanguage, ThemedToken } from "shiki";
 import { highlightCode } from "@/components/ai-elements/code-block";
 import { normalizeExplicitMathDelimiters } from "@/components/ai-elements/mathMarkdown";
@@ -550,6 +551,8 @@ export function CodeViewer({
   onTocToggle,
   onRequestEditMode,
 }: CodeViewerProps) {
+  const workspace = useWorkbenchWorkspace();
+  const resourceIdentity = queryIdentity(workspace, conversationId);
   const canEdit = useCanEdit(conversationId);
   const activeCommentId = activeSelection?.comment_id;
   const previewComments = useMemo(
@@ -1011,6 +1014,7 @@ export function CodeViewer({
         }
       >
         <MonacoCodeEditor
+          key={resourceIdentity}
           position={position}
           content={content}
           conversationId={conversationId}

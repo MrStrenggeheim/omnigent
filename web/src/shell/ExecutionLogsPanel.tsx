@@ -1,3 +1,4 @@
+import { usePanelEscapeClose } from "@/hooks/usePanelEscapeClose";
 import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side panel that shows the raw JSON items for a conversation,
 // scoped to either the main thread or a sub-agent (child) session.
@@ -110,14 +111,7 @@ export function ExecutionLogsPanel({
     if (initialKey) setActiveKey(initialKey);
   }, [open, initialKey]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  usePanelEscapeClose(open, onClose);
 
   useEffect(() => {
     if (ref.current) {

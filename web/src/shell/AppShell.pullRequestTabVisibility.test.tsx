@@ -187,7 +187,7 @@ describe("Pull Requests rail tab visibility", () => {
     // The workspace gate is on: Files renders, so the strip is up — and the
     // Pull Requests tab must also be present (its panel shows an empty state instead).
     expect(screen.getByRole("tab", { name: /^Files$/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /^Agents/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Activity/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Pull Requests" })).toBeInTheDocument();
   });
 

@@ -1,3 +1,4 @@
+import type { WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
   findAgentTerminal,
@@ -16,31 +17,44 @@ export function useWorkspaceResources({
   shareWorkspaceFiles,
   terminalFirst = false,
   terminalPending = false,
+  workspace,
 }: {
   sessionId: string | undefined;
   permissionLevel: number | null;
   shareWorkspaceFiles?: boolean;
   terminalFirst?: boolean;
   terminalPending?: boolean;
+  workspace?: WorkbenchWorkspace | null;
 }) {
   // View grants don't include files. Unknown levels stay permissive; the server enforces access.
-  const canBrowseWorkspace = isEditorLevel(permissionLevel) || shareWorkspaceFiles === true;
-  const environmentQuery = useWorkspaceEnvironment(sessionId, { enabled: canBrowseWorkspace });
+  const canBrowseWorkspace =
+    workspace != null || isEditorLevel(permissionLevel) || shareWorkspaceFiles === true;
+  const environmentQuery = useWorkspaceEnvironment(sessionId, {
+    enabled: canBrowseWorkspace,
+    ...(workspace ? { workspace } : {}),
+  });
   const scope = useSyncExternalStore(
     subscribeExplorerGitScopes,
-    () => getExplorerGitScope(sessionId),
+    () =>
+      getExplorerGitScope(
+        workspace ? { workspaceId: workspace.id, conversationId: sessionId } : sessionId,
+      ),
     () => getExplorerGitScope(undefined),
   );
   const changes = useWorkspaceComparisonChanges(sessionId, {
     ...scope,
     enabled: canBrowseWorkspace,
+    ...(workspace ? { workspace } : {}),
   });
   const changedPaths = useMemo(
     () => new Map((changes.data?.data ?? []).map((file) => [file.path, file])),
     [changes.data],
   );
   const isChangedPath = useCallback((path: string) => changedPaths.has(path), [changedPaths]);
-  const { terminals } = useTerminals(sessionId ?? null, { reconcileWhilePending: terminalPending });
+  const { terminals } = useTerminals(sessionId ?? null, {
+    reconcileWhilePending: terminalPending,
+    workspace: null,
+  });
   const agentTerminal = useMemo(() => findAgentTerminal(terminals), [terminals]);
   // Hide the agent terminal from shells only when it has its own Terminal view.
   const openTerminals = useMemo(
@@ -50,7 +64,8 @@ export function useWorkspaceResources({
   return {
     canBrowseWorkspace,
     environmentQuery,
-    showFilesPanel: canBrowseWorkspace && environmentQuery.data?.available !== false,
+    showFilesPanel:
+      workspace != null || (canBrowseWorkspace && environmentQuery.data?.available !== false),
     changedCount: changedPaths.size,
     isChangedPath,
     terminals,

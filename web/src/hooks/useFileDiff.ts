@@ -13,6 +13,12 @@ import { useQuery } from "@tanstack/react-query";
 import { authenticatedFetch } from "@/lib/identity";
 import { isTempConvId } from "@/lib/tempConversationId";
 import {
+  useWorkbenchWorkspace,
+  queryIdentity,
+  resourceBase,
+  type WorkspaceResourceTarget,
+} from "@/lib/workbenchWorkspace";
+import {
   useWorkspaceChangedFiles,
   useWorkspaceEnvironment,
   useWorkspaceServeable,
@@ -39,12 +45,16 @@ class FileDiffError extends Error {
   }
 }
 
-async function fetchFileDiff(conversationId: string, path: string): Promise<FileDiffResponse> {
+async function fetchFileDiff(
+  conversationId: string,
+  path: string,
+  workspace?: WorkspaceResourceTarget,
+): Promise<FileDiffResponse> {
   // Encode each path segment individually so slashes remain structural.
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   const url =
-    `/v1/sessions/${encodeURIComponent(conversationId)}` +
-    `/resources/environments/${DEFAULT_ENVIRONMENT_ID}/diff/${encodedPath}`;
+    `${resourceBase(workspace, conversationId)}` +
+    `/environments/${DEFAULT_ENVIRONMENT_ID}/diff/${encodedPath}`;
   const res = await authenticatedFetch(url);
   if (!res.ok) {
     // Surface the server's reason (e.g. "git status timed out after 5.0s")
@@ -75,6 +85,8 @@ export function useFileDiff(
   path: string | null,
   options: { requested?: boolean } = {},
 ) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const serveable = useWorkspaceServeable(conversationId);
   const changedFiles = useWorkspaceChangedFiles(conversationId);
   const environment = useWorkspaceEnvironment(conversationId);
@@ -84,11 +96,11 @@ export function useFileDiff(
     options.requested && changedFiles.data === undefined && !changedFiles.isError;
 
   return useQuery({
-    queryKey: ["file-diff", conversationId, path],
-    queryFn: () => fetchFileDiff(conversationId!, path!),
+    queryKey: ["file-diff", identity, path],
+    queryFn: () => fetchFileDiff(conversationId!, path!, workspace),
     enabled:
-      !!conversationId &&
-      !isTempConvId(conversationId) &&
+      !!identity &&
+      (!!workspace || !isTempConvId(conversationId)) &&
       !!path &&
       serveable !== false &&
       environment.data?.available !== false &&
@@ -107,9 +119,11 @@ export function useGitFileDiff(
   path: string | null,
   options: { enabled: boolean; base: string; target: string; scope?: string },
 ) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const serveable = useWorkspaceServeable(conversationId);
   return useQuery<FileDiffResponse & { repository?: string; base?: string; target?: string }>({
-    queryKey: ["git-file-diff", conversationId, path, options.base, options.target, options.scope],
+    queryKey: ["git-file-diff", identity, path, options.base, options.target, options.scope],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({
         operation: "diff",
@@ -119,7 +133,7 @@ export function useGitFileDiff(
         ...(options.scope !== undefined ? { scope: options.scope } : {}),
       });
       const response = await authenticatedFetch(
-        `/v1/sessions/${encodeURIComponent(conversationId!)}/resources/environments/default/git?${params}`,
+        `${resourceBase(workspace, conversationId)}/environments/default/git?${params}`,
         { signal },
       );
       const payload = await response.json();
@@ -132,8 +146,8 @@ export function useGitFileDiff(
     },
     enabled:
       options.enabled &&
-      !!conversationId &&
-      !isTempConvId(conversationId) &&
+      !!identity &&
+      (!!workspace || !isTempConvId(conversationId)) &&
       !!path &&
       serveable !== false,
     staleTime: 5_000,

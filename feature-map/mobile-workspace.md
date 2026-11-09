@@ -5,6 +5,9 @@ Workspace drawers and the phone's full-screen file viewer share horizontally scr
 
 ## Sub-features
 
+- `panel-menu`: the compact + menu lists tool panels and creates a manual shell when the selected workspace supports terminals.
+- `fixed-control-rows`: headers remain 48px tall without vertical scrolling; tabs overflow horizontally and bodies scroll independently.
+
 - `overlay-order`: opening the left sidebar preserves Workspace underneath it; revealing Workspace dismisses the left sidebar and restores its selected page.
 
 - `compact-controls`: header icons share a compact 24px visible surface and 16px glyph with separate 44px mobile touch targets.

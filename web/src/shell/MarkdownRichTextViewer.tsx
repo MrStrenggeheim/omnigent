@@ -46,6 +46,11 @@ import {
 import { createMarkdownDocumentExtensions } from "./markdownDocumentExtensions";
 import { isUserEditUpdate } from "./codeBlockLanguageEdit";
 import {
+  queryIdentity,
+  useWorkbenchWorkspace,
+  WorkbenchWorkspaceProvider,
+} from "@/lib/workbenchWorkspace";
+import {
   installMarkdownParserPatch,
   installMarkdownSerializerPatch,
 } from "./tiptapMarkdownPatches";
@@ -89,7 +94,22 @@ interface MarkdownRichTextViewerProps {
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
-export function MarkdownRichTextViewer({
+export function MarkdownRichTextViewer(props: MarkdownRichTextViewerProps) {
+  const workspace = useWorkbenchWorkspace();
+  const resourceIdentity = queryIdentity(workspace, props.conversationId)!;
+  return (
+    <WorkbenchWorkspaceProvider value={workspace}>
+      <MarkdownRichTextViewerState
+        key={resourceIdentity}
+        {...props}
+        resourceIdentity={resourceIdentity}
+      />
+    </WorkbenchWorkspaceProvider>
+  );
+}
+
+function MarkdownRichTextViewerState({
+  resourceIdentity,
   content,
   conversationId,
   path,
@@ -103,7 +123,7 @@ export function MarkdownRichTextViewer({
   searchOpen,
   onSearchHandled,
   searchInputRef,
-}: MarkdownRichTextViewerProps) {
+}: MarkdownRichTextViewerProps & { resourceIdentity: string }) {
   // A truncated buffer must never be editable, regardless of permission.
   const canEdit = useCanEdit(conversationId) && !truncated;
 
@@ -141,11 +161,8 @@ export function MarkdownRichTextViewer({
 
   return (
     <MarkdownRichTextViewerInner
-      // conversationId is part of the key: FileViewer is not keyed by session
-      // at its mount sites, so a session switch with the same file open must
-      // remount the editor — extensions close over conversationId/path and a
-      // stale closure would fetch workspace images from the previous session.
-      key={`${conversationId}:${editorKey}`}
+      key={`${resourceIdentity}:${editorKey}`}
+      resourceIdentity={resourceIdentity}
       content={content}
       conversationId={conversationId}
       path={path}
@@ -178,6 +195,7 @@ export function MarkdownRichTextViewer({
 // ---------------------------------------------------------------------------
 
 interface InnerProps {
+  resourceIdentity: string;
   content: string;
   conversationId: string;
   path: string;
@@ -205,6 +223,7 @@ interface InnerProps {
 }
 
 function MarkdownRichTextViewerInner({
+  resourceIdentity,
   content,
   conversationId,
   path,
@@ -229,6 +248,8 @@ function MarkdownRichTextViewerInner({
   searchInputRef,
   setContentRef,
 }: InnerProps) {
+  const workspace = useWorkbenchWorkspace();
+  const sourceWorkspaceRef = useRef(workspace?.id ?? null);
   const openFile = useFileViewer();
   const [isCopied, setIsCopied] = useState(false);
   const copyTimeoutRef = useRef<number>(0);
@@ -245,7 +266,7 @@ function MarkdownRichTextViewerInner({
   // file query), so the restore is ready immediately.
   const handleScrollPersist = useScrollRestore(
     scrollContainerRef,
-    conversationId && path ? `viewer-mdedit:${conversationId}:${path}` : null,
+    resourceIdentity && path ? `viewer-mdedit:${resourceIdentity}:${path}` : null,
     true,
   );
   // Fall back to a local ref when the parent doesn't pass one (the toolbar
@@ -341,13 +362,11 @@ function MarkdownRichTextViewerInner({
   // Extensions are created once per component mount.
   const extensions = useMemo(
     () => [
-      ...createMarkdownDocumentExtensions(conversationId, path),
+      ...createMarkdownDocumentExtensions(conversationId, path, sourceWorkspaceRef.current),
       createCommentDecorationExtension(commentStateRef),
       createSearchDecorationExtension(searchStateRef),
     ],
-    // commentStateRef is stable and a path change remounts this component
-    // (editorKey), so the closed-over conversationId/path can't go stale;
-    // extensions must not change after mount.
+    // Resource and path changes remount the editor; image reads retain this source workspace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );

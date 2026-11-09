@@ -121,6 +121,9 @@ from omnigent.host.frames import (
     HostStopRunnerResultFrame,
     HostStoreSecretFrame,
     HostStoreSecretResultFrame,
+    HostTerminalRequestFrame,
+    HostTerminalResultFrame,
+    HostTerminalStreamFrame,
     ImportSessionChunkingUnsupportedError,
     decode_host_frame,
     encode_host_frame,
@@ -1217,6 +1220,13 @@ class HostProcess:
         )
         if not self._interactive_shells:
             self._interactive_shells = ["bash"]
+        from omnigent.host.workbench_terminals import HostWorkbenchTerminals
+        from omnigent.process_logging import data_dir
+
+        self._workbench_terminals = HostWorkbenchTerminals(
+            data_dir() / "workbench-terminals" / f"{identity.host_id}.json",
+            self._interactive_shells,
+        )
         self._harness_tmp_parent = resolve_harness_tmp_parent()
         self._runners: dict[str, _RunnerHandle] = {}
         from omnigent.host.skills import HostSkillDiscovery
@@ -4434,6 +4444,10 @@ class HostProcess:
             # race where shutdown took an incomplete snapshot of those tasks.
             try:
                 await self._quiesce_frame_tasks()
+                try:
+                    await self._workbench_terminals.shutdown()
+                except Exception:
+                    _logger.exception("Workspace terminal shutdown failed")
                 await self._drain_runner_stop_tasks()
                 if self._maintenance_janitor is not None:
                     await self._maintenance_janitor.shutdown()
@@ -4943,6 +4957,7 @@ class HostProcess:
             if (diagnostics := self._diagnostics_for(ws)) is not None:
                 diagnostics.freeze()
             readiness_task.cancel()
+            await self._workbench_terminals.detach_all()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await readiness_task
 
@@ -5249,6 +5264,34 @@ class HostProcess:
             await self._send_text(ws, encode_host_frame(await self._handle_remove_worktree(frame)))
         elif isinstance(frame, HostListWorktreesFrame):
             await self._send_text(ws, encode_host_frame(await self._handle_list_worktrees(frame)))
+        elif isinstance(frame, HostTerminalRequestFrame):
+            try:
+                payload = await self._workbench_terminals.request(frame)
+                result = HostTerminalResultFrame(frame.request_id, payload)
+            except FileNotFoundError as exc:
+                result = HostTerminalResultFrame(
+                    frame.request_id, error=str(exc), error_status=404
+                )
+            except ValueError as exc:
+                result = HostTerminalResultFrame(
+                    frame.request_id, error=str(exc), error_status=400
+                )
+            except Exception:
+                _logger.exception("Workspace terminal operation failed")
+                result = HostTerminalResultFrame(
+                    frame.request_id, error="host terminal operation failed", error_status=502
+                )
+            await self._send_text(ws, encode_host_frame(result))
+            if frame.op == "attach" and result.error is None:
+
+                async def send_terminal_stream(stream_frame: HostTerminalStreamFrame) -> None:
+                    await self._send_text(ws, encode_host_frame(stream_frame))
+
+                await self._workbench_terminals.attach(frame, send_terminal_stream)
+        elif isinstance(frame, HostTerminalStreamFrame):
+            channel = self._workbench_terminals.channels.get(frame.channel_id)
+            if channel is not None:
+                channel.feed(frame)
         elif isinstance(frame, HostFsRequestFrame):
             # Git status and directory walks can block, so run the read
             # off the event loop and reply when it completes.

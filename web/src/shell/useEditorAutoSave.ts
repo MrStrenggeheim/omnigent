@@ -13,6 +13,7 @@ import { fetchFileContent } from "@/hooks/useFileContent";
 import { useWorkspaceServeable } from "@/hooks/useWorkspaceChangedFiles";
 import { useChatStore } from "@/store/chatStore";
 import { useAutoSave } from "./useAutoSave";
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 
 // Debounce between the last edit and an auto-save — long enough to coalesce a
 // burst of typing, short enough to keep the dirty window brief. Shared so both
@@ -77,12 +78,16 @@ export function useEditorAutoSave({
   getContent,
   isEditorDirty,
 }: UseEditorAutoSaveOptions): UseEditorAutoSaveResult {
-  const writeFile = useWriteFileContent(conversationId);
+  const workspace = useWorkbenchWorkspace();
+  // An editor's teardown can run after the selected workspace has changed.
+  const saveScope = useRef({ conversationId, path, workspace }).current;
+  const writeFile = useWriteFileContent(saveScope.conversationId, saveScope.workspace);
   const writeFileRef = useRef(writeFile);
   writeFileRef.current = writeFile;
   // A reachable host lets the save endpoint reconnect a sleeping runner.
   // Only buffer edits when neither the runner nor its host is reachable.
-  const saveDisabled = useWorkspaceServeable(conversationId) === false;
+  const saveDisabled =
+    useWorkspaceServeable(saveScope.conversationId, saveScope.workspace) === false;
 
   // The only concurrent writer is the agent during its turn, so the pre-write
   // conflict check runs only while the session is active — when idle we write
@@ -114,14 +119,19 @@ export function useEditorAutoSave({
         setDirty(false);
         return;
       }
-      writeFileRef.current.reset();
+      const writer = writeFileRef.current;
+      writer.reset();
       try {
         // Pre-write conflict check: mid-turn the file query isn't refetched, so
         // GET the live file first; if it changed under us, raise the conflict
         // and skip the write instead of clobbering the agent's edit.
         if (sessionActiveRef.current) {
           try {
-            const fresh = await fetchFileContent(conversationId, path);
+            const fresh = await fetchFileContent(
+              saveScope.conversationId,
+              saveScope.path,
+              saveScope.workspace?.id ?? null,
+            );
             // Torn down during the GET → don't touch the outer sync hook (it now
             // tracks a different file); fall through and let the write land.
             if (
@@ -135,7 +145,11 @@ export function useEditorAutoSave({
             // Best-effort: a failed conflict-check GET must not block saving.
           }
         }
-        await writeFileRef.current.mutateAsync({ path, content: value });
+        await writer.mutateAsync({
+          path: saveScope.path,
+          content: value,
+          ...(saveScope.workspace ? { workspace: saveScope.workspace.id } : {}),
+        });
         // The write lands regardless, but if this editor was torn down mid-write
         // the outer sync hook now tracks another file — skip the mutations below.
         if (!mountedRef.current) return;
@@ -155,15 +169,7 @@ export function useEditorAutoSave({
         // Surfaced via writeFile.isError in the editor's status UI.
       }
     },
-    [
-      conversationId,
-      path,
-      setDirty,
-      dismissExternalUpdate,
-      markSaved,
-      reconcileServerContent,
-      baselineRef,
-    ],
+    [saveScope, setDirty, dismissExternalUpdate, markSaved, reconcileServerContent, baselineRef],
   );
 
   // Auto-save is suppressed when read-only, the workspace is unreachable, or an

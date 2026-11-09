@@ -1,3 +1,9 @@
+import {
+  useWorkbenchWorkspace,
+  queryIdentity,
+  resourceBase,
+  type WorkspaceResourceTarget,
+} from "@/lib/workbenchWorkspace";
 // Serves every git provider. Runtime names (query keys, routes, test ids) keep
 // the `github` prefix because they are stable wire ids.
 //
@@ -381,9 +387,10 @@ export function pullRequestNotFoundReason(
 export async function fetchPullRequestInfo(
   conversationId: string,
   prUrl?: string,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestInfo> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/github${prQuery(prUrl)}`,
+    `${resourceBase(workspace, conversationId)}/github${prQuery(prUrl)}`,
   );
   if (res.status === 404) {
     // Preserve the server's message so an outdated host (no github route) is
@@ -479,6 +486,8 @@ export function usePullRequestInfo(
   rawConversationId: string | undefined,
   options?: { poll?: boolean; prUrl?: string },
 ) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, rawConversationId);
   // A `temp:*` id (navigate-first new-chat window) has no server session.
   const conversationId = isTempConvId(rawConversationId) ? undefined : rawConversationId;
   const serveable = useWorkspaceServeable(conversationId);
@@ -488,11 +497,15 @@ export function usePullRequestInfo(
   // Turn-end backstop: refetch when the focused session goes active→idle, so a
   // just-opened PR appears without opening the tab. Keys off the turn lifecycle,
   // so it works for every harness (no per-harness tool detection).
-  useTrailingInvalidate(conversationId, useSessionActive(conversationId), "github-info");
+  useTrailingInvalidate(
+    identity,
+    useSessionActive(workspace ? undefined : conversationId),
+    "github-info",
+  );
   return useQuery({
-    queryKey: ["github-info", conversationId, ...(options?.prUrl ? [options.prUrl] : [])],
-    queryFn: () => fetchPullRequestInfo(conversationId!, options?.prUrl),
-    enabled: !!conversationId && serveable !== false,
+    queryKey: ["github-info", identity, ...(options?.prUrl ? [options.prUrl] : [])],
+    queryFn: () => fetchPullRequestInfo(conversationId!, options?.prUrl, workspace),
+    enabled: !!identity && serveable !== false,
     retry,
     retryDelay: runnerOfflineRetryDelay,
     staleTime: 30_000,
@@ -518,9 +531,10 @@ export interface PullRequestPreferenceInput {
 async function postPullRequestPreference(
   conversationId: string,
   body: PullRequestPreferenceInput,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestInfo> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/github/preferences`,
+    `${resourceBase(workspace, conversationId)}/github/preferences`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -539,15 +553,17 @@ async function postPullRequestPreference(
  * update the info cache, and invalidate the selected PR's files and diff.
  */
 export function useSetPullRequestPreference(conversationId: string | undefined) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: PullRequestPreferenceInput) =>
-      postPullRequestPreference(conversationId!, body),
+      postPullRequestPreference(conversationId!, body, workspace),
     onSuccess: (info) => {
-      queryClient.setQueryData(["github-info", conversationId], info);
-      queryClient.invalidateQueries({ queryKey: ["github-info", conversationId] });
-      queryClient.invalidateQueries({ queryKey: ["github-changed-files", conversationId] });
-      queryClient.invalidateQueries({ queryKey: ["github-pr-diff", conversationId] });
+      queryClient.setQueryData(["github-info", identity], info);
+      queryClient.invalidateQueries({ queryKey: ["github-info", identity] });
+      queryClient.invalidateQueries({ queryKey: ["github-changed-files", identity] });
+      queryClient.invalidateQueries({ queryKey: ["github-pr-diff", identity] });
     },
   });
 }
@@ -555,9 +571,10 @@ export function useSetPullRequestPreference(conversationId: string | undefined) 
 async function fetchPullRequestChangedFiles(
   conversationId: string,
   prUrl?: string,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestChangedFilesResult> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/github/changes${prQuery(prUrl)}`,
+    `${resourceBase(workspace, conversationId)}/github/changes${prQuery(prUrl)}`,
   );
   if (res.status === 404) return { available: false, data: [] };
   if (res.status === 503 && (await isRunnerUnavailable503(res))) {
@@ -579,14 +596,16 @@ export function usePullRequestChangedFiles(
   prUrl?: string,
   revision?: string,
 ) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const serveable = useWorkspaceServeable(conversationId);
   const retry = useRunnerOfflineRetry(serveable !== false);
   return useQuery({
-    queryKey: ["github-changed-files", conversationId, ...(prUrl ? [prUrl, revision] : [])],
-    queryFn: () => fetchPullRequestChangedFiles(conversationId!, prUrl),
+    queryKey: ["github-changed-files", identity, ...(prUrl ? [prUrl, revision] : [])],
+    queryFn: () => fetchPullRequestChangedFiles(conversationId!, prUrl, workspace),
     // Only a PR has files to show — skip the call in every no-PR / unavailable
     // / unauthenticated state (the panel shows an empty state instead).
-    enabled: !!conversationId && hasPr && serveable !== false,
+    enabled: !!identity && hasPr && serveable !== false,
     retry,
     retryDelay: runnerOfflineRetryDelay,
     staleTime: 30_000,
@@ -603,6 +622,7 @@ export async function fetchPullRequestFileContents(
   path: string,
   base: string | undefined,
   selected?: { pr_url: string; previous_path?: string; head_sha?: string; base_sha?: string },
+  workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestFileDiffResponse> {
   // Encode each path segment individually so slashes remain structural.
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
@@ -613,8 +633,7 @@ export async function fetchPullRequestFileContents(
   }
   const params = query.size ? `?${query}` : "";
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}` +
-      `/resources/github/diff/${encodedPath}${params}`,
+    `${resourceBase(workspace, conversationId)}/github/diff/${encodedPath}${params}`,
   );
   if (res.status === 503 && (await isRunnerUnavailable503(res))) {
     throw new RunnerOfflineError();
@@ -636,9 +655,10 @@ export interface PullRequestDiffResponse {
 async function fetchPullRequestDiff(
   conversationId: string,
   prUrl?: string,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestDiffResponse> {
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(conversationId)}/resources/github/diff${prQuery(prUrl)}`,
+    `${resourceBase(workspace, conversationId)}/github/diff${prQuery(prUrl)}`,
   );
   if (res.status === 503 && (await isRunnerUnavailable503(res))) {
     throw new RunnerOfflineError();
@@ -659,12 +679,14 @@ export function usePullRequestDiff(
   prUrl?: string,
   revision?: string,
 ) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const serveable = useWorkspaceServeable(conversationId);
   const retry = useRunnerOfflineRetry(serveable !== false);
   return useQuery({
-    queryKey: ["github-pr-diff", conversationId, ...(prUrl ? [prUrl, revision] : [])],
-    queryFn: () => fetchPullRequestDiff(conversationId!, prUrl),
-    enabled: !!conversationId && hasPr && serveable !== false,
+    queryKey: ["github-pr-diff", identity, ...(prUrl ? [prUrl, revision] : [])],
+    queryFn: () => fetchPullRequestDiff(conversationId!, prUrl, workspace),
+    enabled: !!identity && hasPr && serveable !== false,
     retry,
     retryDelay: runnerOfflineRetryDelay,
     staleTime: 30_000,
@@ -672,11 +694,13 @@ export function usePullRequestDiff(
 }
 
 export function useUpdateSessionPr(conversationId: string) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: { url: string; action: "attach" | "remove" }) => {
       const response = await authenticatedFetch(
-        `/v1/sessions/${encodeURIComponent(conversationId)}/resources/github/prs`,
+        `${resourceBase(workspace, conversationId)}/github/prs`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -687,17 +711,17 @@ export function useUpdateSessionPr(conversationId: string) {
       return normalizePullRequestInfo((await response.json()) as PullRequestInfo);
     },
     onSuccess: async (info, body) => {
-      await queryClient.cancelQueries({ queryKey: ["github-info", conversationId] });
-      queryClient.setQueryData(["github-info", conversationId], info);
+      await queryClient.cancelQueries({ queryKey: ["github-info", identity] });
+      queryClient.setQueryData(["github-info", identity], info);
       if (info.selected_pr_url) {
-        queryClient.setQueryData(["github-info", conversationId, info.selected_pr_url], info);
+        queryClient.setQueryData(["github-info", identity, info.selected_pr_url], info);
       }
       if (body.action === "remove") {
         // Keep the observer's key populated until the panel switches selection.
-        queryClient.setQueryData(["github-info", conversationId, body.url], info);
+        queryClient.setQueryData(["github-info", identity, body.url], info);
       }
       queryClient.invalidateQueries({
-        queryKey: ["github-info", conversationId],
+        queryKey: ["github-info", identity],
         predicate: (query) => body.action !== "remove" || query.queryKey[2] !== body.url,
       });
     },
@@ -725,8 +749,9 @@ async function fetchPullRequestEditResource<T>(
     | "merge"
     | "disable-auto-merge",
   request: { prUrl: string } | { body: unknown } | { form: FormData },
+  workspace?: WorkspaceResourceTarget,
 ): Promise<T> {
-  const path = `/v1/sessions/${encodeURIComponent(conversationId)}/resources/github/${resource}`;
+  const path = `${resourceBase(workspace, conversationId)}/github/${resource}`;
   const response =
     "prUrl" in request
       ? await authenticatedFetch(`${path}${prQuery(request.prUrl)}`)
@@ -749,10 +774,17 @@ async function fetchPullRequestEditResource<T>(
 
 /** The labels the selected PR's repository offers, for the label picker. */
 export function usePullRequestRepoLabels(conversationId: string, prUrl: string, enabled: boolean) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   return useQuery({
-    queryKey: ["github-labels", conversationId, prUrl],
+    queryKey: ["github-labels", identity, prUrl],
     queryFn: () =>
-      fetchPullRequestEditResource<PullRequestRepoLabels>(conversationId, "labels", { prUrl }),
+      fetchPullRequestEditResource<PullRequestRepoLabels>(
+        conversationId,
+        "labels",
+        { prUrl },
+        workspace,
+      ),
     enabled,
     retry: false,
     // A repository's label set rarely changes while the picker is in use.
@@ -789,20 +821,27 @@ export function applyPullRequestLabelChange(
  * labels into the info cache, and a failure refetches it.
  */
 export function useUpdatePullRequestLabels(conversationId: string) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
-  const infoKey = ["github-info", conversationId];
+  const infoKey = ["github-info", identity];
   return useMutation({
-    mutationKey: pullRequestLabelsMutationKey(conversationId),
+    mutationKey: pullRequestLabelsMutationKey(identity!),
     // One edit at a time, in click order, so GitHub and the cache end in the last state shown.
-    scope: { id: `github-labels-${conversationId}` },
+    scope: { id: `github-labels-${identity}` },
     mutationFn: (change: PullRequestLabelChange) =>
-      fetchPullRequestEditResource<{ labels: PullRequestLabel[] }>(conversationId, "labels", {
-        body: {
-          pr_url: change.prUrl,
-          add: change.add.map((label) => label.name),
-          remove: change.remove.map((label) => label.name),
+      fetchPullRequestEditResource<{ labels: PullRequestLabel[] }>(
+        conversationId,
+        "labels",
+        {
+          body: {
+            pr_url: change.prUrl,
+            add: change.add.map((label) => label.name),
+            remove: change.remove.map((label) => label.name),
+          },
         },
-      }),
+        workspace,
+      ),
     onSuccess: async ({ labels }, change) => {
       // A poll that started before the edit landed would bring the old labels back.
       await queryClient.cancelQueries({ queryKey: infoKey });
@@ -830,12 +869,19 @@ export function usePullRequestMergeOptions(
   prUrl: string,
   enabled: boolean,
 ) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   return useQuery({
-    queryKey: ["github-merge-options", conversationId, prUrl],
+    queryKey: ["github-merge-options", identity, prUrl],
     queryFn: () =>
-      fetchPullRequestEditResource<PullRequestMergeOptions>(conversationId, "merge-options", {
-        prUrl,
-      }),
+      fetchPullRequestEditResource<PullRequestMergeOptions>(
+        conversationId,
+        "merge-options",
+        {
+          prUrl,
+        },
+        workspace,
+      ),
     enabled,
     retry: false,
     // A repository's merge settings rarely change while the panel is open.
@@ -860,32 +906,46 @@ export interface PullRequestMergeRequest {
  * undone, so nothing shows it as merged until the refetched info says so.
  */
 export function useMergePullRequest(conversationId: string) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
-    mutationKey: ["github-merge", conversationId],
-    scope: { id: `github-merge-${conversationId}` },
+    mutationKey: ["github-merge", identity],
+    scope: { id: `github-merge-${identity}` },
     mutationFn: (request: PullRequestMergeRequest) =>
-      fetchPullRequestEditResource<PullRequestMergeResult>(conversationId, "merge", {
-        body: {
-          pr_url: request.prUrl,
-          merge_method: request.mergeMethod,
-          expected_head: request.expectedHead,
+      fetchPullRequestEditResource<PullRequestMergeResult>(
+        conversationId,
+        "merge",
+        {
+          body: {
+            pr_url: request.prUrl,
+            merge_method: request.mergeMethod,
+            expected_head: request.expectedHead,
+          },
         },
-      }),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["github-info", conversationId] }),
+        workspace,
+      ),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["github-info", identity] }),
   });
 }
 
 /** Turn off the selected PR's auto-merge; the refetched info shows the result. */
 export function useDisablePullRequestAutoMerge(conversationId: string) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
-    mutationKey: ["github-disable-auto-merge", conversationId],
+    mutationKey: ["github-disable-auto-merge", identity],
     mutationFn: (prUrl: string) =>
-      fetchPullRequestEditResource<PullRequestMergeResult>(conversationId, "disable-auto-merge", {
-        body: { pr_url: prUrl },
-      }),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["github-info", conversationId] }),
+      fetchPullRequestEditResource<PullRequestMergeResult>(
+        conversationId,
+        "disable-auto-merge",
+        {
+          body: { pr_url: prUrl },
+        },
+        workspace,
+      ),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["github-info", identity] }),
   });
 }
 
@@ -912,12 +972,19 @@ export function usePullRequestReviewCandidates(
   prUrl: string,
   enabled: boolean,
 ) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   return useQuery({
-    queryKey: ["github-reviewers", conversationId, prUrl],
+    queryKey: ["github-reviewers", identity, prUrl],
     queryFn: () =>
-      fetchPullRequestEditResource<PullRequestReviewCandidates>(conversationId, "reviewers", {
-        prUrl,
-      }),
+      fetchPullRequestEditResource<PullRequestReviewCandidates>(
+        conversationId,
+        "reviewers",
+        {
+          prUrl,
+        },
+        workspace,
+      ),
     enabled,
     retry: false,
     // Repository collaborators rarely change while the picker is in use.
@@ -973,11 +1040,13 @@ export function applyPullRequestReviewerChange(
  * refetches it.
  */
 export function useUpdatePullRequestReviewers(conversationId: string) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
-  const infoKey = ["github-info", conversationId];
+  const infoKey = ["github-info", identity];
   return useMutation({
-    mutationKey: pullRequestReviewersMutationKey(conversationId),
-    scope: { id: `github-reviewers-${conversationId}` },
+    mutationKey: pullRequestReviewersMutationKey(identity!),
+    scope: { id: `github-reviewers-${identity}` },
     mutationFn: (change: PullRequestReviewerChange) =>
       fetchPullRequestEditResource<{ reviewers: PullRequestReviewer[] }>(
         conversationId,
@@ -989,6 +1058,7 @@ export function useUpdatePullRequestReviewers(conversationId: string) {
             remove: change.remove.map(({ login, kind }) => ({ login, kind })),
           },
         },
+        workspace,
       ),
     onSuccess: async ({ reviewers }, change) => {
       // A poll that started before the edit landed would bring the old reviewers back.
@@ -1021,15 +1091,22 @@ interface PullRequestDetails {
  * fallback. A success writes GitHub's resulting title and body into the info cache.
  */
 export function useUpdatePullRequestDetails(conversationId: string) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
-  const infoKey = ["github-info", conversationId];
+  const infoKey = ["github-info", identity];
   return useMutation({
-    mutationKey: ["github-details-update", conversationId],
-    scope: { id: `github-details-${conversationId}` },
+    mutationKey: ["github-details-update", identity],
+    scope: { id: `github-details-${identity}` },
     mutationFn: (change: PullRequestDetailsChange) =>
-      fetchPullRequestEditResource<PullRequestDetails>(conversationId, "details", {
-        body: { pr_url: change.prUrl, title: change.title, body: change.body },
-      }),
+      fetchPullRequestEditResource<PullRequestDetails>(
+        conversationId,
+        "details",
+        {
+          body: { pr_url: change.prUrl, title: change.title, body: change.body },
+        },
+        workspace,
+      ),
     onSuccess: async ({ title, body }, change) => {
       // A poll that started before the edit landed would bring the old text back.
       await queryClient.cancelQueries({ queryKey: infoKey });
@@ -1057,13 +1134,19 @@ export function uploadPullRequestAttachment(
   conversationId: string,
   prUrl: string,
   file: File,
+  workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestAttachment> {
   const form = new FormData();
   form.append("pr_url", prUrl);
   form.append("file", file, file.name || "attachment");
-  return fetchPullRequestEditResource<PullRequestAttachment>(conversationId, "attachments", {
-    form,
-  });
+  return fetchPullRequestEditResource<PullRequestAttachment>(
+    conversationId,
+    "attachments",
+    {
+      form,
+    },
+    workspace,
+  );
 }
 
 export const MAX_PULL_REQUEST_COMMENT_CHARACTERS = 65536;
@@ -1101,8 +1184,10 @@ function mergePostedComments(comments: PullRequestComment[], posted: PullRequest
 
 /** A PR-scoped draft survives tab/session switches and settles even after unmount. */
 export function usePullRequestCommentComposer(conversationId: string, prUrl: string) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
-  const key = commentDraftKey(conversationId, prUrl);
+  const key = commentDraftKey(identity!, prUrl);
   const initialDraft: PullRequestCommentDraft = { body: "", pending: false, error: null };
   const { data: draft = initialDraft } = useQuery<PullRequestCommentDraft>({
     queryKey: key,
@@ -1116,17 +1201,22 @@ export function usePullRequestCommentComposer(conversationId: string, prUrl: str
       current ? { ...current, ...update } : current,
     );
   const mutation = useMutation({
-    mutationKey: ["github-comment-create", conversationId, prUrl],
+    mutationKey: ["github-comment-create", identity, prUrl],
     retry: false,
     mutationFn: (body: string) =>
-      fetchPullRequestEditResource<{ comment: PullRequestComment }>(conversationId, "comments", {
-        body: { pr_url: prUrl, body },
-      }),
+      fetchPullRequestEditResource<{ comment: PullRequestComment }>(
+        conversationId,
+        "comments",
+        {
+          body: { pr_url: prUrl, body },
+        },
+        workspace,
+      ),
     onSuccess: async ({ comment }) => {
-      await queryClient.cancelQueries({ queryKey: ["github-info", conversationId] });
+      await queryClient.cancelQueries({ queryKey: ["github-info", identity] });
       updateDraft({ body: "", pending: false, error: null });
       queryClient.setQueriesData<PullRequestInfo>(
-        { queryKey: ["github-info", conversationId] },
+        { queryKey: ["github-info", identity] },
         (info) =>
           info?.pr && info.selected_pr_url === prUrl
             ? {

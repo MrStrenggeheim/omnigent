@@ -273,7 +273,7 @@ describe("click sub-agent in rail (real SubagentsPanel)", () => {
     // any one of these leaves the tab in its prior state.
     const agentsTab = screen
       .getAllByRole("tablist")
-      .map((tablist) => within(tablist).queryByRole("tab", { name: /Agents/i }))
+      .map((tablist) => within(tablist).queryByRole("tab", { name: /Activity/i }))
       .find((tab): tab is HTMLElement => tab !== null);
     if (!agentsTab) throw new Error("Agents tab was not rendered");
     fireEvent.pointerDown(agentsTab, { button: 0 });
@@ -357,13 +357,16 @@ describe("click sub-agent in rail (real SubagentsPanel)", () => {
           </SidebarDataProvider>
         </QueryClientProvider>,
       );
-      expect(screen.getByRole("tab", { name: /Agents/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /Activity/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
       const mainRow = screen.getByTestId("subagent-main-row");
       expect(mainRow).toHaveAttribute("href", "/c/conv_root");
 
       fireEvent.click(mainRow);
 
-      const expectedTab = rememberedTab ? /Files/i : /Agents/i;
+      const expectedTab = rememberedTab ? /Files/i : /Activity/i;
       expect(screen.getByRole("tab", { name: expectedTab })).toHaveAttribute(
         "aria-selected",
         "true",
@@ -494,7 +497,7 @@ describe("click sub-agent in rail (real SubagentsPanel)", () => {
 
     // The tab is present with the main-agent-only count; Files stays
     // the default selection.
-    const agentsTab = screen.getByRole("tab", { name: /Agents\s*1/i });
+    const agentsTab = screen.getByRole("tab", { name: /Activity\s*1/i });
     expect(agentsTab).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("tab", { name: /Files/i })).toHaveAttribute("aria-selected", "true");
   });

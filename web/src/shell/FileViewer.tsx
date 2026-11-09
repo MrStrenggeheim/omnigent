@@ -85,6 +85,7 @@ import { downloadWorkspaceFile, useFileContent } from "@/hooks/useFileContent";
 import { isVideoFile } from "@/lib/video";
 import { useAgentFileDiff, useGitFileDiff } from "@/hooks/useFileDiff";
 import { CodeBlock } from "@/components/ai-elements/code-block";
+import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
 import { DiffComparisonControls } from "./DiffComparisonControls";
 import {
   type Comment,
@@ -100,7 +101,11 @@ import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useIOSNativeKeyboardInset } from "@/hooks/useIOSNativeKeyboardInset";
 import { useWorkspaceGitChanges } from "@/hooks/useWorkspaceChangedFiles";
 import { useWorkspaceComparisonChanges } from "@/hooks/useWorkspaceComparisons";
-import { useWorkspaceComparison } from "@/lib/workspaceComparison";
+import {
+  useWorkspaceComparison,
+  getFileComparisonScope,
+  type WorkspaceComparisonView,
+} from "@/lib/workspaceComparison";
 import { getExplorerGitScope, subscribeExplorerGitScopes } from "@/lib/explorerGitScope";
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
@@ -328,6 +333,11 @@ function useToolbarOverflow(actionsKey: string): {
 
 interface FileViewerProps {
   syncUrl?: boolean;
+  workspaceId?: string;
+  /** Whether Chat Activity can receive comments and supply captures for this workspace. */
+  recipientValid?: boolean;
+  /** Persist the opening panel with the file tab, independently of the current rail tab. */
+  comparisonScope?: WorkspaceComparisonView;
   agentId?: string | null;
   position?: FilePosition;
   open: boolean;
@@ -378,19 +388,28 @@ export function FileViewer(props: FileViewerProps) {
   // boundAgentId is populated from the active session's agent binding —
   // works for both template agents and session-scoped agents from
   // `omnigent run --server`.
-  const agentId = useChatStore((s) => s.boundAgentId);
+  const boundAgentId = useChatStore((s) => s.boundAgentId);
+  const workspace = useWorkbenchWorkspace();
+  const recipientValid =
+    props.recipientValid ?? (!workspace || workspace.chatSessionId === props.conversationId);
+  const agentId = !recipientValid
+    ? null
+    : props.agentId === undefined
+      ? boundAgentId
+      : props.agentId;
   return (
-    <CommentSenderProvider
-      sessionId={props.conversationId}
-      agentId={props.agentId === undefined ? agentId : props.agentId}
-    >
-      <FileViewerBody {...props} />
+    <CommentSenderProvider sessionId={props.conversationId} agentId={agentId}>
+      <FileViewerBody {...props} agentId={agentId} recipientValid={recipientValid} />
     </CommentSenderProvider>
   );
 }
 
 function FileViewerBody({
   syncUrl = true,
+  workspaceId: explicitWorkspaceId,
+  recipientValid = true,
+  agentId,
+  comparisonScope: originView,
   position,
   open,
   mediaActive = true,
@@ -409,6 +428,11 @@ function FileViewerBody({
   // null = single-user mode (no enforcement); undefined = prop not provided (treat as unrestricted).
   // LEVEL_EDIT = 2; levels below 2 are read-only.
   const canEdit = permissionLevel == null || permissionLevel >= 2;
+  const workspace = useWorkbenchWorkspace();
+  const workspaceId = explicitWorkspaceId ?? workspace?.id;
+  const resourceIdentity = queryIdentity(workspaceId, conversationId)!;
+  const comparisonView =
+    originView ?? getFileComparisonScope({ workspaceId, conversationId }, path);
   const [searchParams, setSearchParams] = useSearchParams();
   const rebasePath = useRebasePath();
   const isMobile = useIsMobileViewport();
@@ -417,7 +441,7 @@ function FileViewerBody({
   // Capture URL params once on open — we don't want re-renders caused by our own
   // param writes to re-run the initialization logic.
   const initialDiffRef = useRef(syncUrl && searchParams.get("diff") === "1");
-  const linkedFileRef = useRef(initialDiffRef.current ? { conversationId, path } : null);
+  const linkedFileRef = useRef(initialDiffRef.current ? { resourceIdentity, path } : null);
   const initialCommentIdRef = useRef(syncUrl ? searchParams.get("comment") : null);
   // Seeded from the parent's persisted state on remount (e.g. returning to a
   // tab); defaults closed on a fresh open. The linked-comment / fresh-open
@@ -444,16 +468,24 @@ function FileViewerBody({
   const keyboardInset = useIOSNativeKeyboardInset((!frameless || mobileOverlay) && open);
   // Video playback reads the complete binary on demand, never the capped JSON preview.
   const fileQuery = useFileContent(conversationId, isVideoFile(path) ? null : path);
-  const { comparison: diffComparison, setComparison: setDiffComparison } =
-    useWorkspaceComparison(conversationId);
+  const { comparison: diffComparison, setComparison: setDiffComparison } = useWorkspaceComparison({
+    workspaceId,
+    conversationId: recipientValid ? (workspace?.chatSessionId ?? conversationId) : undefined,
+    view: comparisonView,
+  });
   const comparisonScope = useSyncExternalStore(
     subscribeExplorerGitScopes,
-    () => getExplorerGitScope(conversationId),
+    () => getExplorerGitScope({ workspaceId, conversationId }),
     () => getExplorerGitScope(undefined),
   );
   const agentComparison =
     diffComparison.source === "agent" || diffComparison.source === "last-turn";
-  const changedFiles = useWorkspaceComparisonChanges(conversationId, comparisonScope);
+  const changedFiles = useWorkspaceComparisonChanges(conversationId, {
+    ...comparisonScope,
+    ...(workspaceId !== undefined ? { workspaceId } : {}),
+    ...(comparisonView !== undefined ? { view: comparisonView } : {}),
+    ...(recipientValid ? {} : { agentEnabled: false }),
+  });
   const gitChanges = useWorkspaceGitChanges(conversationId, {
     path:
       path?.startsWith("/") &&
@@ -477,7 +509,7 @@ function FileViewerBody({
     currentNavIdx >= 0 && currentNavIdx < navigableFiles.length - 1
       ? navigableFiles[currentNavIdx + 1]
       : null;
-  const commentsQuery = useComments(conversationId, path);
+  const commentsQuery = useComments(recipientValid ? conversationId : undefined, path);
   const addComment = useAddComment(conversationId);
   const updateComment = useUpdateComment(conversationId);
   const deleteComment = useDeleteComment(conversationId);
@@ -556,9 +588,9 @@ function FileViewerBody({
   // refreshes, so a comment arriving while the panel is open is
   // marked seen too.
   useEffect(() => {
-    if (!open || !commentsOpen || commentsQuery.data === undefined) return;
+    if (!recipientValid || !open || !commentsOpen || commentsQuery.data === undefined) return;
     markCommentsSeen(commentsQuery.data.map((c) => c.id));
-  }, [open, commentsOpen, commentsQuery.data]);
+  }, [recipientValid, open, commentsOpen, commentsQuery.data]);
   // Notify parent when comments panel opens or closes (e.g. so the parent
   // can widen the inline panel to fit both the code viewer and comments).
   useEffect(() => {
@@ -590,8 +622,10 @@ function FileViewerBody({
   );
 
   const downloadFile = useCallback(() => {
-    downloadWorkspaceFile(conversationId, path).catch(() => toast.error("Download failed"));
-  }, [conversationId, path]);
+    downloadWorkspaceFile(conversationId, path, workspaceId).catch(() =>
+      toast.error("Download failed"),
+    );
+  }, [conversationId, path, workspaceId]);
 
   // Pop the HTML artifact into its own browser tab. The artifact is rendered in
   // a sandboxed, opaque-origin iframe (see `openHtmlArtifactInNewTab`), so it
@@ -615,6 +649,8 @@ function FileViewerBody({
       url.search = "";
       url.searchParams.set("file", path);
     }
+    url.searchParams.set("file", path);
+    if (workspaceId) url.searchParams.set("workspace", workspaceId);
     if (!activeSelection) url.searchParams.delete("comment");
     navigator.clipboard.writeText(url.toString()).then(
       () => {
@@ -624,7 +660,7 @@ function FileViewerBody({
       },
       (err) => console.warn("Failed to copy file link", err),
     );
-  }, [activeSelection, syncUrl, rebasePath, conversationId, path]);
+  }, [activeSelection, syncUrl, rebasePath, conversationId, path, workspaceId]);
 
   const copyCommentLink = useCallback(
     (commentId: string) => {
@@ -643,9 +679,13 @@ function FileViewerBody({
     [syncUrl, rebasePath, conversationId, path],
   );
 
-  const sender = useOptionalCommentSender();
+  const commentSender = useOptionalCommentSender();
+  const sender = recipientValid && agentId ? commentSender : null;
 
-  const allComments = useMemo(() => commentsQuery.data ?? [], [commentsQuery.data]);
+  const allComments = useMemo(
+    () => (recipientValid ? (commentsQuery.data ?? []) : []),
+    [commentsQuery.data, recipientValid],
+  );
   const fileContent = useMemo(() => fileQuery.data?.content ?? "", [fileQuery.data]);
   const [remapFormatted, setRemapFormatted] = useState<
     ((comment: Comment, content: string) => Comment) | null
@@ -778,22 +818,22 @@ function FileViewerBody({
   // notebooks to their rendered preview, and everything else to source.
   const lang = detectLang(path);
   const [markdownRouting, setMarkdownRouting] = useState<{
-    conversationId: string;
+    resourceIdentity: string;
     path: string;
     source: boolean | undefined;
-  }>({ conversationId, path, source: undefined });
+  }>({ resourceIdentity, path, source: undefined });
   // Choose once per file visit so an autosave crossing the limit cannot
   // replace the editor while it contains newer unsaved edits.
   let markdownSourceFallback = markdownRouting.source;
   if (
-    markdownRouting.conversationId !== conversationId ||
+    markdownRouting.resourceIdentity !== resourceIdentity ||
     markdownRouting.path !== path ||
     (markdownRouting.source === undefined && fileQuery.data !== undefined)
   ) {
     markdownSourceFallback = fileQuery.data
       ? isMarkdownTooLargeForRichView(lang, fileContent)
       : undefined;
-    setMarkdownRouting({ conversationId, path, source: markdownSourceFallback });
+    setMarkdownRouting({ resourceIdentity, path, source: markdownSourceFallback });
   }
   const isPreviewable =
     (lang === "markdown" && !markdownSourceFallback) || lang === "html" || isNotebookPath(path);
@@ -843,20 +883,28 @@ function FileViewerBody({
   // A saved preference also applies to unchanged files; only explicit links skip discovery.
   const linkedDiff =
     requestedDiff &&
-    linkedFileRef.current?.conversationId === conversationId &&
+    linkedFileRef.current?.resourceIdentity === resourceIdentity &&
     linkedFileRef.current?.path === path;
-  const sessionDiffQuery = useAgentFileDiff(conversationId, isVideo ? null : path, {
-    enabled: requestedDiff && agentComparison,
-    lastTurn: diffComparison.source === "last-turn",
-    turnId: diffComparison.turnId,
-  });
+  const sessionDiffQuery = useAgentFileDiff(
+    diffComparison.sourceChatId ?? conversationId,
+    isVideo ? null : path,
+    {
+      enabled: requestedDiff && agentComparison && recipientValid,
+      lastTurn: diffComparison.source === "last-turn",
+      turnId: diffComparison.turnId,
+    },
+  );
   const gitDiffQuery = useGitFileDiff(conversationId, isVideo ? null : path, {
     enabled: requestedDiff && !agentComparison,
     base: diffComparison.base,
     target: diffComparison.target,
     scope: diffComparison.source === "git" ? undefined : comparisonScope.path,
   });
-  const diffQuery = agentComparison ? sessionDiffQuery : gitDiffQuery;
+  const diffQuery = agentComparison
+    ? recipientValid
+      ? sessionDiffQuery
+      : { data: undefined, isLoading: false, isError: false, error: null }
+    : gitDiffQuery;
   const prepareDiff =
     requestedDiff &&
     (isDiffAvailable || (linkedDiff && changedFiles.data === undefined && !changedFiles.isError));
@@ -934,10 +982,10 @@ function FileViewerBody({
     : "source";
   // Local state triggers rendering; the WeakSet preserves dismissal across remounts.
   const [dismissedPosition, setDismissedPosition] = useState<FilePosition>();
-  const [appliedNavigation, setAppliedNavigation] = useState({ conversationId, path, position });
+  const [appliedNavigation, setAppliedNavigation] = useState({ resourceIdentity, path, position });
   const lastNavigationRef = useRef(appliedNavigation);
   const appliedPosition =
-    appliedNavigation.conversationId === conversationId && appliedNavigation.path === path
+    appliedNavigation.resourceIdentity === resourceIdentity && appliedNavigation.path === path
       ? appliedNavigation.position
       : undefined;
   const filePosition =
@@ -950,7 +998,7 @@ function FileViewerBody({
   const diffViewActive = viewMode === "diff";
   const currentFileComparison =
     diffComparison.source === "git" || diffComparison.source === "since";
-  const commentsSupported = !diffViewActive || currentFileComparison;
+  const commentsSupported = recipientValid && (!diffViewActive || currentFileComparison);
   useEffect(() => {
     if (!commentsSupported) setCommentsOpen(false);
   }, [commentsSupported]);
@@ -959,19 +1007,27 @@ function FileViewerBody({
   useLayoutEffect(() => {
     if (!open || !registerNavigationGuard) return;
     return registerNavigationGuard((destination, options, navigate) => {
-      if (destination !== path || (options?.line && viewMode === "editor")) {
+      if (
+        (options?.workspaceId !== undefined && options.workspaceId !== workspaceId) ||
+        destination !== path ||
+        (options?.line && viewMode === "editor")
+      ) {
         guardDirty(navigate);
       } else {
         navigate();
       }
     });
-  }, [open, path, viewMode, guardDirty, registerNavigationGuard]);
+  }, [open, path, workspaceId, viewMode, guardDirty, registerNavigationGuard]);
 
   useEffect(() => {
     const last = lastNavigationRef.current;
-    if (last.position === position && last.path === path && last.conversationId === conversationId)
+    if (
+      last.position === position &&
+      last.path === path &&
+      last.resourceIdentity === resourceIdentity
+    )
       return;
-    const next = { conversationId, path, position };
+    const next = { resourceIdentity, path, position };
     lastNavigationRef.current = next;
     const apply = () => setAppliedNavigation(next);
     // Switching out of the rich-text editor must preserve its unsaved-edit guard.
@@ -979,13 +1035,13 @@ function FileViewerBody({
       position &&
       viewMode === "editor" &&
       last.path === path &&
-      last.conversationId === conversationId
+      last.resourceIdentity === resourceIdentity
     ) {
       guardDirty(apply, () => dismissFilePosition(position));
     } else {
       apply();
     }
-  }, [position, path, conversationId, viewMode, guardDirty]);
+  }, [position, path, resourceIdentity, viewMode, guardDirty]);
 
   useEffect(() => {
     const el = contentAreaRef.current;
@@ -1079,7 +1135,7 @@ function FileViewerBody({
   // at an unrelated place after a toggle; the namespace is separate from the
   // `viewer:` keys Monaco writes for its own internal scroller.
   const contentScrollKey =
-    conversationId && path ? `viewer-content:${conversationId}:${viewMode}:${path}` : null;
+    conversationId && path ? `viewer-content:${resourceIdentity}:${viewMode}:${path}` : null;
   const handleContentScroll = useScrollRestore(
     contentAreaRef,
     contentScrollKey,
@@ -1779,7 +1835,7 @@ function FileViewerBody({
           onChange={setDiffComparison}
           repositoryRoot={changedFiles.data?.root_is_repository === true}
           turns={changedFiles.data?.turns}
-          sessionId={conversationId}
+          sessionId={recipientValid ? conversationId : undefined}
           scopePath={comparisonScope.path}
         />
       )}
@@ -1815,7 +1871,11 @@ function FileViewerBody({
             // git_status_failed 500) surfaces the server's reason instead of
             // hanging on "Loading diff…" forever — diffQuery.data stays
             // undefined on error, which would otherwise read as still-loading.
-            diffQuery.isError ? (
+            agentComparison && !recipientValid ? (
+              <p role="status" className="p-8 text-sm text-muted-foreground">
+                Select a chat in this workspace to view captured changes.
+              </p>
+            ) : diffQuery.isError ? (
               <div className="flex items-center justify-center p-8 text-destructive text-ui">
                 Failed to load:{" "}
                 {diffQuery.error instanceof Error

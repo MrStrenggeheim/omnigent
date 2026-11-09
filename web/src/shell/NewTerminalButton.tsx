@@ -1,3 +1,4 @@
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 // "+ New shell" affordance shared by the shell surfaces
 // (InlineTerminalsSection, TerminalsPanel, and MainTerminalView's
 // strip on native-wrapper sessions).
@@ -20,6 +21,7 @@
 //   - SDK agent with several names → distinct-purpose terminals with no
 //     "default", so a plain dropdown to pick which one to launch.
 
+import { useRef } from "react";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import {
   DropdownMenu,
@@ -63,13 +65,22 @@ export function NewTerminalButton({
   // terminals with no default. Only the native case gets the split-button
   // shell picker — see the file header.
   const isNativeWrapper = useTerminalFirst()?.isNativeWrapper ?? false;
-  const declared = agent?.terminals ?? [];
+  const workspace = useWorkbenchWorkspace();
+  const currentWorkspaceRef = useRef(workspace?.id);
+  currentWorkspaceRef.current = workspace?.id;
+  const declared = workspace
+    ? workspace.capabilities.includes("terminals")
+      ? ["shell"]
+      : []
+    : (agent?.terminals ?? []);
   // The iff gate, UI side: no declared terminals → no affordance.
   if (declared.length === 0) return null;
 
   const launch = (name: string) => {
     create.mutate(name, {
-      onSuccess: (info) => onCreated?.(terminalTabKey(info)),
+      onSuccess: (info) => {
+        if (info.workspaceId === currentWorkspaceRef.current) onCreated?.(terminalTabKey(info));
+      },
     });
   };
 

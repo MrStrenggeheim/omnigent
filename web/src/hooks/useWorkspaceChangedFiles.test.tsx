@@ -1,3 +1,8 @@
+import {
+  WorkbenchWorkspaceProvider,
+  queryIdentity,
+  type WorkbenchWorkspace,
+} from "@/lib/workbenchWorkspace";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -618,25 +623,31 @@ describe("useWorkspaceEnvironment gating", () => {
     );
   });
 
-  it("marks the environment unavailable when the server omits metadata.root", async () => {
-    onlineMock.mockReturnValue(true);
-    fetchMock.mockResolvedValue(jsonResponse({ metadata: {} }));
-    const results: WorkspaceEnvironment[] = [];
+  it.each([
+    { metadata: {}, root: null },
+    { metadata: { root: "/workspace", available: false }, root: "/workspace" },
+  ])(
+    "retains root identity while respecting unavailable environment metadata: %j",
+    async ({ metadata, root }) => {
+      onlineMock.mockReturnValue(true);
+      fetchMock.mockResolvedValue(jsonResponse({ metadata }));
+      const results: WorkspaceEnvironment[] = [];
 
-    render(
-      <Wrap>
-        <EnvironmentDataProbe id="conv_live" onData={(data) => results.push(data)} />
-      </Wrap>,
-    );
-    await waitFor(() =>
-      expect(results.at(-1)).toEqual({
-        available: false,
-        root: null,
-        home: null,
-        reachable: null,
-      }),
-    );
-  });
+      render(
+        <Wrap>
+          <EnvironmentDataProbe id="conv_live" onData={(data) => results.push(data)} />
+        </Wrap>,
+      );
+      await waitFor(() =>
+        expect(results.at(-1)).toEqual({
+          available: false,
+          root,
+          home: null,
+          reachable: null,
+        }),
+      );
+    },
+  );
 
   it("surfaces metadata.home alongside root when the server reports it", async () => {
     // home drives "~" expansion for chat path-links; it must round-trip from
@@ -1925,4 +1936,101 @@ it.each([false, true])("gates background workspace activity on grid flag %s", (e
   expect(view.result.current).toBe(false);
   view.unmount();
   conversationRegistry.clear();
+});
+
+describe("selected workspace resource boundary", () => {
+  const workspace: WorkbenchWorkspace = {
+    id: "workspace-a",
+    root: "/selected",
+    host_id: "host-a",
+    target_kind: "host",
+    capabilities: ["files", "git"],
+  };
+  function wrapper(client: QueryClient, selected = workspace) {
+    return ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <WorkbenchWorkspaceProvider value={selected}>{children}</WorkbenchWorkspaceProvider>
+      </QueryClientProvider>
+    );
+  }
+  beforeEach(() => {
+    onlineMock.mockReturnValue(false);
+    hostOnlineMock.mockReturnValue(false);
+    fetchMock.mockImplementation(async (url: string) =>
+      url.endsWith("/default") ? environmentResponse("/selected") : filesystemListResponse(),
+    );
+  });
+  it("serves files without any chat and ignores a different active chat's offline state", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useWorkspaceAllFiles(undefined), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/v1/workbench-workspaces/workspace-a/resources/environments/default",
+      "/v1/workbench-workspaces/workspace-a/resources/environments/default/filesystem?limit=1000&order=asc",
+    ]);
+    expect(
+      client.getQueryData(["workspace-all-files", queryIdentity(workspace), ""]),
+    ).toBeDefined();
+    expect(client.getQueryData(["workspace-all-files", undefined, ""])).toBeUndefined();
+  });
+  it("does not replace workspace discovery with legacy session discovery on 404", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}, 404));
+    const client = new QueryClient();
+    const { result } = renderHook(() => useWorkspaceEnvironment("unrelated-chat"), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.data?.available).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("workbench-workspaces/workspace-a");
+  });
+  it("accepts an explicit workspace for discovery outside a provider", async () => {
+    const client = new QueryClient();
+    const { result } = renderHook(() => useWorkspaceEnvironment(undefined, { workspace }), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(result.current.data?.root).toBe("/selected"));
+    expect(String(fetchMock.mock.calls[0][0])).toContain("workbench-workspaces/workspace-a");
+  });
+  it("keeps recorded agent changes on the actual chat's resource transport", async () => {
+    onlineMock.mockReturnValue(true);
+    fetchMock.mockImplementation(async (url: string) =>
+      url.endsWith("/default")
+        ? environmentResponse()
+        : jsonResponse({ source: "agent", data: [] }),
+    );
+    const client = new QueryClient();
+    const { result } = renderHook(
+      () => useWorkspaceChangedFiles("actual-chat", { source: "agent" }),
+      { wrapper: wrapper(client) },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(
+      fetchMock.mock.calls.every(([url]) => String(url).startsWith("/v1/sessions/actual-chat/")),
+    ).toBe(true);
+    expect(client.getQueryData(["workspace-changed-files", "actual-chat", "agent"])).toBeDefined();
+  });
+  it("does not show the previous workspace's filename search results during a switch", async () => {
+    let selected = workspace;
+    fetchMock.mockResolvedValue(
+      jsonResponse({ data: [{ path: "one.txt", name: "one.txt", type: "file" }] }),
+    );
+    const client = new QueryClient();
+    const { result, rerender } = renderHook(() => useWorkspaceFileSearch("same-chat", "one"), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <WorkbenchWorkspaceProvider value={selected}>{children}</WorkbenchWorkspaceProvider>
+        </QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(result.current.data?.files[0]?.name).toBe("one.txt"));
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    selected = { ...workspace, id: "workspace-b" };
+    rerender();
+    expect(result.current.data).toBeUndefined();
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toContain("workbench-workspaces/workspace-b");
+  });
 });

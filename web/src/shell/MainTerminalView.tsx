@@ -407,6 +407,7 @@ export function MainTerminalView({
                           readOnly={readOnly}
                           active={visible && active && focused}
                           directAttachUrl={terminal.directAttachUrl}
+                          workspaceId={terminal.workspaceId}
                           onResume={runnerOffline && onResume ? handleResume : undefined}
                           resumeTarget={resumeTarget}
                           resumePending={resumePending}

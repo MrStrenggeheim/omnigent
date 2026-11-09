@@ -1,3 +1,5 @@
+import { isEditorLevel } from "@/lib/permissionsApi";
+import { useWorkbenchWorkspace, queryIdentity, resourceBase } from "@/lib/workbenchWorkspace";
 import { type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -97,7 +99,7 @@ async function readResponse(response: Response) {
   return body;
 }
 
-export function ContentSearchPanel({
+function ContentSearchPanelContent({
   conversationId,
   onFileSelect,
   inputRef,
@@ -112,10 +114,13 @@ export function ContentSearchPanel({
   replaceOpen?: boolean;
   replaceFocusNonce?: number;
 }) {
+  const workspace = useWorkbenchWorkspace();
+  const identity = queryIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
-  const canEdit = useCanEdit(conversationId);
+  const sessionCanEdit = useCanEdit(workspace ? "" : conversationId);
+  const canEdit = workspace ? isEditorLevel(workspace.permission_level ?? null) : sessionCanEdit;
   const cachedInput = useQuery<SearchInput>({
-    queryKey: ["content-search-input", conversationId],
+    queryKey: ["content-search-input", identity],
     initialData: defaults(scope),
     queryFn: () => defaults(scope),
     enabled: false,
@@ -135,7 +140,7 @@ export function ContentSearchPanel({
   const [busy, setBusy] = useState(false);
   const [operationError, setOperationError] = useState("");
   const [operationStatus, setOperationStatus] = useState("");
-  const undoKey = ["content-search-undo", conversationId, getCurrentUserId() ?? "local"];
+  const undoKey = ["content-search-undo", identity, getCurrentUserId() ?? "local"];
   const undoState = useQuery<{ id: string; path: string } | null>({
     queryKey: undoKey,
     initialData: null,
@@ -155,8 +160,8 @@ export function ContentSearchPanel({
   const currentInputRef = useRef(currentInput);
   currentInputRef.current = currentInput;
   const searchKey = useMemo(
-    () => ["content-search-result", conversationId, effectiveFolder],
-    [conversationId, effectiveFolder],
+    () => ["content-search-result", identity, effectiveFolder],
+    [identity, effectiveFolder],
   );
   const search = useQuery<ContentSearchResult>({
     queryKey: searchKey,
@@ -182,7 +187,7 @@ export function ContentSearchPanel({
       searchControllers.set(controllerKey, controller);
       const body = await readResponse(
         await authenticatedFetch(
-          `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/default/content-search?${params}`,
+          `${resourceBase(workspace, conversationId)}/environments/default/content-search?${params}`,
           { signal: controller.signal },
         ),
       );
@@ -204,8 +209,8 @@ export function ContentSearchPanel({
   const refetchRef = useRef(submitSearch);
   refetchRef.current = submitSearch;
   useEffect(() => {
-    queryClient.setQueryData(["content-search-input", conversationId], input);
-  }, [conversationId, input, queryClient]);
+    queryClient.setQueryData(["content-search-input", identity], input);
+  }, [identity, input, queryClient]);
   const signature = searchSignature(currentInput);
   const resultsCurrent = Boolean(
     search.data && searchSignature(search.data.snapshot) === signature && !search.isFetching,
@@ -245,7 +250,7 @@ export function ContentSearchPanel({
     async (action: string, snapshot: SearchInput, matches: ContentMatch[], undoId?: string) => {
       return readResponse(
         await authenticatedFetch(
-          `/v1/sessions/${encodeURIComponent(conversationId)}/resources/environments/default/content-replace`,
+          `${resourceBase(workspace, conversationId)}/environments/default/content-replace`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -264,7 +269,7 @@ export function ContentSearchPanel({
         ),
       ) as Promise<ReplacementResult>;
     },
-    [conversationId],
+    [conversationId, workspace],
   );
   async function prepare(matches: ContentMatch[]) {
     if (!search.data || busy || !matches.length || !resultsCurrent) return;
@@ -300,9 +305,9 @@ export function ContentSearchPanel({
       );
       if (result.undo_id) setUndo({ id: result.undo_id, path: preview.input.folder });
       setPreview(null);
-      await queryClient.invalidateQueries({ queryKey: ["file-content", conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["file-content", identity] });
       await queryClient.invalidateQueries({
-        queryKey: ["workspace-changed-files", conversationId],
+        queryKey: ["workspace-changed-files", identity],
       });
       await search.refetch();
     } catch (error) {
@@ -325,9 +330,9 @@ export function ContentSearchPanel({
       setOperationErrors(result.errors ?? []);
       setOperationStatus(`Restored ${result.restored?.length ?? 0} files.`);
       setUndo(result.undo_id ? { id: result.undo_id, path: undo.path } : null);
-      await queryClient.invalidateQueries({ queryKey: ["file-content", conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["file-content", identity] });
       await queryClient.invalidateQueries({
-        queryKey: ["workspace-changed-files", conversationId],
+        queryKey: ["workspace-changed-files", identity],
       });
       await search.refetch();
     } catch (error) {
@@ -736,5 +741,12 @@ export function ContentSearchPanel({
         )}
       </div>
     </section>
+  );
+}
+
+export function ContentSearchPanel(props: Parameters<typeof ContentSearchPanelContent>[0]) {
+  const workspace = useWorkbenchWorkspace();
+  return (
+    <ContentSearchPanelContent key={queryIdentity(workspace, props.conversationId)} {...props} />
   );
 }

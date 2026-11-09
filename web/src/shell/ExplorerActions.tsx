@@ -34,9 +34,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
 import { cn } from "@/lib/utils";
-import { CopyPathButton } from "./CopyPathButton";
-import { FileDownloadButton } from "./FileDownloadButton";
 import { formatBytes } from "./fileStatusUtils";
 import { useFileDropTarget } from "@/hooks/useFileDropTarget";
 import { FileDropOverlay } from "@/components/FileDropOverlay";
@@ -111,6 +110,7 @@ interface ExplorerContextValue {
   entryBase: string;
   writable: boolean;
   selected: Map<string, ExplorerEntry>;
+  selectionMode: boolean;
   focused: string | null;
   registerTree: (controls: TreeControls) => () => void;
   openMenu: (entry: ExplorerEntry, x: number, y: number) => void;
@@ -190,11 +190,17 @@ export function useExplorerRow(path: string, directory: boolean, deleted = false
       if ((event.target as HTMLElement).closest("[data-explorer-action]")) return;
       const button = (event.target as HTMLElement).closest("button");
       if (button && button !== event.currentTarget.querySelector("button")) return;
-      ctx.select(entry, event.metaKey || event.ctrlKey, event.shiftKey);
-      if (event.metaKey || event.ctrlKey || event.shiftKey) {
+      ctx.select(entry, ctx.selectionMode || event.metaKey || event.ctrlKey, event.shiftKey);
+      if (ctx.selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.focus();
+      }
+    },
+    onDoubleClickCapture: (event) => {
+      if (ctx.selectionMode) {
+        event.preventDefault();
+        event.stopPropagation();
       }
     },
     onContextMenu: (event) => {
@@ -278,9 +284,12 @@ export function ExplorerActionsProvider({
   onRefresh: () => Promise<void>;
   onRevealFile?: (path: string) => void;
 }) {
+  const workspace = useWorkbenchWorkspace();
+  const resourceIdentity = queryIdentity(workspace, conversationId);
   const queryClient = useContext(QueryClientContext);
   const viewer = useContext(FileViewerContext);
   const [selected, setSelected] = useState(new Map<string, ExplorerEntry>());
+  const [selectionMode, setSelectionMode] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
   const anchor = useRef<string | null>(null);
   const tree = useRef<TreeControls>({ entries: [] });
@@ -300,7 +309,7 @@ export function ExplorerActionsProvider({
   const busy =
     localBusy ||
     transfers.some(
-      (transfer) => transfer.conversationId === conversationId && transferIsActive(transfer),
+      (transfer) => transfer.conversationId === resourceIdentity && transferIsActive(transfer),
     );
   const busyRef = useRef(false);
   const [trash, setTrash] = useState<TrashEntry[] | null>(null);
@@ -331,7 +340,8 @@ export function ExplorerActionsProvider({
     setSelected(new Map());
     setFocused(null);
     anchor.current = null;
-  }, [conversationId, base]);
+    setSelectionMode(false);
+  }, [resourceIdentity, base]);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -341,7 +351,7 @@ export function ExplorerActionsProvider({
   }, []);
 
   const refresh = useCallback(async () => {
-    if (queryClient && conversationId) {
+    if (queryClient && resourceIdentity) {
       await Promise.all(
         [
           "workspace-dir",
@@ -353,17 +363,17 @@ export function ExplorerActionsProvider({
           "file-content",
           "file-diff",
           "content-search-result",
-        ].map((key) => queryClient.invalidateQueries({ queryKey: [key, conversationId] })),
+        ].map((key) => queryClient.invalidateQueries({ queryKey: [key, resourceIdentity] })),
       );
     }
     if (mounted.current) await onRefresh();
-  }, [conversationId, onRefresh, queryClient]);
+  }, [resourceIdentity, onRefresh, queryClient]);
 
   const run = async (action: () => Promise<void>) => {
     if (busyRef.current) return;
     if (
       getExplorerTransfers().some(
-        (transfer) => transfer.conversationId === conversationId && transferIsActive(transfer),
+        (transfer) => transfer.conversationId === resourceIdentity && transferIsActive(transfer),
       )
     ) {
       setError("A file transfer is already running in this session.");
@@ -382,13 +392,16 @@ export function ExplorerActionsProvider({
     }
   };
   const operation = async (body: Record<string, unknown>): Promise<FilesystemOperationResult> => {
-    if (!conversationId) throw new Error("Open a session before managing files.");
-    const result = await filesystemOperation(conversationId, body);
+    if (!conversationId && !workspace) throw new Error("Select a workspace before managing files.");
+    const result = workspace
+      ? await filesystemOperation(conversationId ?? "", body, undefined, workspace)
+      : await filesystemOperation(conversationId!, body);
     if (body.operation !== "archive" && body.operation !== "trash_list") {
       window.dispatchEvent(
         new CustomEvent("omnigent:workspace-files-changed", {
           detail: {
             conversationId,
+            ...(workspace ? { workspaceId: workspace.id } : {}),
             moves: (result.moved ?? []).map((move) => ({
               source: relativizeToWorkspace(move.source, workspaceRoot),
               destination: relativizeToWorkspace(move.destination, workspaceRoot),
@@ -412,7 +425,11 @@ export function ExplorerActionsProvider({
   const search = (path: string) => {
     window.dispatchEvent(
       new CustomEvent("omnigent:open-content-search", {
-        detail: { conversationId, location: path },
+        detail: {
+          conversationId,
+          ...(workspace ? { workspaceId: workspace.id } : {}),
+          location: path,
+        },
       }),
     );
   };
@@ -436,7 +453,7 @@ export function ExplorerActionsProvider({
   };
   const setClipboard = async (entries: ExplorerEntry[], cut: boolean) => {
     clipboard = {
-      conversationId: conversationId ?? "",
+      conversationId: resourceIdentity ?? "",
       hostId,
       cut,
       entries: distinctRoots(entries).map((entry) => ({
@@ -448,7 +465,7 @@ export function ExplorerActionsProvider({
   };
   const paste = async (destination: string, clip = clipboard, overwriteExisting = false) => {
     if (!clip) throw new Error("Copy or cut files in the Explorer first.");
-    if (clip.conversationId !== conversationId && (!hostId || hostId !== clip.hostId))
+    if (clip.conversationId !== resourceIdentity && (!hostId || hostId !== clip.hostId))
       throw new Error("Files can only be pasted on the same host.");
     const entries = clip.entries.map((entry) => {
       const source = workspaceRoot ? relativizeToWorkspace(entry.path, workspaceRoot) : entry.path;
@@ -474,10 +491,11 @@ export function ExplorerActionsProvider({
     if (clip.cut && clip === clipboard) clipboard = null;
   };
   const download = async (entries: ExplorerEntry[]) => {
-    if (conversationId)
+    if (conversationId || workspace)
       startExplorerArchive(
-        conversationId,
+        conversationId ?? "",
         distinctRoots(entries).map((entry) => entry.path),
+        workspace ?? undefined,
       );
   };
   const loadTrash = async () => {
@@ -551,6 +569,7 @@ export function ExplorerActionsProvider({
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!writable || busy || !target.path}
+          variant="destructive"
           onSelect={() => openDialog("trash", entries)}
         >
           Move to trash…
@@ -639,6 +658,15 @@ export function ExplorerActionsProvider({
           {hasSelection ? `Selection · ${entries.length} selected` : "Selection"}
         </DropdownMenuLabel>
         <DropdownMenuItem
+          onSelect={() => {
+            setSelectionMode(!selectionMode);
+            if (selectionMode) setSelected(new Map());
+          }}
+        >
+          <SquareCheckIcon />
+          {selectionMode ? "Done selecting" : "Select files…"}
+        </DropdownMenuItem>
+        <DropdownMenuItem
           disabled={tree.current.entries.length === 0}
           onSelect={() =>
             setSelected(new Map(tree.current.entries.map((entry) => [entry.path, entry])))
@@ -690,6 +718,7 @@ export function ExplorerActionsProvider({
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!writable || busy}
+              variant="destructive"
               onSelect={() => openDialog("trash", entries)}
             >
               <Trash2Icon />
@@ -742,7 +771,7 @@ export function ExplorerActionsProvider({
   };
   const startDrag = (entry: ExplorerEntry, transfer: DataTransfer) => {
     const clip: ExplorerClipboard = {
-      conversationId: conversationId ?? "",
+      conversationId: resourceIdentity ?? "",
       hostId,
       cut: true,
       entries: picked(entry).map((item) => ({
@@ -798,6 +827,7 @@ export function ExplorerActionsProvider({
     entryBase,
     writable,
     selected,
+    selectionMode,
     focused,
     registerTree,
     openMenu,
@@ -870,8 +900,8 @@ export function ExplorerActionsProvider({
   };
 
   const startUpload = async () => {
-    if (!upload || !conversationId) return;
-    startExplorerUpload(conversationId, upload, overwrite, refresh);
+    if (!upload || (!conversationId && !workspace)) return;
+    startExplorerUpload(conversationId ?? "", upload, overwrite, refresh, workspace ?? undefined);
     setUpload(null);
   };
 
@@ -920,6 +950,7 @@ export function ExplorerActionsProvider({
       openDialog("trash", entries);
     } else if (event.key === "Escape") {
       setSelected(new Map());
+      setSelectionMode(false);
     } else if (
       ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
     ) {
@@ -1330,7 +1361,6 @@ export function ExplorerRowActions({
   directory = false,
   deleted = false,
   bytes = null,
-  conversationId,
 }: {
   path: string;
   directory?: boolean;
@@ -1341,72 +1371,40 @@ export function ExplorerRowActions({
   const ctx = useContext(ExplorerContext);
   const revealBase = useContext(RevealBaseContext);
   const entry = { path: joinBrowseLocation(ctx?.entryBase ?? revealBase, path), directory };
-  const sessionId = conversationId ?? ctx?.conversationId;
-  const selecting = !deleted && (ctx?.selected.size ?? 0) > 0;
   return (
     <span
       data-explorer-action
-      className="relative flex h-6 w-[104px] shrink-0 items-center justify-end"
+      className="flex shrink-0 items-center justify-end gap-1"
       onClick={(event) => event.stopPropagation()}
     >
+      {ctx?.selectionMode && !deleted && (
+        <Checkbox
+          aria-label={`Select ${path}`}
+          checked={ctx.selected.has(entry.path)}
+          onCheckedChange={() => ctx.select(entry, true, false)}
+          className="size-5"
+        />
+      )}
       {bytes !== null && !deleted && (
-        <span
-          data-file-size
-          className="text-sm text-muted-foreground group-hover:invisible group-focus-within:invisible"
-        >
+        <span data-file-size className="text-sm text-muted-foreground">
           {formatBytes(bytes)}
         </span>
       )}
-      <span className="absolute inset-0 flex items-center justify-end gap-0.5">
-        {ctx && !deleted && (
-          <span
-            className={cn(
-              "flex size-6 shrink-0 items-center justify-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
-              selecting && "opacity-100 pointer-events-auto",
-            )}
-          >
-            <Checkbox
-              aria-label={`Select ${path}`}
-              className="after:inset-0"
-              checked={ctx.selected.has(entry.path)}
-              onCheckedChange={() => ctx.select(entry, true, false)}
-            />
-          </span>
-        )}
-        <span
-          data-file-actions
-          className="flex items-center gap-0.5 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+      {ctx && !deleted && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground"
+          aria-label={`Actions for ${path}`}
+          onClick={(event) => {
+            const box = event.currentTarget.getBoundingClientRect();
+            ctx.openMenu(entry, box.left, box.bottom);
+          }}
         >
-          {!deleted && sessionId && (!directory || ctx) && (
-            <FileDownloadButton
-              conversationId={sessionId}
-              path={entry.path}
-              revealOnHover={false}
-              onDownload={directory && ctx ? () => ctx.download([entry]) : undefined}
-            />
-          )}
-          <CopyPathButton
-            path={entry.path}
-            label={directory ? "Copy folder path" : "Copy path"}
-            size="icon-xs"
-          />
-          {ctx && !deleted && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground"
-              aria-label={`Actions for ${path}`}
-              onClick={(event) => {
-                const box = event.currentTarget.getBoundingClientRect();
-                ctx.openMenu(entry, box.left, box.bottom);
-              }}
-            >
-              <MoreHorizontalIcon />
-            </Button>
-          )}
-        </span>
-      </span>
+          <MoreHorizontalIcon />
+        </Button>
+      )}
     </span>
   );
 }

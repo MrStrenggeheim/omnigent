@@ -3,6 +3,7 @@
 // → BlockRenderer → ToolCard.
 
 import { createContext, useContext } from "react";
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 
 /**
  * A 1-based citation target. Object identity is the navigation request key:
@@ -15,7 +16,10 @@ export interface FilePosition {
   endLine?: number;
 }
 
-export type OpenFileOptions = Partial<FilePosition>;
+export type OpenFileOptions = Partial<FilePosition> & {
+  workspaceId?: string;
+  comparisonScope?: "files" | "changes";
+};
 
 export type FileNavigationGuard = (
   path: string,
@@ -100,12 +104,18 @@ export function useFileViewerConversationId(): string | undefined {
 }
 
 /**
- * Returns the workspace root and runner home for the focused session, so chat
- * consumers can collapse an absolute / home-relative path the agent mentions
- * onto a workspace-relative one. Both are null outside AppShell or before the
- * environment resolves.
+ * Workspace surfaces use their selected target; chat citations use the focused session.
  */
 export function useWorkspacePaths(): { root: string | null; home: string | null } {
+  const workspace = useWorkbenchWorkspace();
   const ctx = useContext(FileViewerContext);
+  if (workspace) return { root: workspace.root, home: workspace.home ?? null };
   return { root: ctx?.workspaceRoot ?? null, home: ctx?.workspaceHome ?? null };
+}
+
+/** The host owning these paths, used to gate local desktop reveal actions. */
+export function useSessionHostIdentity(): string | null {
+  const workspace = useWorkbenchWorkspace();
+  const ctx = useContext(FileViewerContext);
+  return workspace ? workspace.host_id : (ctx?.sessionHostId ?? null);
 }

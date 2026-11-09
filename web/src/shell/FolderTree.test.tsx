@@ -223,24 +223,13 @@ describe("FolderTree sorting", () => {
 });
 
 describe("FolderTree file size / download alignment", () => {
-  it("overlays the download button on the file size so both share one slot", () => {
-    // The size label and the hover download button must occupy the same
-    // relative container: the size reserves the width and the button overlays
-    // it (absolute inset-0), so the button appears exactly where the size was.
-    renderTree({ files: [file("readme.md", 2048)] });
-
+  it("keeps size visible without a reserved hover-action overlay", () => {
+    renderTree({ files: [file("README.md", 2048)] });
     const size = screen.getByText("2.0 KB");
-    const slot = size.parentElement;
-    expect(slot).toHaveClass("relative");
-    expect(size).toHaveClass("text-sm");
-    // Size hides on hover but keeps its width to avoid a layout shift.
-    expect(size).toHaveClass("group-hover:invisible");
-
-    const download = screen.getByRole("button", { name: /download readme\.md/i });
-    // Button sits in an absolutely-positioned overlay inside the same slot.
-    const overlay = download.closest("span.absolute") as HTMLElement | null;
-    expect(overlay).not.toBeNull();
-    expect(slot).toContainElement(overlay);
+    expect(size).not.toHaveClass("group-hover:invisible");
+    expect(size.closest("[data-explorer-action]")).not.toHaveClass("w-[104px]");
+    expect(screen.queryByRole("button", { name: /download readme/i })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   it("puts a folder's dirty dot and a file's status letter in one shared column", () => {
@@ -304,34 +293,13 @@ describe("FolderTree trailing column", () => {
     expect(screen.getByText("README.md").closest("li")).toHaveClass("list-none");
   });
 
-  it("gives folders and files alike the same fixed-width trailing slot", () => {
-    // The size label is variable width ("985 B" vs "463 KB"). Letting it size
-    // the column dragged the copy button, the download button and the status
-    // marker to a different x on every row (~16px of measured drift). Every
-    // row -- including folders, which show no size at all -- now renders the
-    // same fixed slot, so those controls line up in one column.
+  it("does not reserve a fixed action column for files or folders", () => {
     renderTree({ files: [file("tiny.txt", 985), file("huge.json", 474_000), dir("src")] });
-
-    const copyButtons = screen.getAllByRole("button", { name: /^Copy (path|folder path):/ });
-    expect(copyButtons).toHaveLength(3);
-    for (const button of copyButtons) {
-      expect(button).toHaveAttribute("data-size", "icon-xs");
-      const slot = button.closest("[data-explorer-action]");
-      expect(slot).not.toBeNull();
-      expect(slot).toHaveClass("w-[104px]");
-      expect(slot?.querySelectorAll("[data-file-actions]")).toHaveLength(1);
+    for (const size of ["985 B", "463 KB"]) {
+      expect(screen.getByText(size).closest("[data-explorer-action]")).not.toHaveClass("w-[104px]");
     }
-  });
-
-  it("offers a copy button on directory rows, not just files", () => {
-    // Directories are paths worth copying too. The row used to be a single
-    // <button>, so a copy control could not be nested inside it at all --
-    // hence the wrapper-div restructure.
-    renderTree({ files: [dir("src")] });
-
-    fireEvent.click(screen.getByRole("button", { name: "Copy folder path: src" }));
-
-    expect(copyTextMock).toHaveBeenCalledWith("src");
+    expect(screen.queryByRole("button", { name: /^Copy (path|folder path):/ })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 });
 
@@ -753,8 +721,7 @@ describe("FolderTree nested lazy loading", () => {
     expect(onFileSelect).toHaveBeenCalledWith("cache/ignored.log");
     fireEvent.doubleClick(screen.getByRole("button", { name: "nested/" }));
     expect(onNavigateDir).toHaveBeenCalledWith("cache/nested");
-    fireEvent.click(screen.getByRole("button", { name: "Copy folder path: nested" }));
-    expect(copyTextMock).toHaveBeenCalledWith("cache/nested");
+    expect(screen.queryByRole("button", { name: "Copy folder path: nested" })).toBeNull();
   });
 
   it("shows an error row when a lazy directory's listing fails", async () => {

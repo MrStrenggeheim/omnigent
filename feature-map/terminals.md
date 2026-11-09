@@ -1,11 +1,7 @@
 # Terminals
 
-A session can show a live terminal next to or instead of the chat. There are two
-kinds that look alike but are separate surfaces: the agent terminal, which runs
-the native harness behind the Chat/Terminal switcher, and user shells, which a
-user opens from the workspace rail. Both attach to a terminal on the session's
-host, survive view switches, reconnect after a dropped connection, and must
-reattach when the session moves to another host.
+The agent terminal belongs to its chat, while user shells in an independent workspace belong to that workspace and remain on its execution target when the selected chat changes.
+Both reuse the terminal viewer; [Activity](chat-activity.md) exposes recorded chat usage and ended output, and [independent workspaces](workbench-workspaces.md) defines manual-shell ownership.
 
 ## Sub-features
 
@@ -17,8 +13,7 @@ reattach when the session moves to another host.
   the mouse), by touch on phones, and by keyboard.
 - `reconnect`: after the terminal connection drops, the terminal shows that it
   is reconnecting and then reattaches without user action.
-- `host-switch-reattach`: after "Switch host…", both the terminal strip and the
-  agent terminal attach to the new host's terminal, not the old one.
+- `host-switch-reattach`: moving an agent session changes its agent terminal; a manual workspace shell retains its original workspace target and is never implicitly moved.
 - `direct-attach`: when the runner is on the same machine the terminal connects
   directly, and falls back to the relay when the direct route is unreachable.
 - `tmux-outage`: terminals stay usable through temporary tmux health-check

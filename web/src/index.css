@@ -591,6 +591,7 @@
   min-height: 48px;
   flex-shrink: 0;
   padding-block: 0;
+  overflow-y: clip;
 }
 
 .workspace-panel-motion {

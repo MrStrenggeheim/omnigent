@@ -8,6 +8,8 @@ export interface TerminalInfo {
   session: string;
   /** Whether the underlying tmux session is currently running. */
   running: boolean;
+  /** Independent lifetime and attach target for a workspace-owned manual shell. */
+  workspaceId?: string;
   /**
    * Loopback attach URL advertised by the session's runner, when the
    * server disclosed one (owner-level callers only). Lets a browser on
@@ -247,5 +249,6 @@ export function terminalInfoFromResource(resource: Record<string, unknown>): Ter
     session: typeof sessionKey === "string" ? sessionKey : "",
     running: typeof running === "boolean" ? running : false,
     directAttachUrl: parseDirectAttachUrl(metadata.direct_attach_url),
+    ...(typeof resource.workspace_id === "string" ? { workspaceId: resource.workspace_id } : {}),
   };
 }

@@ -1343,3 +1343,97 @@ async def test_comparison_scope_permissions_precede_runner_or_persisted_reads(
     )
     assert response.status_code == 403, response.text
     assert runner_client.gets == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("user", "status"),
+    [
+        ("viewer@example.com", 200),
+        ("owner@example.com", 200),
+        ("stranger@example.com", 404),
+        (None, 401),
+    ],
+)
+async def test_activity_requires_existing_session_read_access(
+    app: FastAPI,
+    runner_client: _RecordingRunnerClient,
+    monkeypatch: pytest.MonkeyPatch,
+    user: str | None,
+    status: int,
+) -> None:
+    """Reject callers before reading runner history, including inherited child access."""
+    from omnigent.terminals.history import activity_page
+
+    gets: list[str] = []
+
+    async def get_activity(url: str, **kwargs: Any) -> httpx.Response:
+        gets.append(url)
+        return httpx.Response(
+            200, json=activity_page([], available=True), request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(runner_client, "get", get_activity)
+    headers = {"X-Forwarded-Email": user} if user else {}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://server"
+    ) as client:
+        for session_id in ("conv_share", "conv_child"):
+            response = await client.get(f"/v1/sessions/{session_id}/activity", headers=headers)
+            assert response.status_code == status
+    assert len(gets) == (2 if status == 200 else 0)
+
+
+@pytest.mark.asyncio
+async def test_activity_descendants_keep_provenance_and_individual_acl(
+    app: FastAPI,
+    runner_client: _RecordingRunnerClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A root lookup cannot import a denied or unrelated session's activity."""
+    from omnigent.terminals.history import ActivityEntry, activity_page
+
+    def children(self, session_id: str, **kwargs: Any):
+        return [("conv_child", 1), ("secret", 1)] if session_id == "conv_share" else []
+
+    original_get = _StubConversationStore.get_conversation
+
+    def get_conversation(self, session_id: str):
+        if session_id == "secret":
+            return Conversation(
+                id="secret", created_at=0, updated_at=0, root_conversation_id="secret"
+            )
+        return original_get(self, session_id)
+
+    monkeypatch.setattr(
+        _StubConversationStore, "list_child_conversation_ids_page", children, raising=False
+    )
+    monkeypatch.setattr(_StubConversationStore, "get_conversation", get_conversation)
+    calls: list[str] = []
+
+    async def get_activity(url: str, **kwargs: Any) -> httpx.Response:
+        session_id = url.split("/")[-2]
+        calls.append(session_id)
+        entry = ActivityEntry(
+            id=session_id, session_id=session_id, owner_id=session_id, name="bash", state="running"
+        )
+        return httpx.Response(
+            200, json=activity_page([entry], available=True), request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(runner_client, "get", get_activity)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://server"
+    ) as client:
+        headers = {"X-Forwarded-Email": "viewer@example.com"}
+        page = (await client.get("/v1/sessions/conv_share/activity", headers=headers)).json()
+        assert set(calls) == {"conv_share", "conv_child"}
+        rows = {row["session_id"]: row for row in page["data"]}
+        assert rows["conv_child"]["parent_agent_id"] == "conv_child"
+        assert rows["conv_child"]["owner_id"] == "conv_child"
+        calls.clear()
+        single = await client.get(
+            "/v1/sessions/conv_share/activity?include_children=false", headers=headers
+        )
+        assert [row["session_id"] for row in single.json()["data"]] == ["conv_share"]
+        assert calls == ["conv_share"]

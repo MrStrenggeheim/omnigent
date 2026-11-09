@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { WorkbenchWorkspaceProvider } from "@/lib/workbenchWorkspace";
 import { authenticatedFetch } from "@/lib/identity";
 import { DEFAULT_WORKSPACE_COMPARISON, setWorkspaceComparison } from "@/lib/workspaceComparison";
 import { useWorkspaceComparisonChanges } from "./useWorkspaceComparisons";
@@ -111,6 +112,89 @@ describe("workspace comparison lists", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error).toMatchObject({ message: "Choose a valid commit", status: 400 });
     expect(result.current.data).toBeUndefined();
+  });
+
+  it("uses each view's selection and keeps captures on the explicit source chat under a workspace provider", async () => {
+    const workspaceId = "hook-workspace";
+    setWorkspaceComparison(
+      { workspaceId, conversationId: "capture-chat", view: "changes" },
+      {
+        ...DEFAULT_WORKSPACE_COMPARISON,
+        source: "last-turn",
+        turnId: "turn-one",
+      },
+    );
+    fetchMock.mockImplementation(async (input) =>
+      response(
+        String(input).includes("source=agent")
+          ? { source: "agent", data: [{ path: "captured.txt" }] }
+          : { data: [{ path: "git.txt" }] },
+      ),
+    );
+    const QueryWrapper = wrapper();
+    const { result } = renderHook(
+      () => ({
+        files: useWorkspaceComparisonChanges("unrelated-active-chat", { view: "files" }),
+        changes: useWorkspaceComparisonChanges("unrelated-active-chat", { view: "changes" }),
+      }),
+      {
+        wrapper: ({ children }) => (
+          <QueryWrapper>
+            <WorkbenchWorkspaceProvider
+              value={{
+                id: workspaceId,
+                root: "/repo",
+                host_id: "host",
+                target_kind: "host",
+                capabilities: [],
+              }}
+            >
+              {children}
+            </WorkbenchWorkspaceProvider>
+          </QueryWrapper>
+        ),
+      },
+    );
+    await waitFor(() =>
+      expect(result.current.files.isSuccess && result.current.changes.isSuccess).toBe(true),
+    );
+    expect(result.current.files.data?.data[0].path).toBe("git.txt");
+    expect(result.current.changes.data?.data[0].path).toBe("captured.txt");
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(
+      urls.some(
+        (url) =>
+          url.startsWith(`/v1/workbench-workspaces/${workspaceId}/resources/`) &&
+          url.includes("/git?"),
+      ),
+    ).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.startsWith("/v1/sessions/capture-chat/resources/") && url.includes("source=agent"),
+      ),
+    ).toBe(true);
+    expect(urls.some((url) => url.includes("unrelated-active-chat"))).toBe(false);
+  });
+
+  it("disables captured results for a mismatched Chat Activity recipient", () => {
+    setWorkspaceComparison(
+      { workspaceId: "recipient-test", conversationId: "chat", view: "changes" },
+      {
+        ...DEFAULT_WORKSPACE_COMPARISON,
+        source: "agent",
+      },
+    );
+    renderHook(
+      () =>
+        useWorkspaceComparisonChanges("chat", {
+          workspaceId: "recipient-test",
+          view: "changes",
+          agentEnabled: false,
+        }),
+      { wrapper: wrapper() },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not run the query when disabled or missing a real session", () => {

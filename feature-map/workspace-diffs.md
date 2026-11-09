@@ -1,6 +1,6 @@
 # Workspace diffs
 
-Files, Changes and the file viewer share one explicit comparison with one-word labels (Git, Turn, Chat, Since and Revisions), scoped to the selected panel folder, so displayed badges, changed paths and opened diffs use the same versions.
+Files and Changes each remember an independent comparison with one-word labels (Git, Turn, Chat, Since and Revisions), scoped to the selected workspace and panel folder; an opened file remembers its originating panel comparison.
 
 ## Sub-features
 
@@ -10,7 +10,7 @@ Files, Changes and the file viewer share one explicit comparison with one-word l
 - `since`: Since compares a selected commit with current disk, including later commits and uncommitted edits.
 - `revisions`: Revisions compares two commits, or a single commit with its parent; a root commit has an empty parent side.
 - `root-gate`: Since and Revisions stay disabled unless the selected panel folder is itself a Git repository root, including Git-file worktrees; hover, keyboard focus and accessible descriptions explain the requirement.
-- `sync`: changing comparison in a panel or viewer updates the shared selection without mixing Git and agent sources.
+- `sync`: changing comparison in a panel or viewer updates that panel selection without changing the other panel; captured agent comparisons retain their source chat.
 - `live-tree`: Files remains the live filesystem and only decorates existing entries; Changes includes deletions and groups multiple repositories.
 - `coverage`: captured-history limits, missing preimages and interleaved external changes remain explicit; unavailable data never becomes an invented empty file or a Git fallback.
 - `comments`: historical and captured agent snapshots suppress anchors into current-file comments; only current-disk comparisons support those anchors.
