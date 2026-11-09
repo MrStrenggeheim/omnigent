@@ -1,3 +1,5 @@
+import { persistMessageQueue } from "@/lib/queuedMessagePersistence";
+import { getBasePath } from "@/lib/basePath";
 // Module-scope Zustand store for the active chat session.
 //
 // The streaming state lives outside the React tree so it survives
@@ -143,7 +145,11 @@ import {
   resolveSessionHost,
   subscribeIdentity,
 } from "@/lib/identity";
-import { getOmnigentHostConfig, isDatabricksWorkspace } from "@/lib/host";
+import {
+  getOmnigentHostConfig,
+  getOmnigentServerIdentity,
+  isDatabricksWorkspace,
+} from "@/lib/host";
 // Routing-free emit primitive (not "@/lib/analytics", which pulls in useLocation
 // and would form a routing↔store import cycle).
 import { emitInteractionPhase, startTimedInteraction } from "@/lib/analyticsEmit";
@@ -605,13 +611,12 @@ export interface PendingUserMessage {
  * per turn). This is the opposite of {@link PendingUserMessage}, which is
  * already POSTed and renders as an optimistic bubble in the transcript.
  *
- * In-memory only: a hard reload clears the queue, so `files` can be held
- * directly (no serialization concern).
+ * Persisted per authenticated user and server in IndexedDB, including files.
  */
 export interface QueuedMessage {
   /** Captured at enqueue time so background dispatch preserves the control. */
   command?: "compact";
-  /** Client-only id, e.g. `q_1`. */
+  /** Opaque client-only id, distinct across reloads. */
   queueId: string;
   /** Fully-assembled message text (mentions/quotes already applied). */
   text: string;
@@ -1159,7 +1164,7 @@ export interface AppChatState {
   /**
    * Messages submitted while the agent is busy, held client-side (not yet
    * POSTed) and shown in the composer's queue strip. The head is flushed
-   * FIFO — one per turn — when the session goes idle. In-memory only.
+   * FIFO — one per turn — when the session goes idle. Stored locally across reloads.
    *
    * One flat array across ALL conversations (each entry carries its
    * `conversationId`), so it is app-global rather than per-conversation:
@@ -1445,7 +1450,7 @@ export function releaseConversation(id: string): void {
 // Catalogs that resolved while their bind snapshot was still hydrating.
 const racedNativeModelOptions = new Map<string, NativeModelOption[]>();
 let pendingSeq = 0;
-let queueSeq = 0;
+let stopQueuedMessagePersistence: (() => void) | null = null;
 // When a send last latched local `status` to "streaming". Stamped on the way in
 // and never cleared on the way out: after a normal turn `status` settles to
 // "idle" on its own, so a leftover value is inert — only a `status` still
@@ -1920,6 +1925,31 @@ export function bindConversationForTest(
  * conversation is created.
  */
 export function initChatStore(client: QueryClient): void {
+  stopQueuedMessagePersistence?.();
+  stopQueuedMessagePersistence = null;
+  if (typeof indexedDB !== "undefined") {
+    const persistence = persistMessageQueue({
+      store: useChatStore,
+      scope: () => {
+        const user = getCurrentUserId();
+        const server = getOmnigentServerIdentity();
+        return user && server ? JSON.stringify([server, getBasePath(), user]) : null;
+      },
+      reportError: () =>
+        toast.error(
+          "Queued messages could not be saved on this client. Keep it open until they are sent.",
+        ),
+      restored: () => {
+        useChatStore.getState().maybeFlushQueuedHead();
+        useChatStore.getState().flushBackgroundQueues();
+      },
+    });
+    const unsubscribeIdentity = subscribeIdentity(persistence.refreshScope);
+    stopQueuedMessagePersistence = () => {
+      unsubscribeIdentity();
+      persistence.dispose();
+    };
+  }
   for (const timer of workspaceInvalidationTimers.values()) {
     clearTimeout(timer);
   }
@@ -2167,8 +2197,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       });
       return;
     }
-    queueSeq += 1;
-    const queueId = `q_${queueSeq}`;
+    const queueId = `q_${randomUUID()}`;
     const stableId = randomUUID().replace(/-/g, "");
     target.write((s) => ({
       // Queueing consumes the composer like a send does: a restored failed
@@ -2616,14 +2645,13 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
         opts.onError("This session is still starting. Try again once it has started.");
       } else if (target !== null) {
         // Queue it behind the held message, in the session it was meant for.
-        queueSeq += 1;
         const queuedFor = target === get().conversationId ? get() : setterForState(target);
         const queuedAgentId = queuedFor?.boundAgentId ?? agentId;
         setActive((s) => ({
           queuedMessages: [
             ...s.queuedMessages,
             {
-              queueId: `q_${queueSeq}`,
+              queueId: `q_${randomUUID()}`,
               text,
               stableId,
               conversationId: target,
@@ -3855,10 +3883,9 @@ function holdSendForHost(
   notice: string,
   message: Omit<QueuedMessage, "queueId" | "conversationId">,
 ): void {
-  queueSeq += 1;
   const held: QueuedMessage = {
     ...message,
-    queueId: `q_${queueSeq}`,
+    queueId: `q_${randomUUID()}`,
     conversationId,
     waitingForHost: true,
   };

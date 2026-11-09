@@ -10,6 +10,8 @@ and steers messages while the agent is busy.
 
 ## Sub-features
 
+- `durable-queue`: queued follow-ups survive reload/client restart on this browser profile, preserving FIFO order, text, attachments, reply context, agent and retry/host-wait flags; storage is scoped to the authenticated user and server.
+
 - `quiet-focus`: typing leaves the composer frame neutral, without an accent border or outline; individual keyboard controls retain their focus indicators.
 
 - `prompt-link`: opening the new-session page with `?prompt=`
@@ -655,6 +657,8 @@ Other connection providers alone do not enable the managed MCP picker.
   server agent keeps the dialog open with the server's reason.
 - **`mobile-labels`, new-session composer:**
   `tests/e2e_ui/mobile/test_composer_model_label_stop_overlap.py::test_new_session_composer_collapses_labels_to_icons_on_mobile`
+
+- Queue recovery, attachment restoration, deletion and ordered dispatch through a real reload: `tests/e2e_ui/chat/test_queued_message_reload.py::test_queued_messages_survive_reload_with_attachment_and_delete`; identity races, write ordering and unavailable storage: `web/src/lib/queuedMessagePersistence.test.ts`.
 
 ## Gotchas
 
