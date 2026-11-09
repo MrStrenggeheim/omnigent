@@ -10,7 +10,7 @@ Git supplies change status by default; explicit captured comparisons retain the 
 
 - `create`: create a file or folder with a name dialog; existing destinations produce an error.
 - `organize`: rename, move, duplicate, cut, copy and paste files or folders, with explicit overwrite selection.
-- `selection`: Shift-click selects the inclusive visible range from the retained anchor and Ctrl/Cmd-click toggles the clicked entry; modified clicks never expand folders, and the anchor survives opening a preview; More file actions → Select files… enables explicit checkbox/tap selection on touch, and Done selecting or Escape exits.
+- `selection`: Shift-click selects the inclusive visible range from the retained anchor and Ctrl/Cmd-click toggles the clicked entry; modified clicks never expand folders, and the anchor survives opening a preview; clicking empty Explorer space clears the selection and anchor; More file actions → Select files… enables explicit checkbox/tap selection on touch, and Done selecting or Escape exits.
 - `row-controls`: retain file size and a compact trailing three-dot menu with right-click actions; no hover checkbox/download/copy cluster reserves space.
 - `transfer`: upload files or directory structures and download folders or selected entries as ZIP, with shared [notification center](notifications.md) progress and cancellation.
 - `recovery`: move selected entries to recoverable trash and restore them without overwriting newer files.

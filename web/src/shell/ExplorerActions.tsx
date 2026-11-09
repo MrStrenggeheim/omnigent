@@ -1014,6 +1014,16 @@ export function ExplorerActionsProvider({
         ref={setRoot}
         className="relative flex min-h-0 flex-1 flex-col"
         onKeyDown={onKeyDown}
+        onClick={(event) => {
+          if (
+            !(event.target instanceof Element) ||
+            event.target.closest(
+              '[data-explorer-entry], [data-explorer-action], button, input, textarea, select, a, label, [role="menu"], [role="dialog"], [contenteditable="true"]',
+            )
+          )
+            return;
+          setSelected(new Map());
+        }}
         onContextMenu={(event) => {
           if ((event.target as HTMLElement).closest("input,[data-explorer-entry]")) return;
           event.preventDefault();

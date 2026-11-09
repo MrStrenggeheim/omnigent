@@ -380,3 +380,7 @@ def test_explorer_modified_clicks_select_ranges_without_opening_folders(
     button.click()
     expect(button).to_have_attribute("aria-expanded", "true")
     expect(_entry(explorer, "selection-folder/child.txt")).to_be_visible(timeout=15_000)
+    tree = explorer.get_by_role("tree", name="Workspace files")
+    bounds = tree.bounding_box()
+    tree.click(position={"x": bounds["width"] / 2, "y": bounds["height"] - 5})
+    expect(explorer.locator('[aria-selected="true"]')).to_have_count(0)

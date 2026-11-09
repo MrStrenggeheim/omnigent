@@ -80,6 +80,7 @@ function setup({
           <div>
             <ExplorerToolbar />
             <Tree />
+            <div data-testid="explorer-empty-space" />
           </div>
         </ExplorerActionsProvider>
         <Toaster />
@@ -680,4 +681,19 @@ it("retains the range anchor after preview remount and toggles Ctrl entries with
   fireEvent.click(folder.querySelector("button")!);
   expect(openFolder).toHaveBeenCalledOnce();
   expect(screen.getByTestId("row-a.txt")).toHaveAttribute("aria-selected", "false");
+});
+
+it("clears entries and the range anchor on a free-space click without clearing on menu clicks", async () => {
+  setup();
+  fireEvent.click(screen.getByRole("button", { name: "a.txt" }));
+  fireEvent.click(screen.getByRole("button", { name: "folder" }), { shiftKey: true });
+  fireEvent.click(screen.getByTestId("explorer-empty-space"));
+  for (const entry of entries)
+    expect(screen.getByTestId(`row-${entry.path}`)).toHaveAttribute("aria-selected", "false");
+  fireEvent.click(screen.getByRole("button", { name: "b.txt" }), { shiftKey: true });
+  expect(screen.getByTestId("row-a.txt")).toHaveAttribute("aria-selected", "false");
+  expect(screen.getByTestId("row-b.txt")).toHaveAttribute("aria-selected", "true");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More file actions" }), { button: 0 });
+  await screen.findByRole("menuitem", { name: "Copy selected items" });
+  expect(screen.getByTestId("row-b.txt")).toHaveAttribute("aria-selected", "true");
 });
