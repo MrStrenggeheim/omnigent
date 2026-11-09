@@ -331,7 +331,7 @@ function AppShellImpl() {
         if (guard)
           guard(
             "",
-            { workspaceId: target.id },
+            { workspaceId: target?.id ?? "" },
             () => proceed(index + 1),
             () => {
               if (previousSession) navigateRoute(`/c/${previousSession}`, { replace: true });
@@ -1360,19 +1360,23 @@ function AppShellImpl() {
     );
 
     stateConvRef.current = conversationId;
-  }, [conversationId, canvasMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [conversationId, canvasMode, workspaceStateId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const restoredWorkspaceStateRef = useRef<string | null>(null);
   const skipWorkspacePersistRef = useRef(false);
   useLayoutEffect(() => {
-    if (!workspaceStateId || restoredWorkspaceStateRef.current === workspaceStateId) return;
+    if (!workspaceStateId) {
+      restoredWorkspaceStateRef.current = null;
+      return;
+    }
+    if (restoredWorkspaceStateRef.current === workspaceStateId) return;
     restoredWorkspaceStateRef.current = workspaceStateId;
     skipWorkspacePersistRef.current = true;
     const saved = readSessionWorkspaceState(workspaceStateId);
     const stored = Object.keys(saved).length
       ? saved
-      : stateConvRef.current
-        ? readSessionWorkspaceState(stateConvRef.current)
+      : conversationId
+        ? readSessionWorkspaceState(conversationId)
         : {};
     const cited = searchParams.get("file");
     const citationBelongsHere =
@@ -1387,6 +1391,7 @@ function AppShellImpl() {
     setRightPanelOpenImmediately(stored.open ?? true);
   }, [
     workspaceStateId,
+    conversationId,
     workbench.chatWorkspace?.id,
     workbench.workspace?.id,
     searchParams,

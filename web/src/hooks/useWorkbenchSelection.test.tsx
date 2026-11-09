@@ -116,3 +116,35 @@ it("keeps the original target until its dirty-file guard accepts the switch", as
   expect(view.result.current.workspace?.id).toBe("second");
   expect(view.result.current.sourceSessionId).toBe("chat-b");
 });
+
+it.each([403, 404, 405, 501])(
+  "keeps the active chat's authorized legacy resources for metadata HTTP %s",
+  async (status) => {
+    vi.mocked(authenticatedFetch).mockResolvedValueOnce(new Response("{}", { status }));
+    const view = renderHook(() => useWorkbenchSelection("shared-chat"), { wrapper: wrapper() });
+    await waitFor(() => expect(view.result.current.sourceSessionId).toBe("shared-chat"));
+    expect(view.result.current.workspace).toBeUndefined();
+    expect(view.result.current.error).toBeNull();
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("guards the outgoing workspace even when the next chat uses legacy resources", async () => {
+  let accept!: () => void;
+  const guard = vi.fn((_target, apply) => {
+    accept = apply;
+  });
+  const view = renderHook(({ session }) => useWorkbenchSelection(session, true, guard), {
+    wrapper: wrapper(),
+    initialProps: { session: "chat-a" },
+  });
+  await waitFor(() => expect(view.result.current.workspace?.id).toBe("first"));
+  vi.mocked(authenticatedFetch).mockResolvedValueOnce(new Response("{}", { status: 403 }));
+  view.rerender({ session: "shared-chat" });
+  await waitFor(() => expect(guard).toHaveBeenCalled());
+  expect(view.result.current.workspace?.id).toBe("first");
+  act(() => accept());
+  expect(view.result.current.workspace).toBeUndefined();
+  expect(view.result.current.sourceSessionId).toBe("shared-chat");
+  expect(view.result.current.error).toBeNull();
+});
