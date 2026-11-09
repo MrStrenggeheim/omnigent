@@ -762,7 +762,7 @@ describe("Explorer shared comparisons", () => {
       });
       const up = screen.getByRole("button", { name: "Go to parent folder" });
       const newFile = screen.getByRole("button", { name: "New file" });
-      const header = up.closest("div.h-11");
+      const header = up.closest(".workspace-control-header");
       expect(header).toContainElement(newFile);
       expect(header).toContainElement(screen.getByRole("button", { name: "More file actions" }));
       expect(screen.queryByRole("button", { name: "Reveal active file" })).toBeNull();
