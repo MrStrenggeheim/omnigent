@@ -5,7 +5,7 @@ export PATH=/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr
 
 app=/home/agent/apps/omnigent
 legacy_python=/home/agent/.local/share/uv/tools/omnigent/bin/python
-source=/home/agent/src/omnigent
+source=/home/agent/projects/omnigent
 tool_python="$app/current/venv/bin/python"
 [[ -x "$tool_python" ]] || tool_python="$legacy_python"
 
