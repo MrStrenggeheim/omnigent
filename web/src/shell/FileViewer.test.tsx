@@ -1511,15 +1511,14 @@ describe("FileViewer addressed selection", () => {
   });
 });
 
-describe("FileViewer copy-link button", () => {
-  it("renders a Copy link button in the viewer header toolbar", () => {
-    // The button must always be present when the viewer is open so users can
-    // share a link to the current file (with its current diff/view state baked in).
-    // Failure: the button was not added to the toolbar, or its aria-label changed.
+describe("FileViewer copy-link action", () => {
+  it("keeps Copy link in the three-dot menu instead of the header toolbar", () => {
     useCommentsMock.mockReturnValue(makeCommentsQuery([]));
     renderViewer({ open: true });
 
-    expect(screen.getByRole("button", { name: "Copy link to file" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy link to file" })).toBeNull();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "View settings" }), { button: 0 });
+    expect(screen.getByRole("menuitem", { name: "Copy link to file" })).toBeInTheDocument();
   });
 });
 
@@ -2984,7 +2983,8 @@ it("keeps grid file viewers independent of shared URL parameters and copies a se
   renderViewer({ open: true, syncUrl: false, initialSearch: "diff=1&comment=other-cell" });
   expect(screen.queryByTestId("diff-viewer")).toBeNull();
   expect(screen.getByTestId("url-params")).toHaveTextContent("diff=1&comment=other-cell");
-  fireEvent.click(screen.getByRole("button", { name: "Copy link to file" }));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "View settings" }), { button: 0 });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Copy link to file" }));
   const copied = new URL(writeText.mock.calls[0][0]);
   expect(copied.pathname).toBe("/c/conv_1");
   expect(copied.searchParams.get("file")).toBe("file1.py");

@@ -17,6 +17,8 @@ Files, Changes and the file viewer share one explicit comparison with one-word l
 
 ## How to get to it (user POV)
 
+- In the file viewer, use the three-dot menu → Copy link to file to share the current file and view.
+
 - Desktop: open Workspace → Files or Changes and use Diff comparison in the combined path/control header.
 - Phone: use the right sidebar toggle to open Workspace, choose Files or Changes, then open Diff comparison in that panel's path row.
 - Any text file viewer: choose Show diff in its toolbar or More actions, then use the same comparison dropdown.

@@ -1378,23 +1378,23 @@ function FileViewerBody({
       onSelect: () => setHideWhitespace((prev) => !prev),
     });
   }
+  settingsMenu.push({
+    key: "copy-link",
+    label: "Copy link to file",
+    icon: linkCopied ? (
+      <CheckIcon className="size-4 text-green-500" />
+    ) : (
+      <Link2Icon className="size-4" />
+    ),
+    active: false,
+    onSelect: copyFileLink,
+  });
   toolbarActions.push({
     key: "view-settings",
     label: "View settings",
     tooltip: "View settings",
     icon: <MoreHorizontalIcon className="size-4" />,
     menu: settingsMenu,
-  });
-  toolbarActions.push({
-    key: "copy-link",
-    label: "Copy link to file",
-    tooltip: linkCopied ? "Copied!" : "Copy link",
-    icon: linkCopied ? (
-      <CheckIcon className="size-4 text-green-500" />
-    ) : (
-      <Link2Icon className="size-4" />
-    ),
-    onSelect: copyFileLink,
   });
 
   const showNavButtons = currentNavIdx !== -1 && navigableFiles.length > 1 && !!onNavigateTo;
