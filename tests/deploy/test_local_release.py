@@ -202,7 +202,7 @@ def deployment(tmp_path: Path):
     original = (_ROOT / "deploy/local/omnigent-stable-update").read_text()
     script = tmp_path / "deploy"
     original = original.replace("/home/agent/apps/omnigent", str(app))
-    original = original.replace("/home/agent/src/omnigent", str(source))
+    original = original.replace(str(_ROOT), str(source))
     original = original.replace("/home/agent", str(home))
     original = original.replace(
         "/usr/local/sbin/omnigent-idle-check", str(fake_bin / "idle-check")
