@@ -4,11 +4,19 @@
 // Archived sessions list (which moved here out of the sidebar).
 
 import type { ReactNode } from "react";
+import type * as AvailableAgentsModule from "@/hooks/useAvailableAgents";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Conversation } from "@/hooks/useConversations";
+import { useAvailableAgents } from "@/hooks/useAvailableAgents";
+import {
+  DEFAULT_AGENT_STORAGE_KEY,
+  readDefaultAgentId,
+  writeDefaultAgentId,
+} from "@/lib/defaultAgentPreferences";
 import { BACKGROUND_SESSION_TITLES_STORAGE_KEY } from "@/lib/backgroundSessionTitlesPreferences";
 import { readSessionWorkspaceState, writeSessionWorkspaceState } from "@/lib/sessionWorkspaceState";
 import * as host from "@/lib/host";
@@ -52,6 +60,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next-themes", () => ({
   useTheme: () => ({ theme: mocks.theme, systemTheme: "light", setTheme: mocks.setTheme }),
+}));
+vi.mock("@/hooks/useAvailableAgents", async (original) => ({
+  ...(await original<typeof AvailableAgentsModule>()),
+  useAvailableAgents: vi.fn(),
+  prefetchAvailableAgentDetails: vi.fn(),
 }));
 vi.mock("@/lib/embedded", () => ({ useIsEmbedded: () => mocks.isEmbedded }));
 vi.mock("@/lib/CapabilitiesContext", () => ({
@@ -217,16 +230,35 @@ function LocationProbe() {
 
 function renderPage(path = "/settings") {
   return render(
-    <TooltipProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <SettingsPage />
-        <LocationProbe />
-      </MemoryRouter>
-    </TooltipProvider>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <TooltipProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <SettingsPage />
+          <LocationProbe />
+        </MemoryRouter>
+      </TooltipProvider>
+    </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
+  vi.mocked(useAvailableAgents).mockReturnValue({
+    data: [
+      {
+        id: "ag_polly",
+        name: "polly",
+        display_name: "Polly",
+        description: null,
+        harness: "claude-sdk",
+        skills: [],
+      },
+    ],
+    isLoading: false,
+    isPlaceholderData: false,
+    isError: false,
+  } as unknown as ReturnType<typeof useAvailableAgents>);
   mocks.setTheme.mockReset();
   mocks.archiveMutate.mockReset();
   mocks.deleteMutate.mockReset();
@@ -333,6 +365,65 @@ describe("SettingsPage", () => {
     localStorage.removeItem(BACKGROUND_SESSION_TITLES_STORAGE_KEY);
   });
 
+  it("picks a global default with the existing agent picker and preserves the last-used agent", () => {
+    localStorage.setItem("omnigent:last-agent-id", "remembered");
+    renderPage("/settings/general");
+    const setting = within(screen.getByTestId("settings-default-agent"));
+    expect(setting.getByText("Default agent")).toBeInTheDocument();
+    fireEvent.pointerDown(setting.getByTestId("new-chat-landing-agent-select"), { button: 0 });
+    fireEvent.click(screen.getByTestId("new-chat-landing-agent-ag_polly"));
+    expect(readDefaultAgentId()).toBe("ag_polly");
+    expect(localStorage.getItem("omnigent:last-agent-id")).toBe("remembered");
+    expect(setting.getByTestId("new-chat-landing-agent-select")).toHaveAccessibleName("Polly");
+    fireEvent.click(setting.getByRole("button", { name: "Use last selected agent" }));
+    expect(readDefaultAgentId()).toBeNull();
+  });
+
+  it("pins a saved default into discovery and preserves an unavailable default", () => {
+    writeDefaultAgentId("missing-agent");
+    renderPage("/settings/general");
+    expect(useAvailableAgents).toHaveBeenCalledWith({ pinnedAgentIds: ["missing-agent"] });
+    expect(screen.getByText(/Your saved default agent is unavailable/)).toBeInTheDocument();
+    expect(readDefaultAgentId()).toBe("missing-agent");
+    fireEvent.click(screen.getByRole("button", { name: "Use last selected agent" }));
+    expect(localStorage.getItem(DEFAULT_AGENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it("waits for discovery before declaring the saved default unavailable", () => {
+    writeDefaultAgentId("missing-agent");
+    vi.mocked(useAvailableAgents).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isPlaceholderData: true,
+    } as unknown as ReturnType<typeof useAvailableAgents>);
+    renderPage("/settings/general");
+    expect(screen.queryByText(/Your saved default agent is unavailable/)).not.toBeInTheDocument();
+    expect(readDefaultAgentId()).toBe("missing-agent");
+  });
+
+  it("shows catalog failure without clearing a saved default", () => {
+    writeDefaultAgentId("missing-agent");
+    vi.mocked(useAvailableAgents).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    } as unknown as ReturnType<typeof useAvailableAgents>);
+    renderPage("/settings/general");
+    expect(screen.getByText(/Agent catalog unavailable/)).toBeInTheDocument();
+    expect(readDefaultAgentId()).toBe("missing-agent");
+  });
+
+  it("reports storage failure without pretending the default was cleared", () => {
+    writeDefaultAgentId("ag_polly");
+    renderPage("/settings/general");
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use last selected agent" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not save the default agent");
+    expect(readDefaultAgentId()).toBe("ag_polly");
+  });
+
   it("groups General settings into titled outlined cards and hides its description on mobile", () => {
     renderPage("/settings/general");
 
@@ -379,7 +470,9 @@ describe("SettingsPage", () => {
       screen.getByText(/Allowing copying also lets terminal programs silently replace/),
     ).toBeInTheDocument();
     expect(screen.getByText(/all sessions and terminals on this server/)).toBeInTheDocument();
-    expect(screen.getByText(/this browser or app/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/all sessions and terminals on this server in this browser or app/),
+    ).toBeInTheDocument();
     expect(within(select).getByRole("option", { name: "Allow copying" })).toBeInTheDocument();
     expect(within(select).getByRole("option", { name: "Block copying" })).toBeInTheDocument();
   });
@@ -616,7 +709,7 @@ describe("SettingsPage", () => {
     const group = screen.getByRole("radiogroup", { name: "Default Workspace tab" });
     const options = within(group).getAllByRole("radio");
     expect(options).toHaveLength(4);
-    ["Files", "Changes", "Pull Requests", "Agents"].forEach((label, index) => {
+    ["Files", "Changes", "Pull Requests", "Activity"].forEach((label, index) => {
       expect(options[index]).toHaveAccessibleName(label);
     });
     expect(screen.getByTestId("workspace-tab-default-files")).toHaveAttribute(
@@ -632,7 +725,7 @@ describe("SettingsPage", () => {
     );
     expect(
       screen.getByRole("img", {
-        name: "Sidebar preview: Agents, Files, Changes, Pull Requests pinned.",
+        name: "Sidebar preview: Activity, Files, Changes, Pull Requests pinned.",
       }),
     ).toBeInTheDocument();
     expect(localStorage.getItem("omnigent:default-workspace-tab")).toBe("subagents");
@@ -648,7 +741,7 @@ describe("SettingsPage", () => {
     );
     expect(
       screen.getByRole("img", {
-        name: "Sidebar preview: Changes, Files, Pull Requests, Agents pinned.",
+        name: "Sidebar preview: Changes, Files, Pull Requests, Activity pinned.",
       }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Pin Changes" }));
@@ -676,7 +769,7 @@ describe("SettingsPage", () => {
       selectedBrowserId: "one",
     });
     const page = renderPage("/settings/appearance");
-    for (const label of ["Files", "Changes", "Pull Requests", "Agents"]) {
+    for (const label of ["Files", "Changes", "Pull Requests", "Activity"]) {
       const toggle = screen.getByRole("button", { name: `Pin ${label}` });
       expect(toggle).toHaveAttribute("aria-pressed", "true");
       fireEvent.click(toggle);

@@ -8,6 +8,8 @@ local; automatic client sync and shared/machine scope controls remain deferred.
 
 ## Sub-features
 
+- `default-agent`: General → Sessions selects a default agent for new chats in this browser/app; explicit choices and project defaults take precedence, and an unavailable configured agent is reported instead of silently substituted.
+
 - `accent-surfaces`: Share, navigation, message surfaces, links, focus and composer chrome follow the selected accent in light/dark mode while semantic status colors remain distinct.
 - `flat-transcript`: assistant prose stays unboxed, tool groups use compact disclosures and code has one technical frame.
 
@@ -214,6 +216,8 @@ isolated deployment. Record the candidate/runtime versions, configuration,
 observed results, any mocked services, and remaining entry-point gaps.
 
 - Real chat accent and flat rendering across desktop light and phone dark: `tests/e2e_ui/chat/test_accent_flat_chat.py::test_chat_uses_selected_accent_and_flat_surfaces`.
+
+- Global agent setting and project precedence: `tests/e2e_ui/sessions/test_global_agent_default.py::test_global_agent_default_yields_to_project`; explicit choices and unavailable defaults are covered by `web/src/shell/NewChatDialog.projectPrefill.test.tsx`.
 
 ## Gotchas
 

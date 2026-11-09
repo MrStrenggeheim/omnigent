@@ -76,6 +76,11 @@ import { useTheme } from "next-themes";
 import { PageScroll } from "@/components/PageScroll";
 import { SettingsGroup } from "@/components/SettingsGroup";
 import { SettingsLabel } from "@/components/SettingsLabel";
+import { AgentHarnessPicker } from "@/shell/NewChatDialog";
+import { useAvailableAgents } from "@/hooks/useAvailableAgents";
+import { isAcpHarnessAgent, selectableSessionAgents } from "@/lib/agentGrouping";
+import { isNativeCodingAgent } from "@/lib/nativeCodingAgents";
+import { readDefaultAgentId, writeDefaultAgentId } from "@/lib/defaultAgentPreferences";
 import { McpRegistryConnections } from "@/components/McpRegistry";
 import { ThemeColorPicker } from "@/components/theme/ThemeColorPicker";
 import { CardRadioGroup } from "@/components/theme/CardRadioGroup";
@@ -443,7 +448,7 @@ const workspaceTabCards: {
   { value: "files", label: "Files", icon: FilesIcon },
   { value: "changes", label: "Changes", icon: FileDiffIcon },
   { value: "github", label: "Pull Requests", icon: GitPullRequestIcon },
-  { value: "subagents", label: "Agents", icon: BotIcon },
+  { value: "subagents", label: "Activity", icon: BotIcon },
 ];
 
 /** Centered icon + label body shared by the Mode and Terminal theme cards. */
@@ -584,7 +589,7 @@ function WorkspacePanelDefaultControl() {
     <ThemeSubsection
       labelId={labelId}
       title="Workspace panel"
-      helper="Whether new chats open with the Files / Agents / Shells panel visible. Collapsing or expanding the panel updates this. Existing chats keep their last layout."
+      helper="Whether new chats open with the Files / Activity / Shells panel visible. Collapsing or expanding the panel updates this. Existing chats keep their last layout."
     >
       <CardRadioGroup<WorkspacePanelDefault>
         labelledBy={labelId}
@@ -1852,6 +1857,81 @@ function TerminalClipboardControl() {
   );
 }
 
+/** Explicit default agent for future chats in this browser or app. */
+function DefaultAgentControl() {
+  const [agentId, setAgentId] = useState(readDefaultAgentId);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const { data, isLoading, isPlaceholderData, isError } = useAvailableAgents({
+    pinnedAgentIds: agentId ? [agentId] : [],
+  });
+  const agentList = useMemo(() => selectableSessionAgents(data ?? []), [data]);
+  const harnessEntries = agentList.filter(
+    (agent) => !agent.mine && (isNativeCodingAgent(agent) || isAcpHarnessAgent(agent)),
+  );
+  const agentEntries = agentList.filter((agent) => !harnessEntries.includes(agent));
+  const selected = agentList.find((agent) => agent.id === agentId);
+  const loading = isLoading || isPlaceholderData;
+  const unavailable = agentId !== null && !selected && !loading && !isError;
+  const save = (value: string | null) => {
+    const saved = writeDefaultAgentId(value);
+    setSaveFailed(!saved);
+    if (saved) setAgentId(value);
+  };
+  return (
+    <div className="flex flex-col gap-2" data-testid="settings-default-agent">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <SettingsLabel
+          label="Default agent"
+          description="Agent for new chats in this browser or app. Project defaults and explicit choices take priority."
+          className="flex-1"
+        />
+        <AgentHarnessPicker
+          agentEntries={agentEntries}
+          harnessEntries={harnessEntries}
+          effectiveAgentId={agentId}
+          agentLabel={
+            selected?.display_name ?? (agentId ? "Agent unavailable" : "Use last selected agent")
+          }
+          hasAgents={agentList.length > 0}
+          loading={loading}
+          host={null}
+          onSelectAgent={(agent) => save(agent.id)}
+          pendingAgent={null}
+          pendingAgentId="__unused_pending_agent__"
+          onSelectPending={() => {}}
+          onCreateCustomAgent={() => {}}
+          allowCreateCustomAgent={false}
+          sandboxSelected={false}
+          triggerClassName="h-8 w-full rounded-md border border-input bg-transparent px-3 sm:w-auto sm:max-w-56"
+          contentClassName="max-h-80 w-80"
+        />
+      </div>
+      {agentId && (
+        <Button variant="ghost" size="sm" className="self-end" onClick={() => save(null)}>
+          Use last selected agent
+        </Button>
+      )}
+      {unavailable && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {
+            "Your saved default agent is unavailable. Choose another agent or use the last selected agent."
+          }
+        </p>
+      )}
+      {isError && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Agent catalog unavailable. Your saved default is unchanged.
+        </p>
+      )}
+      {saveFailed && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not save the default agent in this browser or app.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** App-wide behavior settings. */
 function GeneralSection() {
   return (
@@ -1864,7 +1944,10 @@ function GeneralSection() {
           </div>
         </SettingsGroup>
         <SettingsGroup title="Sessions" testId="settings-group-sessions">
-          <BackgroundSessionTitlesControl />
+          <DefaultAgentControl />
+          <div className="mt-4 border-t border-border pt-4">
+            <BackgroundSessionTitlesControl />
+          </div>
         </SettingsGroup>
         <SettingsGroup title="Terminal" testId="settings-group-terminal">
           <TerminalClipboardControl />

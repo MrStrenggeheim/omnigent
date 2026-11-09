@@ -183,6 +183,7 @@ import {
 import { getCliServerUrl, getOmnigentHostConfig } from "@/lib/host";
 import { quoteShellArgument } from "@/lib/shell";
 import { readLastAgentId, writeLastAgentId } from "@/lib/agentPreferences";
+import { readDefaultAgentId } from "@/lib/defaultAgentPreferences";
 import {
   readLastHostChoice,
   writeLastHostChoice,
@@ -2138,6 +2139,7 @@ interface LandingDraft {
   message: string;
   files: File[];
   pickedAgentId: string | null;
+  agentExplicitlySelected: boolean;
   selectedHostId: string | null;
   sandboxSelected: boolean;
   sandboxProvider: string | null;
@@ -2198,6 +2200,7 @@ export function NewChatLandingScreen() {
   // Project driving this visit, when the sidebar's per-project "new session"
   // pencil landed here with a `?project=` query param. Empty otherwise.
   const projectParam = searchParams.get("project") ?? "";
+  const [defaultAgentId] = useState(readDefaultAgentId);
   const [cacheUser, setCacheUser] = useState(getCurrentUserId);
   useEffect(() => {
     if (cacheUser !== null) return;
@@ -2268,7 +2271,7 @@ export function NewChatLandingScreen() {
     isError: agentsError,
     isPlaceholderData: agentsArePlaceholder,
   } = useAvailableAgents({
-    pinnedAgentIds: prefillConfig?.agentId != null ? [prefillConfig.agentId] : [],
+    pinnedAgentIds: [prefillConfig?.agentId, defaultAgentId].filter((id): id is string => !!id),
   });
   // refetchOnFocus: returning from a terminal `omni setup` must clear the
   // readiness badge even if the live push was missed while the tab was hidden.
@@ -2339,6 +2342,7 @@ export function NewChatLandingScreen() {
       : {
           ...landingDraft,
           pickedAgentId: null,
+          agentExplicitlySelected: false,
           pickedHarness: null,
           selectedHostId: null,
           sandboxSelected: false,
@@ -2469,15 +2473,15 @@ export function NewChatLandingScreen() {
   const databricksGitCredentialsTooltipContent = docsLinks?.databricksGitCredentials;
   const showDisabledSandboxWithDocs = !managedSandboxesEnabled && !!newSandboxTooltipContent;
 
-  // Seeded from the persisted last pick so a returning user starts on the
-  // agent they used last; validated against the live list in
-  // effectiveAgentId below (a stale id falls back to the default). A
-  // project-driven visit defers to the project-prefill effect instead
-  // (which falls back to the same last pick).
-  const [pickedAgentId, setPickedAgentId] = useState<string | null>(
-    () => restoredDraft?.pickedAgentId ?? (projectParam !== "" ? null : readLastAgentId()),
+  // Explicit draft picks survive; project defaults resolve before the browser default, then the existing remembered-agent fallback.
+  const [pickedAgentId, setPickedAgentId] = useState<string | null>(() =>
+    restoredDraft?.agentExplicitlySelected
+      ? restoredDraft.pickedAgentId
+      : projectParam !== ""
+        ? null
+        : (defaultAgentId ?? readLastAgentId()),
   );
-  const agentExplicitlySelectedRef = useRef(false);
+  const agentExplicitlySelectedRef = useRef(restoredDraft?.agentExplicitlySelected ?? false);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(
     () => restoredDraft?.selectedHostId ?? null,
   );
@@ -2668,10 +2672,10 @@ export function NewChatLandingScreen() {
   // Per-session brain-harness override for bundle agents (polly / debby).
   // null = the agent spec's declared harness (no override sent). On agent
   // switch, seeded from the user's last stored pick for that agent.
-  const [pickedHarness, setPickedHarness] = useState<string | null>(
-    () =>
-      restoredDraft?.pickedHarness ??
-      readLastHarness(restoredDraft?.pickedAgentId ?? readLastAgentId()),
+  const [pickedHarness, setPickedHarness] = useState<string | null>(() =>
+    restoredDraft?.pickedAgentId === pickedAgentId
+      ? restoredDraft.pickedHarness
+      : readLastHarness(pickedAgentId),
   );
   // Per-session model + reasoning effort for the claude-native model picker.
   // "" = unselected: nothing is checked and `model_override` / `reasoning_effort`
@@ -2750,6 +2754,7 @@ export function NewChatLandingScreen() {
     message,
     files,
     pickedAgentId,
+    agentExplicitlySelected: agentExplicitlySelectedRef.current,
     selectedHostId,
     sandboxSelected,
     sandboxProvider,
@@ -2777,7 +2782,10 @@ export function NewChatLandingScreen() {
     return () => {
       onScreenRef.current = false;
       if (!submittedRef.current) {
-        writeLandingDraft(draftRef.current);
+        writeLandingDraft({
+          ...draftRef.current,
+          agentExplicitlySelected: agentExplicitlySelectedRef.current,
+        });
       } else if (submittedDraftRevisionRef.current === landingDraftRevision) {
         writeLandingDraft(null);
       }
@@ -2870,11 +2878,11 @@ export function NewChatLandingScreen() {
 
   // The landing screen stays mounted while `?project=` changes (clicking
   // another project's pencil), so re-create a fresh visit by hand: clear
-  // every seedable slot and restart the machine. Values the user set are
-  // reset too — a pencil click means "set me up for this project". Also
+  // every seedable slot and restart the machine for the new project. Also
   // restart when the SAME project's stored defaults change (the user edited
   // its settings, then re-opened its composer): `projectParam` stays put, so
   // without this the already-settled machine would keep the stale seeds.
+  // An explicit agent pick survives a refresh of the same project's defaults.
   useEffect(() => {
     const projectChanged = prefill.project !== projectParam;
     const configChanged =
@@ -2884,10 +2892,13 @@ export function NewChatLandingScreen() {
       seededConfigSigRef.current !== null &&
       prefillConfigSig !== seededConfigSigRef.current;
     if (!projectChanged && !configChanged) return;
+    const keepExplicitAgent = !projectChanged && agentExplicitlySelectedRef.current;
     setSandboxSelected(false);
     setSelectedHostId(null);
-    setPickedAgentId(projectParam !== "" ? null : readLastAgentId());
-    agentExplicitlySelectedRef.current = false;
+    if (!keepExplicitAgent) {
+      setPickedAgentId(projectParam !== "" ? null : (defaultAgentId ?? readLastAgentId()));
+      agentExplicitlySelectedRef.current = false;
+    }
     setWorkspace("");
     setBranchName("");
     setAutoSeededBranch("");
@@ -2902,7 +2913,7 @@ export function NewChatLandingScreen() {
     setPickerEdits(null);
     seededConfigSigRef.current = prefillConfigSig;
     setPrefill(initialPrefillState(projectParam));
-  }, [projectParam, prefill.project, prefillConfigSig]);
+  }, [projectParam, prefill.project, prefillConfigSig, defaultAgentId]);
 
   // Record the config the machine settled from, once it's loaded and the
   // machine is done, so the reseed effect above can spot a later change to it
@@ -3130,17 +3141,18 @@ export function NewChatLandingScreen() {
   const pendingAgentAllowedOnTarget = !sandboxSelected;
   // A configured agent absent from templates and the first 30 Mine sessions
   // stays unavailable until the user explicitly chooses another agent.
+  const configuredDefaultAgentId =
+    (projectParam !== "" ? prefillConfig?.agentId?.trim() : null) || defaultAgentId;
   const configuredAgentUnavailable =
-    projectParam !== "" &&
-    prefillConfig?.agentId != null &&
+    configuredDefaultAgentId != null &&
     agents !== undefined &&
     !agentsArePlaceholder &&
-    !agentList.some((a) => a.id === prefillConfig.agentId);
+    !agentList.some((a) => a.id === configuredDefaultAgentId);
   // While the list is catalog-only placeholder data, a persisted pick that
   // isn't in it yet may be a scan-discovered agent still loading — hold the
   // selection empty instead of silently defaulting to the first catalog row.
   const pickUnresolvedOnPlaceholder =
-    agentsArePlaceholder &&
+    (agentsLoading || agentsArePlaceholder) &&
     pickedAgentId !== null &&
     pickedAgentId !== PENDING_AGENT_ID &&
     !agentList.some((a) => a.id === pickedAgentId);
@@ -3163,6 +3175,7 @@ export function NewChatLandingScreen() {
   );
   const automaticHarnessFallback =
     projectParam === "" &&
+    configuredDefaultAgentId === null &&
     !sandboxSelected &&
     !agentExplicitlySelectedRef.current &&
     rememberedNativeAgent != null &&
@@ -4804,7 +4817,7 @@ export function NewChatLandingScreen() {
       sandboxSelected,
       managedSandboxesEnabled,
       selectedHostId,
-      lastAgentId: readLastAgentId(),
+      lastAgentId: defaultAgentId ?? readLastAgentId(),
       config: prefillConfig,
     });
     if (step === null) return;
@@ -4845,6 +4858,7 @@ export function NewChatLandingScreen() {
     selectedHostId,
     pickedAgentId,
     prefillConfig,
+    defaultAgentId,
     defaultSandboxProvider,
   ]);
 
@@ -5212,7 +5226,9 @@ export function NewChatLandingScreen() {
                   : !sandboxSelected && (!selectedHostId || !workspaceValid)
                     ? "Please choose a host and working directory"
                     : configuredAgentUnavailable && selectedAgent == null
-                      ? "This project's configured agent is unavailable — pick an agent to continue"
+                      ? projectParam !== "" && prefillConfig?.agentId
+                        ? "This project's configured agent is unavailable — pick an agent to continue"
+                        : "Your default agent is unavailable — pick an agent to continue"
                       : message.trim().length === 0 && files.length === 0
                         ? "Enter a message to get started"
                         : null;

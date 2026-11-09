@@ -36,6 +36,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ReactNode } from "react";
 
 import { authenticatedFetch } from "@/lib/identity";
+import { readDefaultAgentId, writeDefaultAgentId } from "@/lib/defaultAgentPreferences";
 import type { Host } from "@/hooks/useHosts";
 import { useHostModelOptions, useHosts } from "@/hooks/useHosts";
 import type { AvailableAgent } from "@/hooks/useAvailableAgents";
@@ -349,6 +350,110 @@ afterEach(() => {
 });
 
 describe("NewChatLandingScreen project prefill", () => {
+  it("uses the global agent ahead of the remembered agent on a plain visit", async () => {
+    searchParams = new URLSearchParams("");
+    localStorage.setItem("omnigent:last-agent-id", "ag_hello");
+    writeDefaultAgentId("ag_other");
+    renderLanding();
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_other");
+    expect(body.model_override).toBeUndefined();
+    expect(useAvailableAgents).toHaveBeenCalledWith({ pinnedAgentIds: ["ag_other"] });
+  });
+
+  it("uses a project's agent ahead of the global default", async () => {
+    writeDefaultAgentId("ag_other");
+    setProjectConfig({ agent_id: "ag_hello" });
+    renderLanding();
+    await waitFor(() =>
+      expect(screen.getByTestId("new-chat-landing-agent-select")).toHaveAccessibleName(
+        "Hello World",
+      ),
+    );
+    const body = await submitAndReadBody();
+    expect("agent_id" in body).toBe(false);
+    expect(body.project_id).toBe("proj_alpha");
+    expect(useAvailableAgents).toHaveBeenCalledWith({ pinnedAgentIds: ["ag_hello", "ag_other"] });
+  });
+
+  it("uses the global agent when the project leaves its agent unset", async () => {
+    localStorage.setItem("omnigent:last-agent-id", "ag_hello");
+    writeDefaultAgentId("ag_other");
+    renderLanding();
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_other");
+  });
+
+  it("keeps an explicit pick ahead of project and global defaults", async () => {
+    writeDefaultAgentId("ag_other");
+    setProjectConfig({ agent_id: "ag_other" });
+    renderLanding();
+    selectAgent("ag_hello");
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_hello");
+  });
+
+  it("preserves an explicit agent when the same project's defaults refresh", async () => {
+    writeDefaultAgentId("ag_other");
+    const { rerender } = renderLanding();
+    selectAgent("ag_hello");
+    setProjectConfig({ agent_id: "ag_other" });
+    rerender(<NewChatLandingScreen />);
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_hello");
+  });
+
+  it("requires an explicit replacement when the global default is unavailable", async () => {
+    searchParams = new URLSearchParams("");
+    writeDefaultAgentId("missing-agent");
+    renderLanding();
+    expect(screen.getByTestId("new-chat-landing-agent-select")).toHaveTextContent(
+      "Agent unavailable",
+    );
+    expect(screen.getByTestId("new-chat-landing-submit")).toBeDisabled();
+    selectAgent("ag_other");
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_other");
+    expect(readDefaultAgentId()).toBe("missing-agent");
+  });
+
+  it("waits for a pinned global default to resolve beyond the placeholder catalog", async () => {
+    searchParams = new URLSearchParams("");
+    writeDefaultAgentId("ag_other");
+    vi.mocked(useAvailableAgents).mockReturnValue({
+      data: [agent()],
+      isPlaceholderData: true,
+    } as ReturnType<typeof useAvailableAgents>);
+    const { rerender } = renderLanding();
+    expect(screen.getByTestId("new-chat-landing-submit")).toBeDisabled();
+    setHostsAndAgents();
+    rerender(<NewChatLandingScreen />);
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_other");
+  });
+
+  it("refreshes an implicit draft agent after the global default changes in Settings", async () => {
+    searchParams = new URLSearchParams("");
+    writeDefaultAgentId("ag_hello");
+    const { unmount } = renderLanding();
+    unmount();
+    writeDefaultAgentId("ag_other");
+    renderLanding();
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_other");
+  });
+
+  it("preserves an explicit draft pick over the global default after a remount", async () => {
+    searchParams = new URLSearchParams("");
+    writeDefaultAgentId("ag_other");
+    const { unmount } = renderLanding();
+    selectAgent("ag_hello");
+    unmount();
+    renderLanding();
+    const body = await submitAndReadBody();
+    expect(body.agent_id).toBe("ag_hello");
+  });
+
   it("discards project A's parked draft slots so project B's remount seeds B's defaults", async () => {
     const BETA_REPO = "/Users/corey/projects/beta";
     // Distinct stored defaults per project: Alpha pins ag_other + its repo,
