@@ -47,30 +47,72 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it("keeps the selected workspace when chat moves to another host and persists explicit selection", async () => {
+it("follows the chat's workspace and ignores the old globally saved selection", async () => {
+  localStorage.setItem("omnigent:workbench-selection:owner", "revoked");
   const view = renderHook(({ session }) => useWorkbenchSelection(session), {
     wrapper: wrapper(),
     initialProps: { session: "chat-a" },
   });
   await waitFor(() => expect(view.result.current.workspace?.id).toBe("first"));
   view.rerender({ session: "chat-b" });
-  await waitFor(() => expect(view.result.current.chatWorkspace?.id).toBe("second"));
-  expect(view.result.current.workspace?.id).toBe("first");
-  expect(view.result.current.mismatch).toBe(true);
-  act(() => view.result.current.select(second));
-  await waitFor(() => expect(view.result.current.mismatch).toBe(false));
-  expect(localStorage.getItem("omnigent:workbench-selection:owner")).toBe("second");
-  view.unmount();
-  const reopened = renderHook(() => useWorkbenchSelection("chat-a"), { wrapper: wrapper() });
-  await waitFor(() => expect(reopened.result.current.workspace?.id).toBe("second"));
-  expect(reopened.result.current.workspace?.host_id).toBe("host-b");
+  await waitFor(() => expect(view.result.current.workspace?.id).toBe("second"));
+  expect(
+    vi.mocked(authenticatedFetch).mock.calls.every(([url]) => String(url).endsWith("/resolve")),
+  ).toBe(true);
 });
 
-it("keeps a revoked selection unavailable rather than silently switching to the chat filesystem", async () => {
-  localStorage.setItem("omnigent:workbench-selection:owner", "revoked");
-  const view = renderHook(() => useWorkbenchSelection("chat-a"), { wrapper: wrapper() });
+it("does not show another chat's workspace when resolution fails", async () => {
+  const view = renderHook(({ session }) => useWorkbenchSelection(session), {
+    wrapper: wrapper(),
+    initialProps: { session: "chat-a" },
+  });
+  await waitFor(() => expect(view.result.current.workspace?.id).toBe("first"));
+  vi.mocked(authenticatedFetch).mockResolvedValueOnce(new Response("{}", { status: 503 }));
+  view.rerender({ session: "chat-b" });
   await waitFor(() => expect(view.result.current.error).toBeTruthy());
   expect(view.result.current.workspace).toBeUndefined();
-  expect(view.result.current.selectedId).toBe("revoked");
-  expect(localStorage.getItem("omnigent:workbench-selection:owner")).toBe("revoked");
+});
+
+it("ignores a late response from the outgoing chat", async () => {
+  let finish!: (response: Response) => void;
+  vi.mocked(authenticatedFetch).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = renderHook(({ session }) => useWorkbenchSelection(session), {
+    wrapper: wrapper(),
+    initialProps: { session: "chat-a" },
+  });
+  view.rerender({ session: "chat-b" });
+  await waitFor(() => expect(view.result.current.workspace?.id).toBe("second"));
+  await act(async () => finish(new Response(JSON.stringify(first))));
+  expect(view.result.current.workspace?.id).toBe("second");
+});
+
+it("has no workspace on the new-chat page", async () => {
+  const view = renderHook(() => useWorkbenchSelection(undefined), { wrapper: wrapper() });
+  expect(view.result.current.workspace).toBeUndefined();
+  expect(view.result.current.isLoading).toBe(false);
+  expect(authenticatedFetch).not.toHaveBeenCalled();
+});
+
+it("keeps the original target until its dirty-file guard accepts the switch", async () => {
+  let accept!: () => void;
+  const guard = vi.fn((_target, apply) => {
+    accept = apply;
+  });
+  const view = renderHook(({ session }) => useWorkbenchSelection(session, true, guard), {
+    wrapper: wrapper(),
+    initialProps: { session: "chat-a" },
+  });
+  await waitFor(() => expect(view.result.current.workspace?.id).toBe("first"));
+  view.rerender({ session: "chat-b" });
+  await waitFor(() => expect(guard).toHaveBeenCalled());
+  expect(view.result.current.workspace?.id).toBe("first");
+  expect(view.result.current.sourceSessionId).toBe("chat-a");
+  act(() => accept());
+  expect(view.result.current.workspace?.id).toBe("second");
+  expect(view.result.current.sourceSessionId).toBe("chat-b");
 });

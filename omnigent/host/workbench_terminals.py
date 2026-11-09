@@ -46,6 +46,7 @@ class ManualTerminal:
     output: str = ""
     socket_path: str = ""
     private_dir: str = ""
+    cwd: str | None = None
 
     def public(self) -> dict[str, Any]:
         value = asdict(self)
@@ -200,6 +201,14 @@ class HostWorkbenchTerminals:
                     raise FileNotFoundError("workspace directory is missing")
                 if sum(r.state == "running" for r in matching) >= ACTIVE_LIMIT:
                     raise ValueError("workspace terminal limit reached")
+                requested_cwd = frame.params.get("cwd", "")
+                if not isinstance(requested_cwd, str) or "\x00" in requested_cwd:
+                    raise ValueError("invalid terminal working directory")
+                cwd = (Path(root) / requested_cwd).resolve()
+                if not cwd.is_relative_to(Path(root)):
+                    raise ValueError("terminal working directory is outside the workspace")
+                if not cwd.is_dir():
+                    raise FileNotFoundError("terminal working directory is missing")
                 shell = frame.params.get("terminal")
                 if shell in (None, "", "$SHELL", "shell"):
                     preferred = os.environ.get("SHELL", "")
@@ -223,7 +232,7 @@ class HostWorkbenchTerminals:
                     terminal_id,
                     TerminalEnvSpec(
                         command=shell,
-                        os_env=OSEnvSpec(cwd=root),
+                        os_env=OSEnvSpec(cwd=str(cwd)),
                         keep_alive_after_exit=True,
                         scrollback=2000,
                     ),
@@ -237,6 +246,7 @@ class HostWorkbenchTerminals:
                     time.time(),
                     socket_path=str(created.instance.socket_path),
                     private_dir=str(created.instance.private_dir),
+                    cwd=str(cwd),
                 )
                 try:
                     await created.instance.launch(cwd=created.cwd)

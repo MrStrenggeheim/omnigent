@@ -92,7 +92,11 @@ async def test_chat_cleanup_detach_and_real_shell_exit(tmp_path: Path) -> None:
         return HostTerminalRequestFrame("req", "workspace-a", str(tmp_path), op, params)
 
     try:
-        response = await registry.request(request("create", terminal="shell"))
+        cwd = tmp_path / "nested"
+        cwd.mkdir()
+        response = await registry.request(request("create", terminal="shell", cwd="nested"))
+        assert response["terminal"]["cwd"] == str(cwd)
+        assert response["terminal"]["root"] == str(tmp_path)
         terminal_id = response["terminal"]["id"]
         instance = registry.instances[terminal_id]
         # The chat registry owns none of these instances, even if a chat used the shell.
@@ -105,13 +109,14 @@ async def test_chat_cleanup_detach_and_real_shell_exit(tmp_path: Path) -> None:
                     "req", "workspace-b", str(tmp_path), "stop", {"terminal_id": terminal_id}
                 )
             )
-        await instance.send("printf 'manual-terminal-exit-marker\\n'; exit 7\n")
+        await instance.send("pwd; printf 'manual-terminal-exit-marker\\n'; exit 7\n")
         await poll_until_async(
             lambda: registry.records[terminal_id].state == "exited", timeout_s=10
         )
         record = (await registry.request(request("get", terminal_id=terminal_id)))["terminal"]
         assert record["exit_code"] == 7
         assert "manual-terminal-exit-marker" in record["output"]
+        assert str(cwd) in record["output"]
         assert len(record["output"].encode()) <= OUTPUT_BYTES
         assert terminal_id not in registry.instances
         assert not instance.socket_path.exists()

@@ -1,3 +1,5 @@
+import { setPanelFolder } from "@/lib/panelFolder";
+import { pullRequestIdentity } from "@/lib/pullRequestScope";
 import {
   WorkbenchWorkspaceProvider,
   queryIdentity,
@@ -229,4 +231,63 @@ it("uses one workspace PR cache and mutation target across unrelated chats", asy
     fetch.mock.calls.every(([url]) => String(url).includes("/workbench-workspaces/selected/")),
   ).toBe(true);
   expect(client.getQueryData(["github-info", queryIdentity(workspace)])).toMatchObject(payload);
+});
+
+it("uses the shared folder for PR requests and isolates folder caches", async () => {
+  const workspace = {
+    id: "folder-scope",
+    root: "/work",
+    host_id: "host-a",
+    target_kind: "host" as const,
+    capabilities: ["github"],
+    available: true,
+  };
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL) =>
+      new Response(
+        JSON.stringify({
+          object: "session.github.info",
+          available: true,
+          tracking_available: true,
+          pr: null,
+          prs: [],
+          testFolder: new URL(String(input), "http://test").searchParams.get("folder"),
+        }),
+      ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={client}>
+      <WorkbenchWorkspaceProvider value={workspace}>{children}</WorkbenchWorkspaceProvider>
+    </QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => usePullRequestInfo("chat"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  act(() => setPanelFolder(workspace.id, "/work/repo #1"));
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("folder=repo%20%231"))).toBe(
+      true,
+    ),
+  );
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  const firstKey = [
+    "github-info",
+    pullRequestIdentity({ ...workspace, scopePath: "repo #1" }, "chat"),
+  ];
+  expect(client.getQueryData(firstKey)).toBeTruthy();
+  act(() => setPanelFolder(workspace.id, "/work/repo-two"));
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("folder=repo-two"))).toBe(
+      true,
+    ),
+  );
+  const secondKey = [
+    "github-info",
+    pullRequestIdentity({ ...workspace, scopePath: "repo-two" }, "chat"),
+  ];
+  await waitFor(() => expect(client.getQueryData(secondKey)).toBeTruthy());
+  expect(client.getQueryData(firstKey)).not.toBe(client.getQueryData(secondKey));
+  unmount();
+  setPanelFolder(workspace.id, null);
 });

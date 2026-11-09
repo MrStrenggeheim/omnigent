@@ -74,7 +74,7 @@ async def workspace_stack(db_uri, tmp_path):
                         "status": "ok",
                         "exists": True,
                         "type": "directory",
-                        "canonical_path": str(root),
+                        "canonical_path": str(Path(frame.path).expanduser().resolve()),
                     }
                 )
             elif isinstance(frame, (HostFsRequestFrame, HostFsWriteFrame)):
@@ -398,3 +398,33 @@ async def test_provider_uses_workspace_target_and_namespace(workspace_stack, mon
             )
         ).status_code == 404
         assert len(uploads) == 1
+
+        nested = root / "nested repo"
+        nested.mkdir()
+        scoped = await client.get(
+            f"/v1/workbench-workspaces/{workspace['id']}/resources/github",
+            params={"folder": "nested repo"},
+        )
+        assert scoped.status_code == 200, scoped.text
+        assert calls[-1][0] == str(nested)
+        scope_identity = calls[-1][1]
+        assert scope_identity != workspace["id"]
+        attached = await client.post(
+            url + "?folder=nested%20repo",
+            data={"pr_url": "https://provider.example/pr/1"},
+            files={"file": ("nested.png", b"nested bytes")},
+        )
+        assert attached.status_code == 200, attached.text
+        assert uploads[-1][0] == str(nested)
+        assert uploads[-1][1]["session_id"] == scope_identity
+        assert uploads[-1][1]["content"] == b"nested bytes"
+        outside = root.parent / "outside-pr-root"
+        outside.mkdir(exist_ok=True)
+        (root / "outward").symlink_to(outside, target_is_directory=True)
+        for folder in ("../outside-pr-root", str(outside), "outward"):
+            rejected = await client.get(
+                f"/v1/workbench-workspaces/{workspace['id']}/resources/github",
+                params={"folder": folder},
+            )
+            assert rejected.status_code in {400, 403}, rejected.text
+        assert len(calls) == 2

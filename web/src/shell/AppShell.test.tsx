@@ -74,6 +74,17 @@ vi.mock("@/hooks/useTerminals", async (importOriginal) => ({
   useDeleteTerminal: vi.fn(() => ({ mutate: vi.fn(), isPending: false, isError: false })),
 }));
 
+// These shell tests exercise legacy session resources; workspace resolution has its own suite.
+vi.mock("@/hooks/useWorkbenchSelection", () => ({
+  useWorkbenchSelection: () => ({
+    workspace: undefined,
+    chatWorkspace: undefined,
+    selectedId: null,
+    isLoading: false,
+    error: null,
+  }),
+}));
+
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
   useWorkspaceGitChanges: vi.fn(() => ({ data: undefined, isLoading: true })),
   useWorkspaceEnvironment: vi.fn(() => ({ data: undefined, isLoading: true })),

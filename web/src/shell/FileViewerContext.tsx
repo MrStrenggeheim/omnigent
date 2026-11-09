@@ -25,6 +25,7 @@ export type FileNavigationGuard = (
   path: string,
   options: OpenFileOptions | undefined,
   navigate: () => void,
+  cancel?: () => void,
 ) => void;
 
 interface FileViewerContextType {

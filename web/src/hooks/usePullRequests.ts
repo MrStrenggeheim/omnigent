@@ -1,9 +1,9 @@
 import {
-  useWorkbenchWorkspace,
-  queryIdentity,
-  resourceBase,
-  type WorkspaceResourceTarget,
-} from "@/lib/workbenchWorkspace";
+  usePullRequestWorkspace,
+  pullRequestIdentity,
+  pullRequestUrl,
+} from "@/lib/pullRequestScope";
+import { resourceBase, type WorkspaceResourceTarget } from "@/lib/workbenchWorkspace";
 // Serves every git provider. Runtime names (query keys, routes, test ids) keep
 // the `github` prefix because they are stable wire ids.
 //
@@ -390,7 +390,7 @@ export async function fetchPullRequestInfo(
   workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestInfo> {
   const res = await authenticatedFetch(
-    `${resourceBase(workspace, conversationId)}/github${prQuery(prUrl)}`,
+    pullRequestUrl(`${resourceBase(workspace, conversationId)}/github${prQuery(prUrl)}`, workspace),
   );
   if (res.status === 404) {
     // Preserve the server's message so an outdated host (no github route) is
@@ -486,8 +486,8 @@ export function usePullRequestInfo(
   rawConversationId: string | undefined,
   options?: { poll?: boolean; prUrl?: string },
 ) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, rawConversationId);
+  const workspace = usePullRequestWorkspace(rawConversationId);
+  const identity = pullRequestIdentity(workspace, rawConversationId);
   // A `temp:*` id (navigate-first new-chat window) has no server session.
   const conversationId = isTempConvId(rawConversationId) ? undefined : rawConversationId;
   const serveable = useWorkspaceServeable(conversationId);
@@ -534,7 +534,7 @@ async function postPullRequestPreference(
   workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestInfo> {
   const res = await authenticatedFetch(
-    `${resourceBase(workspace, conversationId)}/github/preferences`,
+    pullRequestUrl(`${resourceBase(workspace, conversationId)}/github/preferences`, workspace),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -553,8 +553,8 @@ async function postPullRequestPreference(
  * update the info cache, and invalidate the selected PR's files and diff.
  */
 export function useSetPullRequestPreference(conversationId: string | undefined) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: PullRequestPreferenceInput) =>
@@ -574,7 +574,10 @@ async function fetchPullRequestChangedFiles(
   workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestChangedFilesResult> {
   const res = await authenticatedFetch(
-    `${resourceBase(workspace, conversationId)}/github/changes${prQuery(prUrl)}`,
+    pullRequestUrl(
+      `${resourceBase(workspace, conversationId)}/github/changes${prQuery(prUrl)}`,
+      workspace,
+    ),
   );
   if (res.status === 404) return { available: false, data: [] };
   if (res.status === 503 && (await isRunnerUnavailable503(res))) {
@@ -596,8 +599,8 @@ export function usePullRequestChangedFiles(
   prUrl?: string,
   revision?: string,
 ) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const serveable = useWorkspaceServeable(conversationId);
   const retry = useRunnerOfflineRetry(serveable !== false);
   return useQuery({
@@ -633,7 +636,10 @@ export async function fetchPullRequestFileContents(
   }
   const params = query.size ? `?${query}` : "";
   const res = await authenticatedFetch(
-    `${resourceBase(workspace, conversationId)}/github/diff/${encodedPath}${params}`,
+    pullRequestUrl(
+      `${resourceBase(workspace, conversationId)}/github/diff/${encodedPath}${params}`,
+      workspace,
+    ),
   );
   if (res.status === 503 && (await isRunnerUnavailable503(res))) {
     throw new RunnerOfflineError();
@@ -658,7 +664,10 @@ async function fetchPullRequestDiff(
   workspace?: WorkspaceResourceTarget,
 ): Promise<PullRequestDiffResponse> {
   const res = await authenticatedFetch(
-    `${resourceBase(workspace, conversationId)}/github/diff${prQuery(prUrl)}`,
+    pullRequestUrl(
+      `${resourceBase(workspace, conversationId)}/github/diff${prQuery(prUrl)}`,
+      workspace,
+    ),
   );
   if (res.status === 503 && (await isRunnerUnavailable503(res))) {
     throw new RunnerOfflineError();
@@ -679,8 +688,8 @@ export function usePullRequestDiff(
   prUrl?: string,
   revision?: string,
 ) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const serveable = useWorkspaceServeable(conversationId);
   const retry = useRunnerOfflineRetry(serveable !== false);
   return useQuery({
@@ -694,13 +703,13 @@ export function usePullRequestDiff(
 }
 
 export function useUpdateSessionPr(conversationId: string) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: { url: string; action: "attach" | "remove" }) => {
       const response = await authenticatedFetch(
-        `${resourceBase(workspace, conversationId)}/github/prs`,
+        pullRequestUrl(`${resourceBase(workspace, conversationId)}/github/prs`, workspace),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -751,10 +760,15 @@ async function fetchPullRequestEditResource<T>(
   request: { prUrl: string } | { body: unknown } | { form: FormData },
   workspace?: WorkspaceResourceTarget,
 ): Promise<T> {
-  const path = `${resourceBase(workspace, conversationId)}/github/${resource}`;
+  const path = pullRequestUrl(
+    `${resourceBase(workspace, conversationId)}/github/${resource}`,
+    workspace,
+  );
   const response =
     "prUrl" in request
-      ? await authenticatedFetch(`${path}${prQuery(request.prUrl)}`)
+      ? await authenticatedFetch(
+          `${path}${prQuery(request.prUrl).replace("?", path.includes("?") ? "&" : "?")}`,
+        )
       : await authenticatedFetch(
           path,
           "form" in request
@@ -774,8 +788,8 @@ async function fetchPullRequestEditResource<T>(
 
 /** The labels the selected PR's repository offers, for the label picker. */
 export function usePullRequestRepoLabels(conversationId: string, prUrl: string, enabled: boolean) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   return useQuery({
     queryKey: ["github-labels", identity, prUrl],
     queryFn: () =>
@@ -821,8 +835,8 @@ export function applyPullRequestLabelChange(
  * labels into the info cache, and a failure refetches it.
  */
 export function useUpdatePullRequestLabels(conversationId: string) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   const infoKey = ["github-info", identity];
   return useMutation({
@@ -869,8 +883,8 @@ export function usePullRequestMergeOptions(
   prUrl: string,
   enabled: boolean,
 ) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   return useQuery({
     queryKey: ["github-merge-options", identity, prUrl],
     queryFn: () =>
@@ -906,8 +920,8 @@ export interface PullRequestMergeRequest {
  * undone, so nothing shows it as merged until the refetched info says so.
  */
 export function useMergePullRequest(conversationId: string) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
     mutationKey: ["github-merge", identity],
@@ -931,8 +945,8 @@ export function useMergePullRequest(conversationId: string) {
 
 /** Turn off the selected PR's auto-merge; the refetched info shows the result. */
 export function useDisablePullRequestAutoMerge(conversationId: string) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   return useMutation({
     mutationKey: ["github-disable-auto-merge", identity],
@@ -972,8 +986,8 @@ export function usePullRequestReviewCandidates(
   prUrl: string,
   enabled: boolean,
 ) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   return useQuery({
     queryKey: ["github-reviewers", identity, prUrl],
     queryFn: () =>
@@ -1040,8 +1054,8 @@ export function applyPullRequestReviewerChange(
  * refetches it.
  */
 export function useUpdatePullRequestReviewers(conversationId: string) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   const infoKey = ["github-info", identity];
   return useMutation({
@@ -1091,8 +1105,8 @@ interface PullRequestDetails {
  * fallback. A success writes GitHub's resulting title and body into the info cache.
  */
 export function useUpdatePullRequestDetails(conversationId: string) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   const infoKey = ["github-info", identity];
   return useMutation({
@@ -1184,8 +1198,8 @@ function mergePostedComments(comments: PullRequestComment[], posted: PullRequest
 
 /** A PR-scoped draft survives tab/session switches and settles even after unmount. */
 export function usePullRequestCommentComposer(conversationId: string, prUrl: string) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId);
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId);
   const queryClient = useQueryClient();
   const key = commentDraftKey(identity!, prUrl);
   const initialDraft: PullRequestCommentDraft = { body: "", pending: false, error: null };

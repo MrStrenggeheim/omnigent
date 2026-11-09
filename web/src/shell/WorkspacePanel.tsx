@@ -1,3 +1,4 @@
+import { usePanelFolder } from "@/lib/panelFolder";
 import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { ChatActivityPanel, type ChatActivityTerminalTarget } from "./ChatActivityPanel";
 import type { FilePosition, OpenFileOptions } from "./FileViewerContext";
@@ -25,7 +26,6 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type ReactElement,
-  type ReactNode,
   type RefObject,
   lazy,
   memo,
@@ -694,8 +694,6 @@ interface WorkspacePanelProps {
 
   fileComparisonScope?: "files" | "changes";
   workspaceUnavailable?: string;
-  workspaceControl?: ReactNode;
-  workspaceMismatch?: ReactNode;
   onOpenActivityTerminal?: (target: ChatActivityTerminalTarget) => void;
   /** Active chat for attribution; workspace resource identity comes from context. */
   conversationId: string;
@@ -834,10 +832,8 @@ interface WorkspacePanelProps {
  */
 function WorkspacePanelImpl({
   conversationId,
-  workspaceControl,
   workspaceUnavailable,
   fileComparisonScope,
-  workspaceMismatch,
   onOpenActivityTerminal,
   contained = false,
   sessionHarness,
@@ -900,15 +896,16 @@ function WorkspacePanelImpl({
   const workspaceIdentity = workspace?.id ?? conversationId;
   const fileContext = useContext(FileViewerContext);
   const workspaceRoot = workspace?.root ?? fileContext?.workspaceRoot ?? null;
+  const panelFolder = usePanelFolder(workspaceIdentity, workspaceRoot);
   const [contentSearchScope, setContentSearchScope] = useState(() =>
     readBrowseLocation(workspaceIdentity, workspaceRoot),
   );
   const [contentReplaceOpen, setContentReplaceOpen] = useState(false);
   const [contentReplaceFocusNonce, setContentReplaceFocusNonce] = useState(0);
   useEffect(() => {
-    setContentSearchScope(readBrowseLocation(workspaceIdentity, workspaceRoot));
+    setContentSearchScope(panelFolder);
     setContentReplaceOpen(false);
-  }, [workspaceIdentity, workspaceRoot]);
+  }, [workspaceIdentity, workspaceRoot, panelFolder]);
   const browsers = useBrowserTabs(conversationId);
   const closeBrowserTab = async (tabId: string) => {
     const closed = await browsers.close(tabId);
@@ -1530,7 +1527,6 @@ function WorkspacePanelImpl({
           onKeyDown={handlePermanentTabNumber}
           className="workspace-control-header workspace-tab-strip flex items-center overflow-x-hidden overflow-y-hidden border-b border-border px-2"
         >
-          {workspaceControl}
           <WorkspaceTabsScroller
             grow={showOpenTabs}
             onOverflowChange={setTabsOverflow}
@@ -1798,7 +1794,6 @@ function WorkspacePanelImpl({
             </WorkspaceTabTooltip>
           </div>
         </div>
-        {workspaceMismatch}
         {/* Tab content — single slot. An open shell tab holds its xterm; a
           file tab holds FileViewer; the Files/Changes tabs show FilesPanel
           (tree vs changed-only list); Subagents lists the root's children +
@@ -1833,7 +1828,7 @@ function WorkspacePanelImpl({
             >
               <p>Workspace unavailable</p>
               <p>{workspaceUnavailable}</p>
-              <p>Choose a workspace from the header or reconnect its host.</p>
+              <p>Reconnect the chat’s host or reopen the chat to resolve its workspace.</p>
             </div>
           ) : pending ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">

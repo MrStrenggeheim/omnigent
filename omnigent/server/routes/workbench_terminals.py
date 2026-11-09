@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnigent.errors import OmnigentError
 from omnigent.host.frames import HostTerminalStreamFrame, encode_host_frame
 from omnigent.process_logging import data_dir
+from omnigent.server.workbench_resources import relative_path
 from omnigent.server.workbench_terminal_service import WorkbenchTerminalService, terminal_resource
 from omnigent.server.workbench_workspace_service import WorkbenchWorkspaceService
 
@@ -23,6 +24,7 @@ class CreateManualTerminal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     terminal: str = Field(default="shell", max_length=256)
+    cwd: str | None = Field(default=None, max_length=8192)
     session_key: str | None = Field(default=None, max_length=128)
     usage_session_id: str | None = Field(default=None, max_length=128)
 
@@ -63,7 +65,13 @@ def create_workbench_terminals_router(
         workspace = await service.require_workspace(request, workspace_id, write=True)
         # usage_session_id is a client provenance hint, never ownership or authority.
         result = await terminals.rpc(
-            workspace, "create", {"terminal": body.terminal, "session_key": body.session_key}
+            workspace,
+            "create",
+            {
+                "terminal": body.terminal,
+                "session_key": body.session_key,
+                **({"cwd": relative_path(workspace, body.cwd)} if body.cwd else {}),
+            },
         )
         return terminal_resource(result["terminal"])
 

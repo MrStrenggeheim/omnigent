@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import logging
 import mimetypes
 import os
@@ -1537,10 +1538,29 @@ def register_resource_routes(
             )
         return root
 
-    async def _github_call(session_id: str, operation: str, **kwargs: Any) -> JSONResponse:
+    async def _github_call(
+        request: Request, session_id: str, operation: str, **kwargs: Any
+    ) -> JSONResponse:
         from omnigent.runner import pr_resource
 
         root = await _github_workspace_root(session_id)
+        folder = request.query_params.get("folder", "")
+        if folder:
+            from omnigent.entities.environment_filesystem import InvalidPath
+            from omnigent.runner.environment_filesystem import _validate_path
+
+            try:
+                relative = _validate_path(folder)
+            except InvalidPath as exc:
+                raise HTTPException(400, str(exc)) from exc
+            base = Path(root).resolve()
+            selected = (base / relative).resolve()
+            if not selected.is_relative_to(base):
+                raise HTTPException(403, "Folder is outside the workspace")
+            if not selected.is_dir():
+                raise HTTPException(404, "Selected folder is unavailable")
+            root = str(selected)
+            session_id += ":" + hashlib.sha256(root.encode()).hexdigest()[:16]
         function = getattr(pr_resource, operation)
         try:
             result = await asyncio.to_thread(function, root, session_id=session_id, **kwargs)
@@ -1549,21 +1569,28 @@ def register_resource_routes(
         return JSONResponse(status_code=200, content=result)
 
     @app.get("/v1/sessions/{session_id}/resources/github")
-    async def read_github_info(session_id: str, pr_url: str | None = None) -> JSONResponse:
-        return await _github_call(session_id, "pr_info", pr_url=pr_url)
+    async def read_github_info(
+        session_id: str, request: Request, pr_url: str | None = None
+    ) -> JSONResponse:
+        return await _github_call(request, session_id, "pr_info", pr_url=pr_url)
 
     @app.get("/v1/sessions/{session_id}/resources/github/changes")
-    async def read_github_changes(session_id: str, pr_url: str | None = None) -> JSONResponse:
-        return await _github_call(session_id, "pr_changed_files", pr_url=pr_url)
+    async def read_github_changes(
+        session_id: str, request: Request, pr_url: str | None = None
+    ) -> JSONResponse:
+        return await _github_call(request, session_id, "pr_changed_files", pr_url=pr_url)
 
     @app.get("/v1/sessions/{session_id}/resources/github/diff")
-    async def read_github_pr_diff(session_id: str, pr_url: str | None = None) -> JSONResponse:
-        return await _github_call(session_id, "pr_diff", pr_url=pr_url)
+    async def read_github_pr_diff(
+        session_id: str, request: Request, pr_url: str | None = None
+    ) -> JSONResponse:
+        return await _github_call(request, session_id, "pr_diff", pr_url=pr_url)
 
     @app.get("/v1/sessions/{session_id}/resources/github/diff/{relative_path:path}")
     async def read_github_file_diff(
         session_id: str,
         relative_path: str,
+        request: Request,
         base: str | None = None,
         pr_url: str | None = None,
         previous_path: str | None = None,
@@ -1575,6 +1602,7 @@ def register_resource_routes(
         ):
             raise HTTPException(status_code=400, detail="Invalid path")
         return await _github_call(
+            request,
             session_id,
             "pr_file_diff",
             base=base or "",
@@ -1591,13 +1619,18 @@ def register_resource_routes(
         if not isinstance(body, dict) or not isinstance(body.get("url"), str):
             raise HTTPException(status_code=400, detail="Expected a pull request URL")
         return await _github_call(
-            session_id, "update_session_pr", url=body["url"], action=body.get("action", "attach")
+            request,
+            session_id,
+            "update_session_pr",
+            url=body["url"],
+            action=body.get("action", "attach"),
         )
 
     @app.post("/v1/sessions/{session_id}/resources/github/preferences")
     async def set_github_preference_route(session_id: str, request: Request) -> JSONResponse:
         body = await request.json()
         return await _github_call(
+            request,
             session_id,
             "set_pr_preference",
             account=body.get("account"),
@@ -1606,8 +1639,10 @@ def register_resource_routes(
         )
 
     @app.get("/v1/sessions/{session_id}/resources/github/labels")
-    async def read_github_labels(session_id: str, pr_url: str | None = None) -> JSONResponse:
-        return await _github_call(session_id, "pr_labels", pr_url=pr_url)
+    async def read_github_labels(
+        session_id: str, request: Request, pr_url: str | None = None
+    ) -> JSONResponse:
+        return await _github_call(request, session_id, "pr_labels", pr_url=pr_url)
 
     @app.post("/v1/sessions/{session_id}/resources/github/labels")
     async def update_github_labels_route(session_id: str, request: Request) -> JSONResponse:
@@ -1615,6 +1650,7 @@ def register_resource_routes(
         if not isinstance(body, dict) or not isinstance(body.get("pr_url"), str):
             raise HTTPException(status_code=400, detail="Expected a pull request URL")
         return await _github_call(
+            request,
             session_id,
             "update_pr_labels",
             pr_url=body["pr_url"],
@@ -1624,9 +1660,9 @@ def register_resource_routes(
 
     @app.get("/v1/sessions/{session_id}/resources/github/merge-options")
     async def read_github_merge_options(
-        session_id: str, pr_url: str | None = None
+        session_id: str, request: Request, pr_url: str | None = None
     ) -> JSONResponse:
-        return await _github_call(session_id, "pr_merge_options", pr_url=pr_url)
+        return await _github_call(request, session_id, "pr_merge_options", pr_url=pr_url)
 
     @app.post("/v1/sessions/{session_id}/resources/github/merge")
     async def merge_github_pr_route(session_id: str, request: Request) -> JSONResponse:
@@ -1634,6 +1670,7 @@ def register_resource_routes(
         if not isinstance(body, dict) or not isinstance(body.get("pr_url"), str):
             raise HTTPException(status_code=400, detail="Expected a pull request URL")
         return await _github_call(
+            request,
             session_id,
             "merge_pr",
             pr_url=body["pr_url"],
@@ -1646,11 +1683,15 @@ def register_resource_routes(
         body = await request.json()
         if not isinstance(body, dict) or not isinstance(body.get("pr_url"), str):
             raise HTTPException(status_code=400, detail="Expected a pull request URL")
-        return await _github_call(session_id, "disable_pr_auto_merge", pr_url=body["pr_url"])
+        return await _github_call(
+            request, session_id, "disable_pr_auto_merge", pr_url=body["pr_url"]
+        )
 
     @app.get("/v1/sessions/{session_id}/resources/github/reviewers")
-    async def read_github_reviewers(session_id: str, pr_url: str | None = None) -> JSONResponse:
-        return await _github_call(session_id, "pr_review_candidates", pr_url=pr_url)
+    async def read_github_reviewers(
+        session_id: str, request: Request, pr_url: str | None = None
+    ) -> JSONResponse:
+        return await _github_call(request, session_id, "pr_review_candidates", pr_url=pr_url)
 
     @app.post("/v1/sessions/{session_id}/resources/github/reviewers")
     async def update_github_reviewers_route(session_id: str, request: Request) -> JSONResponse:
@@ -1658,6 +1699,7 @@ def register_resource_routes(
         if not isinstance(body, dict) or not isinstance(body.get("pr_url"), str):
             raise HTTPException(status_code=400, detail="Expected a pull request URL")
         return await _github_call(
+            request,
             session_id,
             "update_pr_reviewers",
             pr_url=body["pr_url"],
@@ -1671,7 +1713,7 @@ def register_resource_routes(
         if not isinstance(body, dict) or not isinstance(body.get("pr_url"), str):
             raise HTTPException(status_code=400, detail="Expected a pull request URL")
         return await _github_call(
-            session_id, "create_pr_comment", pr_url=body["pr_url"], body=body.get("body")
+            request, session_id, "create_pr_comment", pr_url=body["pr_url"], body=body.get("body")
         )
 
     @app.post("/v1/sessions/{session_id}/resources/github/details")
@@ -1680,6 +1722,7 @@ def register_resource_routes(
         if not isinstance(body, dict) or not isinstance(body.get("pr_url"), str):
             raise HTTPException(status_code=400, detail="Expected a pull request URL")
         return await _github_call(
+            request,
             session_id,
             "update_pr_details",
             pr_url=body["pr_url"],
@@ -1693,6 +1736,7 @@ def register_resource_routes(
     ) -> JSONResponse:
         # The server forwards the file's raw bytes, already capped at its size limit.
         return await _github_call(
+            request,
             session_id,
             "upload_pr_attachment",
             pr_url=pr_url,

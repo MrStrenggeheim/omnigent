@@ -1,3 +1,4 @@
+import { usePanelFolder } from "@/lib/panelFolder";
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -258,6 +259,7 @@ export async function createTerminal(
   conversationId: string,
   terminal: string,
   workspace?: WorkbenchWorkspace | null,
+  cwd?: string,
 ): Promise<TerminalInfo> {
   // Random session key so repeated clicks launch fresh terminals —
   // the runner's launch is idempotent per (terminal, session_key), so
@@ -270,7 +272,11 @@ export async function createTerminal(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ terminal, session_key: sessionKey }),
+      body: JSON.stringify({
+        terminal,
+        session_key: sessionKey,
+        ...(workspace && cwd ? { cwd } : {}),
+      }),
     },
   );
   if (!res.ok) {
@@ -307,9 +313,10 @@ export function useCreateTerminal(
   explicitWorkspace?: WorkbenchWorkspace | null,
 ) {
   const workspace = useWorkbenchWorkspace(explicitWorkspace);
+  const folder = usePanelFolder(workspace?.id, workspace?.root ?? null);
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (terminal: string) => createTerminal(conversationId, terminal, workspace),
+    mutationFn: (terminal: string) => createTerminal(conversationId, terminal, workspace, folder),
     onMutate: async () => {
       const key = workspace
         ? ["workbench-terminals", workspace.id]

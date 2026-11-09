@@ -1,4 +1,5 @@
-import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
+import { PanelFolderBar } from "./PanelFolderBar";
+import { usePullRequestWorkspace, pullRequestIdentity } from "@/lib/pullRequestScope";
 import { isEditorLevel } from "@/lib/permissionsApi";
 // Serves every git provider. Runtime names (query keys, routes, test ids) keep
 // the `github` prefix because they are stable wire ids.
@@ -1020,18 +1021,18 @@ function pullRequestLabel(pr: PullRequestAssociation, sessionProvider?: string |
 }
 
 export function PullRequestPanel({ conversationId }: { conversationId: string }) {
-  const workspace = useWorkbenchWorkspace();
+  const workspace = usePullRequestWorkspace(conversationId);
   return (
     <PullRequestPanelContent
-      key={queryIdentity(workspace, conversationId)}
+      key={pullRequestIdentity(workspace, conversationId)}
       conversationId={conversationId}
     />
   );
 }
 
 function PullRequestPanelContent({ conversationId }: { conversationId: string }) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId)!;
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId)!;
   const isMobileViewport = useIsMobileViewport();
   const [selection, setSelection] = useState<{ sessionId: string; url?: string }>();
   const [prPickerOpen, setPrPickerOpen] = useState(false);
@@ -1176,7 +1177,10 @@ function PullRequestPanelContent({ conversationId }: { conversationId: string })
     <div className="flex h-full min-h-0 flex-col">
       {showTrackingControls ? (
         <div className="workspace-control-header flex items-center gap-2 border-b border-border px-2">
-          <PanelTitle copy={copy} showTitle={prs.length === 0} />
+          <PanelFolderBar
+            conversationId={conversationId}
+            fallback={<PanelTitle copy={copy} showTitle={prs.length === 0} />}
+          />
           <div className="ml-auto flex min-w-0 flex-1 items-center gap-2">
             {prs.length > 0 && (
               <TooltipProvider>
@@ -1328,8 +1332,8 @@ function PullRequestPanelDetails({
   refreshButton?: React.ReactNode;
   emptyStateAction?: React.ReactNode;
 }) {
-  const workspace = useWorkbenchWorkspace();
-  const identity = queryIdentity(workspace, conversationId)!;
+  const workspace = usePullRequestWorkspace(conversationId);
+  const identity = pullRequestIdentity(workspace, conversationId)!;
   const baseRef = info.data?.base_ref ?? undefined;
   const prUrl = info.data?.selected_pr_url;
   const headSha = info.data?.pr?.head_sha;
@@ -1696,7 +1700,12 @@ function PullRequestPanelDetails({
         <div className="shrink-0 border-b border-border pb-0.5">
           <div className="px-3 pt-2">
             <div className="flex items-center gap-2">
-              {showProviderIcon && <PanelTitle copy={copy} />}
+              {showProviderIcon && (
+                <PanelFolderBar
+                  conversationId={conversationId}
+                  fallback={<PanelTitle copy={copy} />}
+                />
+              )}
               <span className="block min-w-0 truncate text-xs text-muted-foreground">
                 {data.repo?.name_with_owner ?? copy.label}
                 {data.branch && (

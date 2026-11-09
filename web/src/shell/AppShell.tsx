@@ -1,7 +1,7 @@
+import { readBrowseLocation } from "@/lib/panelFolder";
 import { getFileComparisonScope, setFileComparisonScope } from "@/lib/workspaceComparison";
 import { WorkbenchWorkspaceProvider, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { useWorkbenchSelection } from "@/hooks/useWorkbenchSelection";
-import { WorkbenchSelector } from "./WorkbenchSelector";
 import { ChatActivityPanel, type ChatActivityTerminalTarget } from "./ChatActivityPanel";
 import {
   BotIcon,
@@ -35,7 +35,14 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { reconcileWorkspaceFilePath, type WorkspaceFilesChanged } from "@/lib/workspaceFileEvents";
 import { toast } from "@/lib/notifications";
-import { Outlet, useLocation, useParams, useRebasePath, useSearchParams } from "@/lib/routing";
+import {
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+  useRebasePath,
+  useSearchParams,
+} from "@/lib/routing";
 import { CANVAS_CONVERSATION_MIN_WIDTH } from "@/canvas/CanvasWorkspace";
 import { isCanvasPathname } from "@/canvas/canvasNavigation";
 import { useCanvasSidebar } from "@/canvas/useCanvasSidebar";
@@ -312,20 +319,35 @@ function AppShellImpl() {
   // create window (or on a stale temp reload, before ChatPage redirects).
   const serverConversationId = isTempConvId(conversationId) ? undefined : conversationId;
   const pendingConversation = conversationId != null && serverConversationId == null;
+  const navigateRoute = useNavigate();
+  const fileNavigationGuardsRef = useRef(new Set<FileNavigationGuard>());
   const workbench = useWorkbenchSelection(
     serverConversationId,
     true,
-    new URLSearchParams(location.search).get("workspace"),
+    (target, apply, previousSession) => {
+      const guards = [...fileNavigationGuardsRef.current];
+      const proceed = (index: number) => {
+        const guard = guards[index];
+        if (guard)
+          guard(
+            "",
+            { workspaceId: target.id },
+            () => proceed(index + 1),
+            () => {
+              if (previousSession) navigateRoute(`/c/${previousSession}`, { replace: true });
+            },
+          );
+        else apply();
+      };
+      proceed(0);
+    },
   );
-  const selectWorkbench = workbench.select;
-  const chatWorkspace = workbench.chatWorkspace;
   const workspaceScope = useMemo<WorkbenchWorkspace | null>(
     () =>
       workbench.workspace
         ? {
             ...workbench.workspace,
-            chatSessionId:
-              workbench.chatWorkspace?.id === workbench.workspace.id ? serverConversationId : null,
+            chatSessionId: workbench.sourceSessionId ?? serverConversationId,
           }
         : workbench.selectedId
           ? {
@@ -339,7 +361,7 @@ function AppShellImpl() {
               chatSessionId: null,
             }
           : null,
-    [workbench.workspace, workbench.selectedId, workbench.chatWorkspace?.id, serverConversationId],
+    [workbench.workspace, workbench.selectedId, workbench.sourceSessionId, serverConversationId],
   );
   const workspaceStateId = workspaceScope ? `workbench:${workspaceScope.id}` : null;
   const mobileSearchScopeId = workspaceStateId ?? conversationId;
@@ -1354,8 +1376,7 @@ function AppShellImpl() {
         : {};
     const cited = searchParams.get("file");
     const citationBelongsHere =
-      searchParams.get("workspace") === workbench.workspace?.id ||
-      workbench.chatWorkspace?.id === workbench.workspace?.id;
+      !searchParams.get("workspace") || searchParams.get("workspace") === workbench.workspace?.id;
     const file = citationBelongsHere && cited ? cited : (stored.selectedFilePath ?? null);
     const files = stored.openFiles ?? [];
     setOpenFiles(file && !files.includes(file) ? [...files, file] : files);
@@ -1580,7 +1601,6 @@ function AppShellImpl() {
     ],
   );
 
-  const fileNavigationGuardsRef = useRef(new Set<FileNavigationGuard>());
   const registerNavigationGuard = useCallback((guard: FileNavigationGuard) => {
     fileNavigationGuardsRef.current.add(guard);
     return () => {
@@ -1600,70 +1620,7 @@ function AppShellImpl() {
     [commitFileNavigation],
   );
 
-  const selectWorkspace = useCallback(
-    (nextWorkspace: WorkbenchWorkspace) => {
-      if (nextWorkspace.id === workspaceScope?.id) return;
-      const guards = [...fileNavigationGuardsRef.current];
-      const navigate = (index: number) => {
-        const guard = guards[index];
-        if (guard)
-          guard(selectedFilePath ?? "", { workspaceId: nextWorkspace.id }, () =>
-            navigate(index + 1),
-          );
-        else {
-          setActivityTerminal(null);
-          selectWorkbench(nextWorkspace);
-          setSearchParams(
-            (previous) => {
-              const next = new URLSearchParams(previous);
-              next.set("workspace", nextWorkspace.id);
-              next.delete("file");
-              next.delete("comment");
-              return next;
-            },
-            { replace: true },
-          );
-        }
-      };
-      navigate(0);
-    },
-    [workspaceScope?.id, selectedFilePath, selectWorkbench, setSearchParams],
-  );
-  const openChatFile = useCallback(
-    (path: string, options?: OpenFileOptions) => {
-      const target = chatWorkspace;
-      if (!target || target.id === workspaceScope?.id) {
-        openFileViewer(path, options);
-        return;
-      }
-      const guards = [...fileNavigationGuardsRef.current];
-      const navigate = (index: number) => {
-        const guard = guards[index];
-        if (guard) guard(path, { ...options, workspaceId: target.id }, () => navigate(index + 1));
-        else {
-          writeSessionWorkspaceState(`workbench:${target.id}`, {
-            openFiles: [path],
-            selectedFilePath: path,
-            rightRailTab: "files",
-            open: true,
-          });
-          selectWorkbench(target);
-          setSearchParams(
-            (previous) => {
-              const next = new URLSearchParams(previous);
-              next.set("workspace", target.id);
-              next.set("file", path);
-              next.delete("comment");
-              return next;
-            },
-            { replace: true },
-          );
-        }
-      };
-      navigate(0);
-    },
-    [chatWorkspace, workspaceScope?.id, openFileViewer, selectWorkbench, setSearchParams],
-  );
+  const openChatFile = openFileViewer;
 
   useUiOpenFile(serverConversationId, showFilesPanel, openChatFile);
 
@@ -2465,8 +2422,7 @@ function AppShellImpl() {
     activeConv?.workspace ??
     (workspaceScope ? null : environmentQuery.data?.root) ??
     null;
-  const workspaceHome =
-    workspaceScope && workbench.mismatch ? null : (environmentQuery.data?.home ?? null);
+  const workspaceHome = environmentQuery.data?.home ?? null;
   const fileViewerContextValue = useMemo(
     () => ({
       openFile: openChatFile,
@@ -2756,7 +2712,10 @@ function AppShellImpl() {
           setFilesPanelOpen(false);
           setMobileSearch({
             conversationId: workspaceStateId ?? conversationId ?? "",
-            location: "",
+            location: readBrowseLocation(
+              workspaceScope?.id ?? conversationId ?? "",
+              workspaceScope?.root ?? null,
+            ),
             replace: false,
           });
         });
@@ -2797,7 +2756,6 @@ function AppShellImpl() {
 
   return (
     <MobileWorkspaceProvider
-      headerControl={<WorkbenchSelector selection={workbench} onSelect={selectWorkspace} />}
       onNewShell={
         agentSupportsShells
           ? () => {
@@ -3048,10 +3006,7 @@ function AppShellImpl() {
                         <WorkbenchWorkspaceProvider value={workspaceScope}>
                           <WorkspacePanel
                             conversationId={conversationId ?? ""}
-                            pending={
-                              pendingConversation ||
-                              (!!workbench.selectedId && !workbench.workspace)
-                            }
+                            pending={pendingConversation}
                             width={inlinePanelWidth}
                             inert={!workspacePanelVisible || inlinePanelWidth === 0}
                             open={workspacePanelVisible}
@@ -3073,26 +3028,6 @@ function AppShellImpl() {
                             agentCount={agentCount}
                             rootSessionId={rootSessionId}
                             workspaceUnavailable={workbench.error?.message}
-                            workspaceControl={
-                              <WorkbenchSelector selection={workbench} onSelect={selectWorkspace} />
-                            }
-                            workspaceMismatch={
-                              workbench.mismatch ? (
-                                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-2 py-1 text-xs text-muted-foreground">
-                                  <span>Chat uses another workspace</span>
-                                  <button
-                                    type="button"
-                                    className="underline"
-                                    onClick={() =>
-                                      workbench.chatWorkspace &&
-                                      selectWorkspace(workbench.chatWorkspace)
-                                    }
-                                  >
-                                    Open chat workspace
-                                  </button>
-                                </div>
-                              ) : null
-                            }
                             onOpenActivityTerminal={setActivityTerminal}
                             fileComparisonScope={
                               selectedFilePath

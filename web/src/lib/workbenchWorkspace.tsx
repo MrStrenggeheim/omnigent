@@ -6,9 +6,11 @@ import { isTempConvId } from "./tempConversationId";
 export interface WorkbenchWorkspace extends WorkspaceMetadata {
   chatSessionId?: string | null;
   home?: string | null;
+  scopePath?: string;
 }
 
-export type WorkspaceResourceTarget = Pick<WorkbenchWorkspace, "id"> | string | null | undefined;
+export type WorkspaceResourceTarget =
+  Pick<WorkbenchWorkspace, "id" | "scopePath"> | string | null | undefined;
 
 const WorkbenchWorkspaceContext = createContext<WorkbenchWorkspace | null>(null);
 

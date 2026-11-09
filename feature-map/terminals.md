@@ -3,6 +3,8 @@
 The agent terminal belongs to its chat, while user shells in an independent workspace belong to that workspace and remain on its execution target when the selected chat changes.
 Both reuse the terminal viewer; [Activity](chat-activity.md) exposes recorded chat usage and ended output, and [independent workspaces](workbench-workspaces.md) defines manual-shell ownership.
 
+New manual shells start in the selected panel folder; browsing later leaves existing processes in their own working directories.
+
 ## Sub-features
 
 - `agent-terminal-view`: the Chat/Terminal switcher shows the harness terminal

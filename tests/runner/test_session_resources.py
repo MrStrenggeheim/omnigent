@@ -2925,3 +2925,46 @@ async def test_terminal_exit_cleanup_evicts_only_the_exited_instance(tmp_path: P
         "a successor registered under the same key must survive exit cleanup"
     )
     assert terminal_registry.get("conv_exit", "claude", "main") is successor
+
+
+@pytest.mark.asyncio
+async def test_pr_resources_follow_folder_scope_and_reject_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from omnigent.runner import pr_resource
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    app = create_runner_app(
+        runner_workspace=workspace,
+        server_client=NullServerClient(),  # type: ignore[arg-type]
+    )
+    calls = []
+
+    def info(root, *, session_id=None, pr_url=None):
+        calls.append((root, session_id, pr_url))
+        return {"available": True}
+
+    monkeypatch.setattr(pr_resource, "pr_info", info)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://runner"
+    ) as client:
+        env = await client.get("/v1/sessions/conv_new/resources/environments/default")
+        root = Path(env.json()["metadata"]["root"])
+        nested = root / "nested repo"
+        nested.mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "outward").symlink_to(outside, target_is_directory=True)
+        url = "/v1/sessions/conv_new/resources/github"
+        response = await client.get(
+            url, params={"folder": "nested repo", "pr_url": "https://example.test/pr/1"}
+        )
+        assert response.status_code == 200, response.text
+        assert calls[0][0] == str(nested)
+        assert calls[0][1].startswith("conv_new:")
+        assert calls[0][2] == "https://example.test/pr/1"
+        for folder in ("../outside", str(outside), "outward", "missing"):
+            response = await client.get(url, params={"folder": folder})
+            assert response.status_code in {400, 403, 404}, response.text
+        assert len(calls) == 1

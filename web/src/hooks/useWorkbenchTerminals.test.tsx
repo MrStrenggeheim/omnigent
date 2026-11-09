@@ -1,3 +1,4 @@
+import { setPanelFolder } from "@/lib/panelFolder";
 import type * as IdentityModule from "@/lib/identity";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -236,4 +237,20 @@ describe("workspace terminal mutations", () => {
       expect(client.getQueryData(key(workspaceA))).toEqual(expected);
     },
   );
+});
+
+it("starts new manual terminals in the selected panel folder without changing their workspace owner", async () => {
+  fetchMock.mockResolvedValue(response(resource("created")));
+  const { wrapper } = cache();
+  setPanelFolder(workspaceA.id, "/a/nested");
+  const { result, unmount } = renderHook(() => useCreateTerminal("chat-a", workspaceA), {
+    wrapper,
+  });
+  act(() => result.current.mutate("shell"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  const [url, options] = fetchMock.mock.calls[0];
+  expect(url).toBe("/v1/workbench-workspaces/workspace-a/terminals");
+  expect(JSON.parse(options.body)).toMatchObject({ terminal: "shell", cwd: "nested" });
+  unmount();
+  setPanelFolder(workspaceA.id, null);
 });

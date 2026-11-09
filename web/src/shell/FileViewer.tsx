@@ -1051,13 +1051,13 @@ function FileViewerBody({
   const registerNavigationGuard = useContext(FileViewerContext)?.registerNavigationGuard;
   useLayoutEffect(() => {
     if (!open || !registerNavigationGuard) return;
-    return registerNavigationGuard((destination, options, navigate) => {
+    return registerNavigationGuard((destination, options, navigate, cancel) => {
       if (
         (options?.workspaceId !== undefined && options.workspaceId !== workspaceId) ||
         destination !== path ||
         (options?.line && viewMode === "editor")
       ) {
-        guardDirty(navigate);
+        guardDirty(navigate, cancel);
       } else {
         navigate();
       }

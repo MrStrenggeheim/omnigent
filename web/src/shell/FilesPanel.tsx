@@ -1,3 +1,4 @@
+import { subscribePanelFolder, readPanelFolder, setPanelFolder } from "@/lib/panelFolder";
 import {
   EyeIcon,
   EyeOffIcon,
@@ -56,6 +57,8 @@ import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { useScrollRestore } from "./useScrollRestore";
 import { ExplorerActionsProvider, ExplorerToolbar } from "./ExplorerActions";
 import { setExplorerGitScope } from "@/lib/explorerGitScope";
+
+export { readBrowseLocation } from "@/lib/panelFolder";
 
 interface FilesPanelProps {
   conversationId?: string;
@@ -149,14 +152,6 @@ function SearchFilterInput({
  * expandedPathsCache. Keyed by conversation, so a session switch still lands
  * on that session's own last location (or its root), never another's.
  */
-const browseLocationCache = new Map<string, string>();
-const browseLocationListeners = new Set<() => void>();
-function subscribeBrowseLocation(onChange: () => void) {
-  browseLocationListeners.add(onChange);
-  return () => {
-    browseLocationListeners.delete(onChange);
-  };
-}
 const ROOT_DIRECTORIES = [""];
 const visitedDirectoriesCache = new Map<string, string[]>();
 const directoryListeners = new Set<() => void>();
@@ -164,15 +159,6 @@ const directoryListeners = new Set<() => void>();
 function subscribeDirectories(onChange: () => void) {
   directoryListeners.add(onChange);
   return () => directoryListeners.delete(onChange);
-}
-
-export function readBrowseLocation(
-  conversationId: string,
-  workspaceRoot: string | null = null,
-  workspaceId?: string,
-): string {
-  const owner = workspaceId ?? conversationId;
-  return relativizeToWorkspace(browseLocationCache.get(owner) ?? null, workspaceRoot);
 }
 
 /**
@@ -265,8 +251,8 @@ export function FilesPanel({
   // from the per-conversation cache so the location survives the panel
   // unmounting while a file is open in the viewer.
   const browseLocation = useSyncExternalStore(
-    subscribeBrowseLocation,
-    () => (browseOwner && browseLocationCache.get(browseOwner)) || null,
+    subscribePanelFolder,
+    () => readPanelFolder(browseOwner),
     () => null,
   );
   const [browseError, setBrowseError] = useState<string | null>(null);
@@ -354,11 +340,7 @@ export function FilesPanel({
       }
       setBrowseError(null);
       const next = absolutePath === workspaceRoot ? null : absolutePath;
-      if (browseOwner) {
-        if (next === null) browseLocationCache.delete(browseOwner);
-        else browseLocationCache.set(browseOwner, next);
-      }
-      for (const listener of browseLocationListeners) listener();
+      if (browseOwner) setPanelFolder(browseOwner, next);
       window.dispatchEvent(
         new CustomEvent("omnigent:browse-location-changed", {
           detail: {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import ntpath
@@ -20,6 +21,10 @@ from omnigent.server.routes._host_filesystem import (
     HostFsUnavailableError,
     read_workspace_from_host,
     write_workspace_from_host,
+)
+from omnigent.server.routes._workspace_validation import (
+    WorkspaceValidationError,
+    validate_workspace,
 )
 from omnigent.server.workbench_workspace_service import WorkbenchWorkspaceService
 from omnigent.stores.workbench_workspace_store import WorkbenchWorkspace
@@ -73,7 +78,13 @@ class HostWorkspaceResources:
         self.workspace = workspace
 
     async def call(
-        self, op: str, params: dict[str, Any], *, write: bool = False, root: str | None = None
+        self,
+        op: str,
+        params: dict[str, Any],
+        *,
+        write: bool = False,
+        root: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         conn = await self.service.host_connection(self.workspace)
         operation = write_workspace_from_host if write else read_workspace_from_host
@@ -83,7 +94,7 @@ class HostWorkspaceResources:
                 host_conn=conn,
                 op=op,
                 workspace=root or self.workspace.root,
-                session_id=self.workspace.id,
+                session_id=namespace or self.workspace.id,
                 params=params,
             )
         except HostFsError as exc:
@@ -187,6 +198,26 @@ class HostWorkspaceResources:
         query: dict[str, Any] = dict(request.query_params)
         method = request.method
         if resource.startswith("github"):
+            folder = relative_path(self.workspace, str(query.pop("folder", "")))
+            root = None
+            if folder:
+                if self.workspace.host_id is None:
+                    raise HTTPException(409, "Workspace has no host filesystem target")
+                paths = ntpath if ntpath.splitdrive(self.workspace.root)[0] else posixpath
+                try:
+                    root = await validate_workspace(
+                        host_registry=self.service.host_registry,
+                        host_id=self.workspace.host_id,
+                        workspace=paths.join(self.workspace.root, folder),
+                        spec_cwd=self.workspace.root,
+                    )
+                except WorkspaceValidationError as exc:
+                    raise HTTPException(400, exc.message) from exc
+            namespace = (
+                self.workspace.id + ":" + hashlib.sha256(root.encode()).hexdigest()[:16]
+                if root
+                else None
+            )
             suffix = resource.removeprefix("github").strip("/")
             if method == "GET":
                 op = _PROVIDER_READS.get(suffix)
@@ -194,10 +225,12 @@ class HostWorkspaceResources:
                     op = "github_diff"
                     query["path"] = relative_path(self.workspace, suffix[5:])
                 if op:
-                    return await self.call(op, query)
+                    return await self.call(op, query, root=root, namespace=namespace)
             op = _PROVIDER_WRITES.get((method, suffix))
             if op:
-                return await self.call(op, {**query, **body}, write=True)
+                return await self.call(
+                    op, {**query, **body}, write=True, root=root, namespace=namespace
+                )
             raise HTTPException(404, "Workspace provider operation is unsupported")
         if resource == "environments" and method == "GET":
             return {"object": "list", "data": [await self.environment()], "has_more": False}
@@ -280,7 +313,7 @@ class HostWorkspaceResources:
             except (ValueError, TypeError) as exc:
                 raise HTTPException(400, "Invalid Git directories") from exc
             query["directories"] = [relative_path(self.workspace, item) for item in directories]
-            for key in ("path", "scope"):
+            for key in ("path", "scope", "folder"):
                 if key in query:
                     query[key] = relative_path(self.workspace, query[key])
             return await self.call("git_inspect", query)
@@ -366,7 +399,7 @@ class RunnerWorkspaceResources:
             for path, _ in operation_paths(body):
                 relative_path(self.workspace, path)
             body["_owner"] = self.workspace.owner_user_id or "local-owner"
-        for key in ("path", "scope"):
+        for key in ("path", "scope", "folder"):
             if key in request.query_params:
                 relative_path(self.workspace, request.query_params[key])
         if "directories" in request.query_params:
