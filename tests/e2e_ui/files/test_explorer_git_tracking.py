@@ -280,6 +280,33 @@ def test_wide_workspace_keeps_explorer_beside_stable_file_viewer(
                 assert header.bounding_box()["height"] == 48
         divider.press("ArrowLeft")
         assert explorer.bounding_box()["width"] > before_width + 50
+        explorer_header = explorer.locator(".workspace-control-header").first
+        viewer_header = viewer.locator(".workspace-control-header").first
+        for row in (explorer_header, viewer_header):
+            assert row.bounding_box()["height"] == 48
+        explorer_bounds = explorer_header.bounding_box()
+        viewer_bounds = viewer_header.bounding_box()
+        assert abs(explorer_bounds["y"] - viewer_bounds["y"]) < 0.5
+        assert (
+            abs(
+                explorer_bounds["y"]
+                + explorer_bounds["height"]
+                - viewer_bounds["y"]
+                - viewer_bounds["height"]
+            )
+            < 0.5
+        )
+        divider.press("Home")
+        assert explorer.bounding_box()["width"] == 180
+        expect(explorer.get_by_role("button", name="New file", exact=True)).to_be_hidden()
+        overflow = explorer.get_by_role("button", name="More file actions", exact=True)
+        expect(overflow).to_be_in_viewport()
+        overflow.click()
+        expect(page.get_by_role("menuitem", name="New file", exact=True)).to_be_visible()
+        expect(page.get_by_role("menuitem", name="Refresh files", exact=True)).to_be_visible()
+        page.keyboard.press("Escape")
+        divider.press("ArrowRight")
+        assert explorer.bounding_box()["width"] == 200
         folder = _entry(explorer, prefix)
         expect(folder).to_be_visible(timeout=15_000)
         if folder.locator("button[aria-expanded]").get_attribute("aria-expanded") != "true":

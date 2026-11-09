@@ -1248,52 +1248,43 @@ export function ExplorerToolbar({
 } = {}) {
   const ctx = useContext(ExplorerContext);
   if (!ctx) return null;
+  const actions = [
+    {
+      label: "New file",
+      Icon: FilePlusIcon,
+      disabled: !ctx.writable || ctx.busy,
+      run: () => ctx.newItem(false),
+    },
+    {
+      label: "New folder",
+      Icon: FolderPlusIcon,
+      disabled: !ctx.writable || ctx.busy,
+      run: () => ctx.newItem(true),
+    },
+    ...(onRefresh
+      ? [{ label: "Refresh files", Icon: RefreshCwIcon, disabled: refreshing, run: onRefresh }]
+      : []),
+    { label: "Collapse all folders", Icon: CopyMinusIcon, disabled: false, run: ctx.collapse },
+  ];
   return (
     <div
       className={cn("flex shrink-0 items-center gap-[2px]", !inline && "px-2 py-1")}
       aria-label="File actions"
     >
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        title="New file"
-        aria-label="New file"
-        disabled={!ctx.writable || ctx.busy}
-        onClick={() => ctx.newItem(false)}
-      >
-        <FilePlusIcon />
-      </Button>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        title="New folder"
-        aria-label="New folder"
-        disabled={!ctx.writable || ctx.busy}
-        onClick={() => ctx.newItem(true)}
-      >
-        <FolderPlusIcon />
-      </Button>
-      {onRefresh && (
+      {actions.map(({ label, Icon, disabled, run }) => (
         <Button
+          key={label}
           size="icon-sm"
           variant="ghost"
-          title="Refresh files"
-          aria-label="Refresh files"
-          disabled={refreshing}
-          onClick={onRefresh}
+          title={label}
+          aria-label={label}
+          disabled={disabled}
+          onClick={run}
+          className={inline ? "@max-[400px]/filespanel:hidden" : undefined}
         >
-          <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
+          <Icon className={cn(label === "Refresh files" && refreshing && "animate-spin")} />
         </Button>
-      )}
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        title="Collapse all folders"
-        aria-label="Collapse all folders"
-        onClick={ctx.collapse}
-      >
-        <CopyMinusIcon />
-      </Button>
+      ))}
       {ctx.selected.size > 0 && (
         <span className={cn("text-xs text-muted-foreground", inline && "sr-only")}>
           {ctx.selected.size} selected
@@ -1306,6 +1297,15 @@ export function ExplorerToolbar({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Folder actions</DropdownMenuLabel>
+          {actions.map(({ label, Icon, disabled, run }) => (
+            <DropdownMenuItem key={label} disabled={disabled} onSelect={run}>
+              <Icon />
+              {label}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+
           {!inline && onShowAgentChangesChange && (
             <>
               <DropdownMenuCheckboxItem

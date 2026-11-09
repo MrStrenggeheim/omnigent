@@ -5,7 +5,7 @@ Git supplies change status by default, while an optional agent-change overlay ex
 
 ## Sub-features
 
-- `adaptive-viewer`: a desktop file workspace at least 720px wide keeps a 260–320px Explorer beside the viewer; narrower widths and phones show one surface, and crossing the threshold preserves the editor and draft.
+- `adaptive-viewer`: a desktop file workspace at least 720px wide keeps a resizable Explorer (180px minimum; 260–320px default) beside the viewer; narrower widths and phones show one surface, and crossing the threshold preserves the editor and draft.
 
 - `create`: create a file or folder with a name dialog; existing destinations produce an error.
 - `organize`: rename, move, duplicate, cut, copy and paste files or folders, with explicit overwrite selection.
@@ -14,6 +14,7 @@ Git supplies change status by default, while an optional agent-change overlay ex
 - `transfer`: upload files or directory structures and download folders or selected entries as ZIP, with shared [notification center](notifications.md) progress and cancellation.
 - `recovery`: move selected entries to recoverable trash and restore them without overwriting newer files.
 - `navigation`: collapse folders, reveal the most recently active file and search within a folder.
+- `compact-toolbar`: narrow Explorer columns keep folder navigation, comparison and the menu visible; folder actions remain in the menu, and host-served status sits below the control row.
 - `freshness`: update active directory listings after operations and external changes, including idle-host refresh.
 - `stable-refresh`: preserve expanded folders, loaded children and selection while background requests update existing directory queries.
 - `git-status`: show current Git status from the nearest repository for explicitly browsed directories, including nested repositories and repositories with a Git directory or Git file.

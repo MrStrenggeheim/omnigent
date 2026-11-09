@@ -176,5 +176,5 @@ it("remembers resized Explorer width, clamps to leave viewer room and restores i
   divider = screen.getByRole("separator", { name: "Resize file explorer" });
   expect(divider).toHaveAttribute("aria-valuenow", "640");
   fireEvent.keyDown(divider, { key: "Home" });
-  expect(divider).toHaveAttribute("aria-valuenow", "260");
+  expect(divider).toHaveAttribute("aria-valuenow", "180");
 });

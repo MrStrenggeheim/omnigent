@@ -25,8 +25,8 @@ export function AdaptiveFileWorkspace({
     handleProps,
   } = useResizableColumn(
     Math.min(320, Math.max(260, availableWidth * 0.3)),
-    260,
-    Math.max(260, Math.min(640, availableWidth - 360)),
+    180,
+    Math.max(180, Math.min(640, availableWidth - 360)),
     { preferenceKey: "explorerColumnWidthPx", label: "Resize file explorer", enabled: split },
   );
   useLayoutEffect(() => {

@@ -35,7 +35,6 @@ import {
 import { cn } from "@/lib/utils";
 import { BrowseLocationBar } from "./BrowseLocationBar";
 import { DiffComparisonControls } from "./DiffComparisonControls";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
@@ -536,7 +535,7 @@ export function FilesPanel({
         )}
       >
         {/* Shared folder scope and actions for Files and Changes. */}
-        <div className="workspace-control-header flex items-center gap-[2px] px-2">
+        <div className="workspace-control-header flex items-center gap-[2px] border-b border-border px-2">
           {workingDir && workspaceRoot && (
             <BrowseLocationBar
               current={workingDir}
@@ -547,24 +546,6 @@ export function FilesPanel({
               onNavigate={navigateTo}
               error={locationError}
             />
-          )}
-          {servedFromHost && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    data-testid="files-host-served-badge"
-                    className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                  >
-                    <MoonIcon className="size-3 shrink-0" />
-                    Asleep
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Agent is asleep — files shown live from the host. Send a message to wake it.
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
           )}
           <div className="ml-auto flex items-center gap-[2px]">
             <DiffComparisonControls
@@ -649,7 +630,17 @@ export function FilesPanel({
             {comparisonQuery.data.warning}
           </p>
         )}
-        <div className="shrink-0 border-t border-border" />
+        {servedFromHost && (
+          <p
+            role="status"
+            data-testid="files-host-served-badge"
+            className="flex shrink-0 items-center gap-1 px-2 py-1 text-xs text-muted-foreground"
+            title="Agent is asleep. Send a message to wake it."
+          >
+            <MoonIcon className="size-3 shrink-0" />
+            Files served by host
+          </p>
+        )}
         {/* Search toolbar — the Changed | All scope switch leads, then the
               search field, then the per-view trailing control (Sort for the
               changed list, glob filters for the tree). Lives outside the
