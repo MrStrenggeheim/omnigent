@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 // Right-panel file viewer with Shiki syntax highlighting and a comments side panel.
 //
 // Layout:
@@ -62,7 +63,7 @@ import {
 } from "lucide-react";
 import { useSearchParams, useRebasePath } from "@/lib/routing";
 import { Button } from "@/components/ui/button";
-import { FileExplorerToggle } from "./AdaptiveFileWorkspace";
+import { FileExplorerToggle, useFileExplorerHeader } from "./AdaptiveFileWorkspace";
 import {
   Dialog,
   DialogContent,
@@ -452,6 +453,7 @@ function FileViewerBody({
   // LEVEL_EDIT = 2; levels below 2 are read-only.
   const canEdit = permissionLevel == null || permissionLevel >= 2;
   const workspace = useWorkbenchWorkspace();
+  const explorerHeaderTarget = useFileExplorerHeader();
   const workspaceId = explicitWorkspaceId ?? workspace?.id;
   const resourceIdentity = queryIdentity(workspaceId, conversationId)!;
   const comparisonView =
@@ -1610,7 +1612,13 @@ function FileViewerBody({
 
   const innerContent = (
     <>
-      {mobileOverlay && <MobileWorkspaceTabs beforeNavigate={guardDirty} />}
+      {mobileOverlay &&
+        (mobileEmbedded ? (
+          explorerHeaderTarget &&
+          createPortal(<MobileWorkspaceTabs beforeNavigate={guardDirty} />, explorerHeaderTarget)
+        ) : (
+          <MobileWorkspaceTabs beforeNavigate={guardDirty} />
+        ))}
       <div
         ref={toolbarHeaderRef}
         className="workspace-control-header flex min-w-0 items-center justify-between gap-2 border-b border-border px-3"

@@ -15,7 +15,15 @@ import { SidebarPanelIcon } from "./SidebarToggle";
 
 const SPLIT_MIN_WIDTH = 720;
 const VISIBILITY_KEY = "omnigent:file-explorer-visible";
-const ExplorerVisibility = createContext<{ open: boolean; toggle: () => void } | null>(null);
+const ExplorerVisibility = createContext<{
+  open: boolean;
+  toggle: () => void;
+  headerTarget: HTMLDivElement | null;
+} | null>(null);
+
+export function useFileExplorerHeader() {
+  return useContext(ExplorerVisibility)?.headerTarget ?? null;
+}
 
 function readVisibility(): boolean | null {
   try {
@@ -70,6 +78,7 @@ export function AdaptiveFileWorkspace({
 }) {
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
   const [visible, setVisible] = useState(readVisibility);
+  const [headerTarget, setHeaderTarget] = useState<HTMLDivElement | null>(null);
   const availableWidth = measuredWidth ?? width;
   const split = !!explorer && (visible ?? (!isMobile && availableWidth >= SPLIT_MIN_WIDTH));
   const toggle = useCallback(() => {
@@ -82,8 +91,8 @@ export function AdaptiveFileWorkspace({
     }
   }, [split]);
   const visibility = useMemo(
-    () => (explorer ? { open: split, toggle } : null),
-    [explorer, split, toggle],
+    () => (explorer ? { open: split, toggle, headerTarget } : null),
+    [explorer, split, toggle, headerTarget],
   );
   const {
     width: explorerWidth,
@@ -116,33 +125,36 @@ export function AdaptiveFileWorkspace({
         role="group"
         aria-label="File workspace"
         data-file-workspace-overlay={mobileOverlay || undefined}
-        className={`flex min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden ${mobileOverlay ? "fixed inset-0 z-40 bg-card" : ""}`}
+        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${mobileOverlay ? "fixed inset-0 z-40 bg-card" : ""}`}
       >
-        {explorer && (
+        {mobileOverlay && <div ref={setHeaderTarget} className="shrink-0" />}
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+          {explorer && (
+            <section
+              key="explorer"
+              aria-label="File explorer"
+              className={`${split ? "flex" : "hidden"} relative min-h-0 shrink-0 flex-col overflow-hidden border-r border-border`}
+              hidden={!split}
+              aria-hidden={!split || undefined}
+              inert={!split}
+              style={{ width: explorerWidth }}
+            >
+              {explorer}
+              <div
+                {...handleProps}
+                className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/50 focus-visible:bg-primary/50 focus-visible:outline-none"
+              />
+            </section>
+          )}
           <section
-            key="explorer"
-            aria-label="File explorer"
-            className={`${split ? "flex" : "hidden"} relative min-h-0 shrink-0 flex-col overflow-hidden border-r border-border`}
-            hidden={!split}
-            aria-hidden={!split || undefined}
-            inert={!split}
-            style={{ width: explorerWidth }}
+            key="viewer"
+            aria-label="File viewer"
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            style={{ minWidth: split ? 240 : undefined }}
           >
-            {explorer}
-            <div
-              {...handleProps}
-              className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/50 focus-visible:bg-primary/50 focus-visible:outline-none"
-            />
+            {children}
           </section>
-        )}
-        <section
-          key="viewer"
-          aria-label="File viewer"
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-          style={{ minWidth: split ? 240 : undefined }}
-        >
-          {children}
-        </section>
+        </div>
       </div>
     </ExplorerVisibility.Provider>
   );
