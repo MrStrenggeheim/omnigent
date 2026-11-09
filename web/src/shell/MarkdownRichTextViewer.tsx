@@ -1,3 +1,4 @@
+import { useFileContentReader } from "./FileContentReader";
 // TipTap-based rich text editor for markdown files.
 //
 // Comment UX:
@@ -14,8 +15,8 @@
 //   • Comment anchors use the validated Markdown source map, with a
 //     text-offset fallback for documents the map cannot verify.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangleIcon, Check, Copy, MessageSquareOffIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { AlertTriangleIcon, MessageSquareOffIcon } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { Transaction } from "@tiptap/pm/state";
 import type { Node } from "@tiptap/pm/model";
@@ -251,14 +252,6 @@ function MarkdownRichTextViewerInner({
   const workspace = useWorkbenchWorkspace();
   const sourceWorkspaceRef = useRef(workspace?.id ?? null);
   const openFile = useFileViewer();
-  const [isCopied, setIsCopied] = useState(false);
-  const copyTimeoutRef = useRef<number>(0);
-  useEffect(
-    () => () => {
-      window.clearTimeout(copyTimeoutRef.current);
-    },
-    [],
-  );
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const linkMouseDownRef = useRef<{ x: number; y: number } | null>(null);
   // Persist/restore the editor's scroll position across unmount/remount and
@@ -273,20 +266,6 @@ function MarkdownRichTextViewerInner({
   // path always does; this keeps the bar usable in isolation/tests).
   const fallbackSearchInputRef = useRef<HTMLInputElement>(null);
   const localSearchInputRef = searchInputRef ?? fallbackSearchInputRef;
-
-  const handleCopyContent = useCallback(() => {
-    if (!navigator?.clipboard?.writeText) return;
-    navigator.clipboard
-      .writeText(content)
-      .then(() => {
-        setIsCopied(true);
-        window.clearTimeout(copyTimeoutRef.current);
-        copyTimeoutRef.current = window.setTimeout(() => setIsCopied(false), 2000);
-      })
-      .catch(() => {
-        // ignore clipboard errors
-      });
-  }, [content]);
 
   // Baseline used to detect actual edits vs TipTap normalisation.
   const baselineRef = useRef<string | null>(null);
@@ -407,6 +386,12 @@ function MarkdownRichTextViewerInner({
     },
   });
   editorRef.current = editor;
+  useFileContentReader(
+    useCallback(
+      () => (canEdit && editor && !editor.isDestroyed ? editor.getMarkdown() : content),
+      [canEdit, editor, content],
+    ),
+  );
 
   // Auto-save wiring: debounce on edit, flush on blur. A programmatic
   // setContentRef (emitUpdate=false) emits no "update", so we never re-save
@@ -543,17 +528,6 @@ function MarkdownRichTextViewerInner({
           }
         }}
       >
-        {!canEdit && (
-          <button
-            type="button"
-            title="Copy"
-            onClick={handleCopyContent}
-            className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            {isCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-            {isCopied ? "Copied!" : "Copy"}
-          </button>
-        )}
         <EditorContent
           editor={editor}
           className="outline-none max-w-none text-ui text-foreground [&_*::selection]:bg-blue-300/40 [&_*::selection]:text-foreground [&::selection]:bg-blue-300/40 [&::selection]:text-foreground tiptap-md-content"

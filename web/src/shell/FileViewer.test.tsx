@@ -1,3 +1,4 @@
+import { useFileContentReader } from "./FileContentReader";
 // Tests for FileViewer's comments-panel open/close semantics and URL sync:
 //
 //   1. Panel stays closed on fresh open regardless of whether the file has comments.
@@ -16,7 +17,7 @@
 
 import type * as CommentSenderModule from "@/hooks/CommentSenderContext";
 import type * as TerminalsModule from "@/hooks/useTerminals";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { WorkbenchWorkspaceProvider } from "@/lib/workbenchWorkspace";
 import userEvent from "@testing-library/user-event";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -67,6 +68,7 @@ vi.mock("./CodeViewer", () => ({
     searchOpen?: boolean;
     onDirtyChange?: (dirty: boolean) => void;
   }) => {
+    useFileContentReader(useCallback(() => `current buffer for ${path}`, [path]));
     codeViewerRenders({ path, position });
     return (
       <div
@@ -3143,3 +3145,17 @@ it("keeps grid file viewers independent of shared URL parameters and copies a se
   expect(copied.searchParams.has("comment")).toBe(false);
 });
 import type * as NotificationsModule from "@/lib/notifications";
+
+it("copies the active editor buffer through the three-dot menu", async () => {
+  vi.mocked(copyText).mockClear().mockResolvedValue(undefined);
+  vi.mocked(useFileContent).mockReturnValue({
+    data: { content: "saved contents", path: "file1.py", encoding: "utf-8" },
+  } as ReturnType<typeof useFileContent>);
+  useCommentsMock.mockReturnValue(makeCommentsQuery([]));
+  renderViewer({ open: true });
+  expect(screen.queryByRole("button", { name: "Copy file content" })).toBeNull();
+  fireEvent.pointerDown(screen.getByRole("button", { name: "View settings" }), { button: 0 });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Copy file content" }));
+  await waitFor(() => expect(copyText).toHaveBeenCalledWith("current buffer for file1.py"));
+  expect(toast.success).toHaveBeenCalledWith("File content copied");
+});

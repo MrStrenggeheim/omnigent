@@ -4,7 +4,7 @@
 // formatting commands, editor.isActive() for active-state badges, and
 // editor.storage.markdown.getMarkdown() for copy / save.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEditorState } from "@tiptap/react";
 import {
@@ -14,7 +14,6 @@ import {
   Bold,
   Check,
   Code,
-  Copy,
   Heading1,
   Heading2,
   Heading3,
@@ -268,25 +267,7 @@ export function ToolbarPlugin({
     }),
   });
 
-  const [isCopied, setIsCopied] = useState(false);
-  const copyTimeoutRef = useRef<number>(0);
-
   const getMarkdown = useCallback(() => editor?.getMarkdown() ?? "", [editor]);
-
-  const handleCopy = useCallback(() => {
-    const md = getMarkdown();
-    if (!navigator?.clipboard?.writeText) return;
-    navigator.clipboard
-      .writeText(md)
-      .then(() => {
-        setIsCopied(true);
-        window.clearTimeout(copyTimeoutRef.current);
-        copyTimeoutRef.current = window.setTimeout(() => setIsCopied(false), 2000);
-      })
-      .catch(() => {
-        // ignore clipboard errors
-      });
-  }, [getMarkdown]);
 
   const handleSave = useCallback(() => {
     if (!isDirty || saveDisabled || hasExternalUpdate) return;
@@ -454,9 +435,6 @@ export function ToolbarPlugin({
       <TableBtn editor={editor} />
       {editor && <TableAlignControls editor={editor} />}
       <div className="ml-auto flex items-center gap-2">
-        <ToolbarBtn title="Copy" onClick={handleCopy}>
-          {isCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </ToolbarBtn>
         <button
           type="button"
           title={saveStatus.title}

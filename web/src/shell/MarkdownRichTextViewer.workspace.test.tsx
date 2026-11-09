@@ -1,3 +1,4 @@
+import { FileContentReaderContext, type FileContentReader } from "./FileContentReader";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Editor } from "@tiptap/core";
 import type * as TipTapReact from "@tiptap/react";
@@ -233,4 +234,35 @@ describe("Markdown workspace editor identity", () => {
     expect(JSON.parse(state.fetch.mock.calls[0][1].body).content).toContain("saved draft ");
     expect(next.getText()).toBe("Workspace B document.");
   });
+});
+
+const exportedContent = { current: null as FileContentReader | null };
+function registerExportedContent(reader: FileContentReader) {
+  exportedContent.current = reader;
+  return () => {
+    exportedContent.current = null;
+  };
+}
+
+it("exports current Markdown source including unsaved edits without changing editor selection", async () => {
+  const { element, onDirtyChange } = makeView();
+  render(
+    <FileContentReaderContext.Provider value={registerExportedContent}>
+      {element("chat-a", workspaceA)}
+    </FileContentReaderContext.Provider>,
+  );
+  const editor = await liveEditor();
+  act(() => {
+    editor.view.focus();
+    editor.commands.insertContentAt(1, "**Unsaved** ");
+    editor.commands.setTextSelection({ from: 2, to: 7 });
+  });
+  const expected = editor.getMarkdown();
+  expect(exportedContent.current).not.toBeNull();
+  expect(exportedContent.current?.()).toBe(expected);
+  expect(expected).toContain("Unsaved");
+  expect(editor.state.selection.from).toBe(2);
+  expect(editor.state.selection.to).toBe(7);
+  expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  expect(state.fetch).not.toHaveBeenCalled();
 });

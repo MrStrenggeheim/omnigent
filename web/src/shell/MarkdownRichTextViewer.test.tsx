@@ -1,16 +1,7 @@
-// Tests for the read-only copy button in MarkdownRichTextViewer.
-//
-// MarkdownRichTextViewer has two modes controlled by `useCanEdit`:
-//   - canEdit=true:  shows the MarkdownEditorToolbar (which has its own
-//     copy button) and no overlay button.
-//   - canEdit=false: shows a standalone "Copy" overlay button that
-//     writes the raw `content` prop to the clipboard.
-//
-// These tests cover the read-only path. The TipTap editor and all
-// comment/toolbar plugins are mocked to null so that jsdom doesn't need
-// to exercise ProseMirror or markdown parsing APIs.
+import { FileContentReaderContext } from "./FileContentReader";
+// Markdown content is exposed to the shared header action; the document has no inline Copy control.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarkdownRichTextViewer } from "./MarkdownRichTextViewer";
 import { FileViewerContext } from "./FileViewerContext";
@@ -139,19 +130,29 @@ const fileViewerContext = {
   workspaceHome: null,
 };
 
+let readContent: (() => string) | null = null;
+const registerReader = (reader: () => string) => {
+  readContent = reader;
+  return () => {
+    if (readContent === reader) readContent = null;
+  };
+};
+
 function renderViewer(content: string, truncated = false, path = "/test.md") {
   return render(
     <FileViewerContext.Provider value={fileViewerContext}>
-      <MarkdownRichTextViewer
-        content={content}
-        conversationId="conv_1"
-        path={path}
-        isSettled={true}
-        truncated={truncated}
-        comments={[]}
-        activeSelection={null}
-        onSetActiveSelection={() => {}}
-      />
+      <FileContentReaderContext.Provider value={registerReader}>
+        <MarkdownRichTextViewer
+          content={content}
+          conversationId="conv_1"
+          path={path}
+          isSettled={true}
+          truncated={truncated}
+          comments={[]}
+          activeSelection={null}
+          onSetActiveSelection={() => {}}
+        />
+      </FileContentReaderContext.Provider>
     </FileViewerContext.Provider>,
   );
 }
@@ -159,6 +160,7 @@ function renderViewer(content: string, truncated = false, path = "/test.md") {
 // ── Test suite ────────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  readContent = null;
   setupReadOnlyHooks();
   openFile.mockClear();
   vi.mocked(followLinkWithPopupFallback).mockReset();
@@ -171,55 +173,17 @@ afterEach(() => {
   cleanup();
 });
 
-describe("MarkdownRichTextViewer read-only copy button", () => {
-  it("renders a Copy button in read-only mode", () => {
-    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
-
-    renderViewer("# Hello");
-
-    // Button must be present so the user can copy the document.
-    expect(screen.getByTitle("Copy")).toBeDefined();
+describe("MarkdownRichTextViewer shared content action", () => {
+  it("exposes the complete source to the header without an inline Copy button", () => {
+    const view = renderViewer("# Hello\n\nWorld");
+    expect(screen.queryByTitle("Copy")).toBeNull();
+    expect(readContent?.()).toBe("# Hello\n\nWorld");
+    view.unmount();
+    expect(readContent).toBeNull();
   });
-
-  it("calls navigator.clipboard.writeText with the raw content when clicked", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-
-    renderViewer("# Hello\n\nWorld");
-
-    fireEvent.click(screen.getByTitle("Copy"));
-
-    // The full raw markdown string must be written to the clipboard
-    // unchanged so the recipient gets proper markdown.
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith("# Hello\n\nWorld");
-    });
-  });
-
-  it("shows 'Copied!' text immediately after a successful copy", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-
-    renderViewer("content");
-
-    fireEvent.click(screen.getByTitle("Copy"));
-
-    // Visual confirmation that the copy succeeded — the label changes
-    // to "Copied!" until the 2-second reset fires.
-    await waitFor(() => {
-      expect(screen.getByText("Copied!")).toBeDefined();
-    });
-  });
-
-  it("does not render the Copy button in edit mode (toolbar handles it)", () => {
-    // canEdit=true: the MarkdownEditorToolbar is shown instead, which
-    // has its own copy button. The overlay button must not appear to
-    // avoid duplicate copy controls.
+  it("keeps edit mode free of a duplicate inline Copy button", () => {
     vi.mocked(permissions.useCanEdit).mockReturnValue(true);
-    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn() } });
-
     renderViewer("content");
-
     expect(screen.queryByTitle("Copy")).toBeNull();
   });
 });
@@ -527,9 +491,7 @@ describe("MarkdownRichTextViewer truncated guard", () => {
 
     // Banner explains why editing is disabled.
     expect(screen.getByText(/too large to load fully/)).toBeDefined();
-    // canEdit is forced false → the read-only Copy overlay appears instead of
-    // the editing toolbar, proving the editor is no longer editable.
-    expect(screen.getByTitle("Copy")).toBeDefined();
+    expect(screen.queryByTitle("Copy")).toBeNull();
   });
 
   it("stays editable (no truncated banner) when not truncated", () => {

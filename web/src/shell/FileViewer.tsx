@@ -1,3 +1,4 @@
+import { FileContentReaderContext, type FileContentReader } from "./FileContentReader";
 import { createPortal } from "react-dom";
 // Right-panel file viewer with Shiki syntax highlighting and a comments side panel.
 //
@@ -38,6 +39,7 @@ import {
   AlertTriangleIcon,
   ArrowLeftIcon,
   CheckIcon,
+  CopyIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -570,6 +572,24 @@ function FileViewerBody({
   // Auto-save lifecycle reported up from the Monaco editor, shown as a status
   // chip in the toolbar (the editor itself no longer has a Save button).
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const contentReader = useRef<FileContentReader | null>(null);
+  const registerContentReader = useCallback((reader: FileContentReader) => {
+    contentReader.current = reader;
+    return () => {
+      if (contentReader.current === reader) contentReader.current = null;
+    };
+  }, []);
+  const copyFileContent = useCallback(async () => {
+    try {
+      const content = contentReader.current?.() ?? fileQuery.data?.content;
+      if (content === undefined) throw new Error("File content unavailable");
+      await copyText(content);
+      toast.success("File content copied");
+    } catch {
+      toast.error("Failed to copy file content");
+    }
+  }, [fileQuery.data]);
+
   // Brief "copied" feedback for the copy-link button.
   const [linkCopied, setLinkCopied] = useState(false);
   const linkCopiedTimerRef = useRef<number>(0);
@@ -1459,6 +1479,17 @@ function FileViewerBody({
       onSelect: () => setHideWhitespace((prev) => !prev),
     });
   }
+  if (fileQuery.data?.encoding === "utf-8" && !fileQuery.data.truncated && viewMode !== "diff") {
+    settingsMenu.push({
+      key: "copy-content",
+      label: "Copy file content",
+      icon: <CopyIcon className="size-4" />,
+      active: false,
+      onSelect: () => {
+        void copyFileContent();
+      },
+    });
+  }
   settingsMenu.push({
     key: "copy-link",
     label: "Copy link to file",
@@ -1965,30 +1996,32 @@ function FileViewerBody({
               )
             )
           ) : (
-            <CodeViewer
-              position={filePosition}
-              conversationId={conversationId}
-              path={path}
-              fileQuery={fileQuery}
-              onDirtyChange={handleDirtyChange}
-              onSaveStatusChange={setSaveStatus}
-              comments={openComments}
-              addressedComments={addressedComments}
-              activeSelection={activeSelection}
-              onSetActiveSelection={handleSetActiveSelection}
-              pendingBodyRef={pendingBodyRef}
-              panelOpen={open}
-              mediaActive={open && isActiveViewport && mediaActive}
-              searchOpen={searchOpen}
-              setSearchOpen={setSearchOpen}
-              searchFocusNonce={searchFocusNonce}
-              searchInputRef={searchInputRef}
-              viewMode={viewMode}
-              markdownSourceFallback={markdownSourceFallback ?? false}
-              tocOpen={tocOpen}
-              onTocToggle={() => setTocOpen((prev) => !prev)}
-              onRequestEditMode={lang === "markdown" ? handleRequestEditMode : undefined}
-            />
+            <FileContentReaderContext.Provider value={registerContentReader}>
+              <CodeViewer
+                position={filePosition}
+                conversationId={conversationId}
+                path={path}
+                fileQuery={fileQuery}
+                onDirtyChange={handleDirtyChange}
+                onSaveStatusChange={setSaveStatus}
+                comments={openComments}
+                addressedComments={addressedComments}
+                activeSelection={activeSelection}
+                onSetActiveSelection={handleSetActiveSelection}
+                pendingBodyRef={pendingBodyRef}
+                panelOpen={open}
+                mediaActive={open && isActiveViewport && mediaActive}
+                searchOpen={searchOpen}
+                setSearchOpen={setSearchOpen}
+                searchFocusNonce={searchFocusNonce}
+                searchInputRef={searchInputRef}
+                viewMode={viewMode}
+                markdownSourceFallback={markdownSourceFallback ?? false}
+                tocOpen={tocOpen}
+                onTocToggle={() => setTocOpen((prev) => !prev)}
+                onRequestEditMode={lang === "markdown" ? handleRequestEditMode : undefined}
+              />
+            </FileContentReaderContext.Provider>
           )}
         </div>
         {commentsSupported && commentsOpen && (

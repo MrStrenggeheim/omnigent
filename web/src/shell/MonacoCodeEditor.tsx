@@ -1,3 +1,4 @@
+import { useFileContentReader } from "./FileContentReader";
 // Monaco-based source viewer/editor, including large Markdown files.
 //
 // One component serves both modes, switched by permission:
@@ -284,6 +285,7 @@ function MonacoCodeEditorInner({
   // than editor.getValue() so a flush-on-unmount can run after Monaco has
   // already disposed the editor instance (the child <Editor> unmounts first).
   const latestContentRef = useRef(content);
+  useFileContentReader(useCallback(() => latestContentRef.current, []));
 
   // Live dirty check (buffer vs saved baseline) — lets auto-save decide whether
   // there's anything to persist without re-reading the (possibly disposed-on-

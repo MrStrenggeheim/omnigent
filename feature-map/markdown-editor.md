@@ -7,6 +7,8 @@ and the recording protocol for comparing revisions.
 
 ## Sub-features
 
+- `copy-source`: the file preview three-dot menu → Copy file content copies the full current Markdown buffer, including unsaved edits; the formatting toolbar retains save/retry but no separate Copy button.
+
 - `read`: headings, lists, tasks, tables, links, quotes, and fenced code render.
 - `edit-save`: typing preserves the caret and autosave survives reopening.
 - `find`: search finds edited content without typing into the document.
@@ -193,6 +195,8 @@ Record the server-backed tests through `verify-env run`, using `--ui-skip-build`
 `--video=on`, `--slowmo=250`, `--screenshot=on`, and `--reruns=0`. Keep each test's
 fixture and viewport unchanged between revisions. List any entry point not run
 instead of treating one comparison clip as complete feature verification.
+
+- Whole Markdown-buffer copy from the file menu, including unsaved edits: `tests/e2e_ui/files/test_copy_file_content.py::test_markdown_copy_content_in_menu_includes_unsaved_edits`.
 
 ## Gotchas
 
