@@ -10,7 +10,7 @@ Git supplies change status by default; explicit captured comparisons retain the 
 
 - `create`: create a file or folder with a name dialog; existing destinations produce an error.
 - `organize`: rename, move, duplicate, cut, copy and paste files or folders, with explicit overwrite selection.
-- `selection`: Ctrl/Cmd-click and Shift-click select entries for bulk operations; More file actions → Select files… enables explicit checkbox/tap selection on touch, and Done selecting or Escape exits.
+- `selection`: Shift-click selects the inclusive visible range from the retained anchor and Ctrl/Cmd-click toggles the clicked entry; modified clicks never expand folders, and the anchor survives opening a preview; More file actions → Select files… enables explicit checkbox/tap selection on touch, and Done selecting or Escape exits.
 - `row-controls`: retain file size and a compact trailing three-dot menu with right-click actions; no hover checkbox/download/copy cluster reserves space.
 - `transfer`: upload files or directory structures and download folders or selected entries as ZIP, with shared [notification center](notifications.md) progress and cancellation.
 - `recovery`: move selected entries to recoverable trash and restore them without overwriting newer files.
@@ -58,6 +58,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Overlay preferences and live tree behavior have component coverage in `web/src/lib/filesPanelPreferences.test.ts`, `web/src/shell/FilesPanel.test.tsx` and `web/src/shell/FolderTree.test.tsx`.
 - Expanded-directory invalidation: `web/src/store/chatStore.test.ts`.
 - Open tab reconciliation after folder moves/deletions: `web/src/lib/workspaceFileEvents.test.ts`.
+- Modified-click range selection, Ctrl toggle and folder expansion suppression across preview creation: `tests/e2e_ui/files/test_workbench_ownership.py::test_explorer_modified_clicks_select_ranges_without_opening_folders`.
 - Keyboard rename, bulk ZIP selection, drag auto-expansion/move, external expanded-folder updates: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_keyboard_bulk_drag_reveal_and_external_refresh`.
 - For keyboard, bulk selection and drag-and-drop, create two folders and three files; select adjacent and nonadjacent rows, copy/paste into another folder, rename using F2, and drop onto a collapsed folder to check auto-expansion.
 - Upload a directory containing a nested binary file and an empty folder; verify both structure and downloaded bytes, then cancel an in-progress transfer and confirm the unfinished destination was not installed.

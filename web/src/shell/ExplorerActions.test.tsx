@@ -1,3 +1,4 @@
+import { resetExplorerSelectionsForTesting } from "@/lib/explorerSelection";
 import userEvent from "@testing-library/user-event";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -92,6 +93,7 @@ async function rowMenu(path: string) {
 }
 const operation = vi.mocked(filesystemOperation);
 beforeEach(() => {
+  resetExplorerSelectionsForTesting();
   vi.clearAllMocks();
   toast.dismiss();
   operation.mockReset().mockResolvedValue({});
@@ -652,5 +654,30 @@ it("enables explicit touch selection from the Explorer menu and removes checkbox
   expect(await screen.findByRole("menuitem", { name: "Copy selected items" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("menuitem", { name: "Done selecting" }));
   expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  expect(screen.getByTestId("row-a.txt")).toHaveAttribute("aria-selected", "false");
+});
+
+it("retains the range anchor after preview remount and toggles Ctrl entries without opening folders", () => {
+  const view = setup();
+  fireEvent.click(screen.getByRole("button", { name: "a.txt" }));
+  view.unmount();
+  setup();
+  const folder = screen.getByTestId("row-folder");
+  const openFolder = vi.fn();
+  folder.querySelector("button")!.addEventListener("click", openFolder);
+  fireEvent.click(folder.querySelector("button")!, { shiftKey: true });
+  for (const path of ["a.txt", "b.txt", "folder"])
+    expect(screen.getByTestId(`row-${path}`)).toHaveAttribute("aria-selected", "true");
+  expect(openFolder).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "b.txt" }), { ctrlKey: true });
+  expect(screen.getByTestId("row-b.txt")).toHaveAttribute("aria-selected", "false");
+  expect(folder).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(screen.getByRole("button", { name: "b.txt" }), { ctrlKey: true });
+  expect(screen.getByTestId("row-b.txt")).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(folder.querySelector("button")!, { ctrlKey: true });
+  expect(folder).toHaveAttribute("aria-selected", "false");
+  expect(openFolder).not.toHaveBeenCalled();
+  fireEvent.click(folder.querySelector("button")!);
+  expect(openFolder).toHaveBeenCalledOnce();
   expect(screen.getByTestId("row-a.txt")).toHaveAttribute("aria-selected", "false");
 });

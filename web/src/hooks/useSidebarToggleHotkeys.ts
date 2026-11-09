@@ -20,6 +20,8 @@ export interface SidebarToggleHandlers {
   onToggleLeft: () => void;
   /** Flip the right (Workspace) sidebar. Bound to ⌘/Ctrl + ⌥/Alt + ]. */
   onToggleRight: () => void;
+  /** Direct I toggle; the alternate bracket chord may focus before closing. */
+  onToggleRightDirect?: () => void;
 }
 
 export function useSidebarToggleHotkeys(
@@ -33,9 +35,11 @@ export function useSidebarToggleHotkeys(
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent): void => {
-      // Require the platform command modifier AND Alt (the ⌘⌥ message-nav chord)
-      // and additionally reject Shift, so ⌘⌥⇧ combos stay free for future bindings.
-      if (!hasCommandModifier(e, isMac) || !e.altKey || e.shiftKey) return;
+      // B/I are the direct panel shortcuts; retain Alt+[ / Alt+] as alternatives.
+      if (!hasCommandModifier(e, isMac) || e.shiftKey || e.isComposing || e.defaultPrevented)
+        return;
+      const left = e.altKey ? e.code === "BracketLeft" : e.code === "KeyB";
+      const right = e.altKey ? e.code === "BracketRight" : e.code === "KeyI";
       // AltGr often reports as Ctrl+Alt; ignore it so intl-layout typing doesn't
       // accidentally toggle sidebars while focused in an editor/composer. Guard
       // the call: not every environment implements getModifierState, and an
@@ -47,14 +51,15 @@ export function useSidebarToggleHotkeys(
       // "‘" on macOS, but e.code is stable across layouts and modifiers.
       // Claim the chord: preventDefault drops any default action and
       // stopPropagation keeps it from reaching other keydown listeners.
-      if (e.code === "BracketLeft") {
+      if (left) {
         e.preventDefault();
         e.stopPropagation();
         latest.current.onToggleLeft();
-      } else if (e.code === "BracketRight") {
+      } else if (right) {
         e.preventDefault();
         e.stopPropagation();
-        latest.current.onToggleRight();
+        if (!e.altKey && latest.current.onToggleRightDirect) latest.current.onToggleRightDirect();
+        else latest.current.onToggleRight();
       }
     };
 

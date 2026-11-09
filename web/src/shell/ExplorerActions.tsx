@@ -1,3 +1,4 @@
+import { useExplorerSelection } from "@/lib/explorerSelection";
 import {
   createContext,
   useCallback,
@@ -198,7 +199,7 @@ export function useExplorerRow(path: string, directory: boolean, deleted = false
       }
     },
     onDoubleClickCapture: (event) => {
-      if (ctx.selectionMode) {
+      if (ctx.selectionMode || event.ctrlKey || event.metaKey || event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -288,10 +289,9 @@ export function ExplorerActionsProvider({
   const resourceIdentity = queryIdentity(workspace, conversationId);
   const queryClient = useContext(QueryClientContext);
   const viewer = useContext(FileViewerContext);
-  const [selected, setSelected] = useState(new Map<string, ExplorerEntry>());
+  const { selected, setSelected, anchor } = useExplorerSelection(resourceIdentity, base);
   const [selectionMode, setSelectionMode] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
-  const anchor = useRef<string | null>(null);
   const tree = useRef<TreeControls>({ entries: [] });
   const root = useRef<HTMLDivElement>(null);
   const [dropTarget, setDropTarget] = useState<HTMLDivElement | null>(null);
@@ -337,9 +337,7 @@ export function ExplorerActionsProvider({
     [entryBase],
   );
   useEffect(() => {
-    setSelected(new Map());
     setFocused(null);
-    anchor.current = null;
     setSelectionMode(false);
   }, [resourceIdentity, base]);
   const mounted = useRef(true);
@@ -745,21 +743,33 @@ export function ExplorerActionsProvider({
 
   const select = (entry: ExplorerEntry, additive: boolean, range: boolean) => {
     setFocused(entry.path);
-    setSelected((previous) => {
-      if (range)
-        return new Map(
-          selectionRange(tree.current.entries, anchor.current, entry).map((item) => [
+    if (range) {
+      const rangeEntries = selectionRange(tree.current.entries, anchor.current, entry);
+      setSelected(
+        new Map(
+          (additive ? [...selected.values(), ...rangeEntries] : rangeEntries).map((item) => [
             item.path,
             item,
           ]),
-        );
+        ),
+      );
+      if (anchor.current === null) anchor.current = entry.path;
+      return;
+    }
+    if (!additive) {
       anchor.current = entry.path;
-      if (!additive) return new Map([[entry.path, entry]]);
-      const next = new Map(previous);
-      if (next.has(entry.path)) next.delete(entry.path);
-      else next.set(entry.path, entry);
-      return next;
-    });
+      setSelected(new Map([[entry.path, entry]]));
+      return;
+    }
+    const next = new Map(selected);
+    if (next.has(entry.path)) {
+      next.delete(entry.path);
+      if (anchor.current === entry.path) anchor.current = [...next.keys()].at(-1) ?? null;
+    } else {
+      next.set(entry.path, entry);
+      anchor.current = entry.path;
+    }
+    setSelected(next);
   };
   const openMenu = (entry: ExplorerEntry, x: number, y: number) => {
     if (!selected.has(entry.path)) {
@@ -950,6 +960,7 @@ export function ExplorerActionsProvider({
       openDialog("trash", entries);
     } else if (event.key === "Escape") {
       setSelected(new Map());
+      anchor.current = null;
       setSelectionMode(false);
     } else if (
       ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)

@@ -255,16 +255,27 @@ def test_workspace_restores_search_and_hidden_controls_without_coupling_comparis
 def test_browser_manual_shell_keeps_workspace_owner_after_chat_deletion(
     page: Page, ownership: Ownership, tmp_path: Path
 ) -> None:
-    rail = _open(page, ownership)
+    _open(page, ownership)
+    rail = page.get_by_role("complementary", name="Workspace", exact=True, include_hidden=True)
+    sidebar = page.get_by_role(
+        "complementary", name="Conversations", exact=True, include_hidden=True
+    )
+    sidebar_was_hidden = sidebar.get_attribute("aria-hidden") == "true"
+    page.keyboard.press("Control+b")
+    expect(sidebar).to_have_attribute("aria-hidden", "false" if sidebar_was_hidden else "true")
+    page.keyboard.press("Control+b")
+    page.keyboard.press("Control+i")
+    expect(rail).to_have_attribute("data-state", "closed")
+    page.keyboard.press("Control+i")
+    expect(rail).to_have_attribute("data-state", "open")
     _switch_chat(page, ownership)
-    rail.get_by_role("button", name="Open new", exact=True).click()
     with page.expect_response(
         lambda response: (
             response.request.method == "POST"
             and response.url.endswith(f"/workbench-workspaces/{ownership.workspaces[0]}/terminals")
         )
     ) as created:
-        page.get_by_role("menuitem", name=re.compile(r"^Shell \(")).click()
+        page.keyboard.press("Control+j")
     assert created.value.ok, created.value.text()
     terminal = created.value.json()
     endpoint = f"/v1/workbench-workspaces/{ownership.workspaces[0]}/terminals/{terminal['id']}"
@@ -272,6 +283,11 @@ def test_browser_manual_shell_keeps_workspace_owner_after_chat_deletion(
         assert terminal["workspace_id"] == ownership.workspaces[0]
         assert terminal["metadata"]["root"] == str(ownership.roots[0])
         expect(rail.locator(".xterm-screen")).to_be_visible(timeout=30_000)
+        page.keyboard.press("Control+j")
+        listed = ownership.client.get(endpoint.rsplit("/", 1)[0])
+        listed.raise_for_status()
+        assert len([row for row in listed.json()["data"] if row["running"]]) == 1
+
         deleted = ownership.client.delete(f"/v1/sessions/{ownership.chats[0]}")
         assert deleted.status_code in {200, 204}, deleted.text
         detail = ownership.client.get(endpoint)
@@ -325,3 +341,42 @@ def test_mobile_explorer_selection_is_explicit(page: Page, ownership: Ownership)
     header = panel.locator(".workspace-control-header").first
     assert header.evaluate("element => getComputedStyle(element).overflowY") in {"hidden", "clip"}
     assert header.bounding_box()["height"] == 48
+
+
+def test_explorer_modified_clicks_select_ranges_without_opening_folders(
+    page: Page, ownership: Ownership
+) -> None:
+    folder = ownership.roots[0] / "selection-folder"
+    folder.mkdir()
+    (folder / "child.txt").write_text("folder child\n")
+    (ownership.roots[0] / "z-selection.txt").write_text("range target\n")
+    rail = _open(page, ownership)
+    _entry(rail, _FILE).locator("button").first.click()
+    viewer = page.get_by_test_id("file-viewer")
+    expect(viewer).to_contain_text(_A_CONTENT.strip(), timeout=30_000)
+    show = viewer.get_by_role("button", name="Show file explorer", exact=True)
+    if show.is_visible():
+        show.click()
+    explorer = page.get_by_role("region", name="File explorer", exact=True)
+    last = _entry(explorer, "z-selection.txt")
+    expect(last).to_be_visible(timeout=30_000)
+    last.locator("button").first.click(modifiers=["Shift"])
+    expect(_entry(explorer, _FILE)).to_have_attribute("aria-selected", "true")
+    expect(last).to_have_attribute("aria-selected", "true")
+    directory = _entry(explorer, "selection-folder")
+    button = directory.locator("button[aria-expanded]")
+    expect(button).to_have_attribute("aria-expanded", "false")
+    button.click(modifiers=["Control"])
+    expect(directory).to_have_attribute("aria-selected", "true")
+    expect(button).to_have_attribute("aria-expanded", "false")
+    _entry(explorer, _FILE).locator("button").first.click(modifiers=["Control"])
+    expect(_entry(explorer, _FILE)).to_have_attribute("aria-selected", "false")
+    expect(last).to_have_attribute("aria-selected", "true")
+    expect(directory).to_have_attribute("aria-selected", "true")
+    _entry(explorer, _FILE).locator("button").first.click(modifiers=["Control"])
+    expect(_entry(explorer, _FILE)).to_have_attribute("aria-selected", "true")
+    button.click(modifiers=["Shift"])
+    expect(button).to_have_attribute("aria-expanded", "false")
+    button.click()
+    expect(button).to_have_attribute("aria-expanded", "true")
+    expect(_entry(explorer, "selection-folder/child.txt")).to_be_visible(timeout=15_000)

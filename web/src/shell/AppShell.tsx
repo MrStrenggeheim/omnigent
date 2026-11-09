@@ -46,7 +46,7 @@ import { useApproveHotkey } from "@/hooks/useApproveHotkey";
 import { useSidebarToggleHotkeys } from "@/hooks/useSidebarToggleHotkeys";
 import { useCommandPaletteHotkey } from "@/hooks/useCommandPaletteHotkey";
 import { useNewSessionHotkey } from "@/hooks/useNewSessionHotkey";
-import { useNewShellHotkey } from "@/hooks/useNewShellHotkey";
+import { useNewShellHotkey, useManualTerminalHotkey } from "@/hooks/useNewShellHotkey";
 import { useSettingsHotkey } from "@/hooks/useSettingsHotkey";
 import { useIsEmbedded } from "@/lib/embedded";
 import { AgentInfoContent, agentHasInfo } from "@/components/AgentInfo";
@@ -2003,6 +2003,7 @@ function AppShellImpl() {
   useSidebarToggleHotkeys({
     onToggleLeft: toggleLeftSidebar,
     onToggleRight: toggleRightPanelFromHotkey,
+    onToggleRightDirect: toggleRightPanel,
   });
 
   // ⌘K (Ctrl+K) toggles the command palette. Bound capture-phase, so in the
@@ -2283,6 +2284,20 @@ function AppShellImpl() {
     openTerminalTab,
   ]);
   useNewShellHotkey(launchDefaultShell, shellLaunchable);
+  useManualTerminalHotkey(
+    () => {
+      const recent =
+        selectedTerminalKey && openTerminals.includes(selectedTerminalKey)
+          ? selectedTerminalKey
+          : openTerminals.at(-1);
+      handleSidebarClose();
+      if (recent) {
+        if (isMobileViewport()) openTerminalsPanel(recent);
+        else openTerminalTab(recent);
+      } else if (shellLaunchable) launchDefaultShell();
+    },
+    openTerminals.length > 0 || shellLaunchable,
+  );
 
   // Focus a shell the user just created ("+"→Shell) as soon as its tab appears
   // — a new non-agent terminal key that wasn't present when the create started.

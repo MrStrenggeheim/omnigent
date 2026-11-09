@@ -8,7 +8,7 @@ Both reuse the terminal viewer; [Activity](chat-activity.md) exposes recorded ch
 - `agent-terminal-view`: the Chat/Terminal switcher shows the harness terminal
   and returns to chat with the terminal's content kept. States: starting up
   (no Resume action), stopped (Resume offered), connected.
-- `user-shell`: open a shell, type into it, and close it.
+- `user-shell`: open a shell, type into it, and close it; Ctrl+J (Command+J on macOS) reveals the most recent manual shell or creates one when needed.
 - `scrollback`: scroll back with the mouse wheel (including programs that track
   the mouse), by touch on phones, and by keyboard.
 - `reconnect`: after the terminal connection drops, the terminal shows that it

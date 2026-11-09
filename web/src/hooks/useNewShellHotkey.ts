@@ -51,6 +51,24 @@ export function useNewShellHotkey(
   enabled = true,
   isMac = isMacPlatform(),
 ): void {
+  useTerminalHotkey(onLaunch, enabled, isMac, false);
+}
+
+/** Open the workspace's most recent manual shell, creating one only when necessary. */
+export function useManualTerminalHotkey(
+  onOpen: () => void,
+  enabled = true,
+  isMac = isMacPlatform(),
+): void {
+  useTerminalHotkey(onOpen, enabled, isMac, true);
+}
+
+function useTerminalHotkey(
+  onLaunch: () => void,
+  enabled: boolean,
+  isMac: boolean,
+  manual: boolean,
+): void {
   // Held in a ref so the bound handler always calls the latest closure without
   // re-registering on every render.
   const latest = useRef(onLaunch);
@@ -60,15 +78,26 @@ export function useNewShellHotkey(
     if (!enabled) return;
     const handler = (e: globalThis.KeyboardEvent): void => {
       // Ignore auto-repeat: holding the chord would spawn a shell per tick.
-      if (e.repeat || !isNewShellHotkey(e, isMac)) return;
+      const openChord =
+        (isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
+        !e.altKey &&
+        !e.shiftKey &&
+        e.code === "KeyJ";
+      if (
+        e.repeat ||
+        e.isComposing ||
+        e.defaultPrevented ||
+        !(manual ? openChord : isNewShellHotkey(e, isMac))
+      )
+        return;
       // Leave the chord to a focused editor/terminal that consumes keystrokes.
       const el = document.activeElement;
-      if (el instanceof Element && el.closest(TEXT_ENTRY_SURFACE) !== null) return;
+      if (!manual && el instanceof Element && el.closest(TEXT_ENTRY_SURFACE) !== null) return;
       e.preventDefault();
       e.stopPropagation();
       latest.current();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [enabled, isMac]);
+  }, [enabled, isMac, manual]);
 }

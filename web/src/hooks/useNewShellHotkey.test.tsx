@@ -1,7 +1,7 @@
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { isNewShellHotkey, useNewShellHotkey } from "./useNewShellHotkey";
+import { isNewShellHotkey, useNewShellHotkey, useManualTerminalHotkey } from "./useNewShellHotkey";
 
 afterEach(() => {
   cleanup();
@@ -154,3 +154,25 @@ describe("useNewShellHotkey", () => {
     expect(e.defaultPrevented).toBe(false);
   });
 });
+
+it.each([false, true])(
+  "opens manual terminals with the platform J shortcut and ignores repeat (mac=%s)",
+  (isMac) => {
+    const open = vi.fn();
+    renderHook(() => useManualTerminalHotkey(open, true, isMac));
+    const modifiers = isMac ? { metaKey: true } : { ctrlKey: true };
+    const key = new KeyboardEvent("keydown", {
+      code: "KeyJ",
+      ...modifiers,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(key);
+    expect(key.defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledOnce();
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { code: "KeyJ", ...modifiers, repeat: true }),
+    );
+    expect(open).toHaveBeenCalledOnce();
+  },
+);

@@ -13,6 +13,7 @@ The right panel selects a filesystem workspace independently of the chat; Files,
 
 ## How to get to it (user POV)
 
+- Keyboard: Ctrl+B toggles the left sidebar, Ctrl+I toggles the right panel, and Ctrl+J opens an existing manual shell or creates one; macOS uses Command.
 - Desktop: open the right panel and use Select workspace in its existing top row; choose a known workspace or a folder on an available host.
 - Phone: open the right sidebar and use Select workspace beside its tool tabs.
 - Switch chats from the left sidebar while keeping a file, search or shell open; the workspace stays selected and a different chat workspace has an explicit Open action.

@@ -138,3 +138,15 @@ describe("useSidebarToggleHotkeys", () => {
     expect(onToggleLeft).not.toHaveBeenCalled();
   });
 });
+
+it.each([false, true])(
+  "toggles the left/right panels with the platform B/I shortcuts (mac=%s)",
+  (isMac) => {
+    const { onToggleLeft, onToggleRight } = setup(isMac);
+    const modifiers = isMac ? { metaKey: true } : { ctrlKey: true };
+    press(modifiers, "KeyB");
+    press(modifiers, "KeyI");
+    expect(onToggleLeft).toHaveBeenCalledOnce();
+    expect(onToggleRight).toHaveBeenCalledOnce();
+  },
+);
