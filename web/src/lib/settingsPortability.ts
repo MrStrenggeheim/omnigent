@@ -31,6 +31,7 @@ const EXPORTABLE_KEYS = [
   "omnigent:ui-theme-palette",
   "omnigent:custom-theme",
   "omnigent:default-workspace-panel",
+  "omnigent:file-explorer-visible",
   "omnigent:default-workspace-tab",
   PINNED_WORKSPACE_TABS_STORAGE_KEY,
   "omnigent:default-transcript-view",

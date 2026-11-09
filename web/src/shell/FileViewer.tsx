@@ -62,6 +62,7 @@ import {
 } from "lucide-react";
 import { useSearchParams, useRebasePath } from "@/lib/routing";
 import { Button } from "@/components/ui/button";
+import { FileExplorerToggle } from "./AdaptiveFileWorkspace";
 import {
   Dialog,
   DialogContent,
@@ -273,6 +274,7 @@ const TOOLBAR_MAX_TITLE_PX = 280;
  */
 function useToolbarOverflow(actionsKey: string): {
   headerRef: React.RefObject<HTMLDivElement | null>;
+  explorerRef: React.RefObject<HTMLButtonElement | null>;
   backRef: React.RefObject<HTMLDivElement | null>;
   navRef: React.RefObject<HTMLDivElement | null>;
   pathMeasureRef: React.RefObject<HTMLSpanElement | null>;
@@ -281,6 +283,7 @@ function useToolbarOverflow(actionsKey: string): {
   collapsed: boolean;
 } {
   const headerRef = useRef<HTMLDivElement | null>(null);
+  const explorerRef = useRef<HTMLButtonElement | null>(null);
   const backRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLDivElement | null>(null);
   const pathMeasureRef = useRef<HTMLSpanElement | null>(null);
@@ -300,6 +303,7 @@ function useToolbarOverflow(actionsKey: string): {
 
       const backWidth = backRef.current?.offsetWidth ?? 0;
       const navWidth = navRef.current?.offsetWidth ?? 0;
+      const explorerWidth = explorerRef.current?.offsetWidth ?? 0;
       const chipWidth = chipRef.current?.offsetWidth ?? 0;
       const buttonsWidth = measure.scrollWidth;
       // Path-aware reserve: the label's intrinsic text width, clamped. Measured
@@ -312,7 +316,14 @@ function useToolbarOverflow(actionsKey: string): {
         TOOLBAR_MAX_TITLE_PX,
       );
       // ~12px covers the inter-group flex gaps.
-      const required = backWidth + navWidth + titleReserve + chipWidth + buttonsWidth + 12;
+      const required =
+        backWidth +
+        navWidth +
+        (explorerWidth ? explorerWidth + 8 : 0) +
+        titleReserve +
+        chipWidth +
+        buttonsWidth +
+        12;
       setCollapsed(available < required);
     };
     evaluate();
@@ -324,7 +335,16 @@ function useToolbarOverflow(actionsKey: string): {
     return () => ro.disconnect();
   }, [actionsKey]);
 
-  return { headerRef, backRef, navRef, pathMeasureRef, chipRef, measureRef, collapsed };
+  return {
+    headerRef,
+    explorerRef,
+    backRef,
+    navRef,
+    pathMeasureRef,
+    chipRef,
+    measureRef,
+    collapsed,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +383,8 @@ interface FileViewerProps {
   frameless?: boolean;
   /** The same frameless viewer fills the mobile viewport without remounting. */
   mobileOverlay?: boolean;
+  /** The surrounding workspace owns full-screen positioning while retaining Explorer. */
+  mobileEmbedded?: boolean;
   /** Only the active viewport mounts the diff editor and synchronizes the URL. */
   viewport?: "desktop" | "mobile";
   /** Called when the user presses Escape to close the active file tab. */
@@ -421,6 +443,7 @@ function FileViewerBody({
   permissionLevel,
   frameless,
   mobileOverlay = false,
+  mobileEmbedded = false,
   viewport,
   onCommentsOpenChange,
   sort = "recent",
@@ -1456,6 +1479,7 @@ function FileViewerBody({
   const showNavButtons = currentNavIdx !== -1 && navigableFiles.length > 1 && !!onNavigateTo;
   const {
     headerRef: toolbarHeaderRef,
+    explorerRef: toolbarExplorerRef,
     backRef: toolbarBackRef,
     navRef: toolbarNavRef,
     pathMeasureRef: toolbarPathMeasureRef,
@@ -1644,6 +1668,7 @@ function FileViewerBody({
             </div>
           )}
           {/* Always show the file path/name in the toolbar, in every view. */}
+          <FileExplorerToggle buttonRef={toolbarExplorerRef} />
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2069,10 +2094,11 @@ function FileViewerBody({
       <div
         ref={setViewerRoot}
         data-testid="file-viewer"
+        data-file-viewer-embedded={mobileEmbedded || undefined}
         style={{ paddingBottom: keyboardInset || undefined }}
         className={cn(
           "flex flex-col flex-1 min-h-0 overflow-hidden bg-card",
-          mobileOverlay && "fixed inset-0 z-40 shadow-lg",
+          mobileOverlay && !mobileEmbedded && "fixed inset-0 z-40 shadow-lg",
         )}
       >
         {innerContent}

@@ -728,10 +728,9 @@ describe("WorkspacePanel content area", () => {
       selectedFilePath: "src/App.tsx",
     });
 
-    // A selected file shows its viewer in the content slot; the scope panel
-    // must not also mount. The stub echoes the path it received.
+    // The viewer is visible; the retained Explorer stays hidden until opened.
     expect(screen.getByTestId("file-viewer-stub")).toHaveTextContent("src/App.tsx");
-    expect(screen.queryByTestId("files-panel-stub")).toBeNull();
+    expect(screen.getByTestId("files-panel-stub")).not.toBeVisible();
   });
 
   it.each(["files", "changes"] as const)(

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { AdaptiveFileWorkspace } from "./AdaptiveFileWorkspace";
+import { AdaptiveFileWorkspace, FileExplorerToggle } from "./AdaptiveFileWorkspace";
 import { ResponsiveViewerSlot } from "./ResponsiveViewerSlot";
 import { CommentSenderProvider } from "@/hooks/CommentSenderContext";
 
@@ -177,4 +177,52 @@ it("remembers resized Explorer width, clamps to leave viewer room and restores i
   expect(divider).toHaveAttribute("aria-valuenow", "640");
   fireEvent.keyDown(divider, { key: "Home" });
   expect(divider).toHaveAttribute("aria-valuenow", "180");
+});
+
+it("remembers an explicit visibility choice across every width, mobile layout and remount", () => {
+  const tree = (isMobile = false) => (
+    <AdaptiveFileWorkspace
+      width={420}
+      isMobile={isMobile}
+      explorer={<input aria-label="Explorer filter" defaultValue="kept filter" />}
+    >
+      <FileExplorerToggle />
+      <textarea aria-label="Retained file draft" defaultValue="kept draft" />
+    </AdaptiveFileWorkspace>
+  );
+  const view = render(tree());
+  const draft = screen.getByLabelText("Retained file draft");
+  fireEvent.click(screen.getByRole("button", { name: "Show file explorer" }));
+  const filter = screen.getByLabelText("Explorer filter");
+  expect(screen.getByRole("region", { name: "File explorer" })).toBeVisible();
+  for (const width of [320, 420, 719, 720, 1000]) {
+    resize(width);
+    expect(screen.getByRole("button", { name: "Hide file explorer" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByLabelText("Retained file draft")).toBe(draft);
+  }
+  view.rerender(tree(true));
+  expect(screen.getByRole("region", { name: "File explorer" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Hide file explorer" }));
+  for (const width of [320, 720, 1400]) {
+    resize(width);
+    expect(screen.queryByRole("region", { name: "File explorer" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Show file explorer" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Show file explorer" }));
+  expect(screen.getByLabelText("Explorer filter")).toBe(filter);
+  expect(filter).toHaveValue("kept filter");
+  view.unmount();
+  const reopened = render(tree());
+  expect(screen.getByRole("region", { name: "File explorer" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Hide file explorer" }));
+  reopened.unmount();
+  render(tree());
+  resize(1400);
+  expect(screen.queryByRole("region", { name: "File explorer" })).toBeNull();
 });

@@ -5,7 +5,8 @@ Git supplies change status by default; explicit captured comparisons retain the 
 
 ## Sub-features
 
-- `adaptive-viewer`: a desktop file workspace at least 720px wide keeps a resizable Explorer (180px minimum; 260–320px default) beside the viewer; narrower widths and phones show one surface, and crossing the threshold preserves the editor and draft.
+- `adaptive-viewer`: the button immediately before the open file path toggles Explorer and remembers the choice at every panel width, including phones; before the first explicit choice, desktop widths of at least 720px show it automatically.
+- `explorer-resize`: Explorer retains its resizable width (180px minimum), while narrow splits keep at least 240px for the viewer and allow horizontal overflow; toggling preserves the file editor and Explorer state.
 
 - `create`: create a file or folder with a name dialog; existing destinations produce an error.
 - `organize`: rename, move, duplicate, cut, copy and paste files or folders, with explicit overwrite selection.
@@ -37,7 +38,7 @@ Git supplies change status by default; explicit captured comparisons retain the 
 - Notifications in the conversation header, Files/Changes drawer or mobile full-screen file viewer opens shared transfer activity after its popup collapses.
 - Search in folder opens the shared [workspace content search](workspace-content-search.md) with the chosen scope.
 
-- Wide file workspace: maximize or widen the right panel, then open a file to keep Files or Changes visible beside it; drag their divider or use its arrow keys to adjust and remember the Explorer width.
+- Open-file header: Show file explorer / Hide file explorer, immediately left of the path, works at every panel width and remembers the choice across files and reloads; drag their divider or use its arrow keys to adjust the Explorer width.
 
 ## Driving it with the repro environment
 
@@ -47,6 +48,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Delayed background refresh, shared drop overlay, idle/hover row controls and selection visibility: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_background_refresh_and_shared_hover_controls`.
 - Transfer progress and cancellation remain accessible through the [notification center](notifications.md) across folder, file and session navigation; real browser navigation during upload is covered by `tests/e2e_ui/files/test_explorer_file_operations.py::test_upload_continues_while_viewing_another_file`, including popup, retained-center and phone-center variants.
 - Desktop and mobile toolbar search, replacement preview, apply and undo: `tests/e2e_ui/files/test_explorer_file_operations.py::test_workspace_search_replace_preview_and_undo`.
+- Header-toggle persistence across narrow desktop and phone widths: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_file_header_toggles_explorer_at_any_width_and_remembers_choice`.
 - Adaptive Explorer/viewer layout, draggable remembered width, 48px control headers, file navigation and resize continuity: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_wide_workspace_keeps_explorer_beside_stable_file_viewer`; `web/src/shell/AdaptiveFileWorkspace.test.tsx` covers draft and focus preservation.
 - Filename search and directory reveal: `tests/e2e_ui/files/test_file_search.py`.
 - Desktop and phone More file actions → the shared comparison dropdown, nested repository status, retained parent status during delayed discovery, absent historical paths and reload persistence: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_shared_comparison_keeps_files_live_and_gates_mixed_revisions`.

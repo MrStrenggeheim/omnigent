@@ -1852,25 +1852,26 @@ function WorkspacePanelImpl({
               autoFocus={autoFocusSelectedTerminal}
             />
           ) : selectedFilePath !== null ? (
-            <AdaptiveFileWorkspace
-              width={width}
-              isMobile={isMobile}
-              explorer={
-                showFilesPanel ? (
-                  <FilesPanel
-                    conversationId={conversationId || undefined}
-                    frameless
-                    onFileSelect={openFileViewer}
-                    flatView={rightRailTab === "changes"}
-                    showHidden={filesPanelShowHidden}
-                    onShowHiddenChange={onShowHiddenChange}
-                    sort={filesPanelSort}
-                    onSortChange={onSortChange}
-                  />
-                ) : null
-              }
-            >
-              <ResponsiveViewerSlot mobile={isMobile} mobileTarget={mobileFileTarget}>
+            <ResponsiveViewerSlot mobile={isMobile} mobileTarget={mobileFileTarget}>
+              <AdaptiveFileWorkspace
+                mobileOverlay={isMobile}
+                width={width}
+                isMobile={isMobile}
+                explorer={
+                  showFilesPanel ? (
+                    <FilesPanel
+                      conversationId={conversationId || undefined}
+                      frameless
+                      onFileSelect={openFileViewer}
+                      flatView={rightRailTab === "changes"}
+                      showHidden={filesPanelShowHidden}
+                      onShowHiddenChange={onShowHiddenChange}
+                      sort={filesPanelSort}
+                      onSortChange={onSortChange}
+                    />
+                  ) : null
+                }
+              >
                 <FileViewer
                   syncUrl={!contained}
                   agentId={agentId}
@@ -1881,6 +1882,7 @@ function WorkspacePanelImpl({
                     fileComparisonScope ?? (rightRailTab === "changes" ? "changes" : "files")
                   }
                   mobileOverlay={isMobile}
+                  mobileEmbedded
                   frameless
                   open
                   mediaActive={isMobile ? mobileFileTarget != null : open}
@@ -1899,8 +1901,8 @@ function WorkspacePanelImpl({
                   onCommentsOpenChange={onCommentsOpenChange}
                   sort={filesPanelSort}
                 />
-              </ResponsiveViewerSlot>
-            </AdaptiveFileWorkspace>
+              </AdaptiveFileWorkspace>
+            </ResponsiveViewerSlot>
           ) : sideChatSelected && !isMobile ? (
             // A side chat: a forked child conversation streamed here in its own
             // scoped surface, beside the still-active main chat. Phones show it

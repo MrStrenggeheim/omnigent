@@ -1165,7 +1165,8 @@ html[data-electron-mac] .breadcrumb-folder {
     aside[aria-label="Workspace"],
     .conversations-sidebar,
     [data-testid="execution-logs-panel"],
-    [data-testid="file-viewer"],
+    [data-testid="file-viewer"]:not([data-file-viewer-embedded]),
+    [data-file-workspace-overlay],
     [data-testid="files-panel-drawer"],
     [data-testid="terminals-panel"],
     .mobile-panel-drawer

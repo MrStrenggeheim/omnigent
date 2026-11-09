@@ -346,3 +346,62 @@ def test_wide_workspace_keeps_explorer_beside_stable_file_viewer(
         expect(panel.get_by_role("button", name="Select panel", exact=True)).to_have_count(0)
     finally:
         shutil.rmtree(repository)
+
+
+@pytest.mark.parametrize("mobile", [False, True], ids=["desktop", "phone"])
+def test_file_header_toggles_explorer_at_any_width_and_remembers_choice(
+    page: Page, seeded_session: tuple[str, str], request: pytest.FixtureRequest, mobile: bool
+) -> None:
+    base, session_id = seeded_session
+    path = "explorer-toggle.txt"
+    _seed_file(base, session_id, path, "Explorer toggle retained viewer\n")
+    page.set_viewport_size({"width": 390 if mobile else 1440, "height": 960})
+    page.goto(f"{base}/c/{session_id}?file={path}&view=explore")
+    viewer = page.get_by_test_id("file-viewer")
+    expect(viewer).to_contain_text("Explorer toggle retained viewer", timeout=30_000)
+    viewer.evaluate("element => element.dataset.toggleIdentity = 'retained'")
+    toggle = viewer.get_by_role("button", name="Show file explorer", exact=True)
+    expect(toggle).to_be_visible()
+    toggle.click()
+    explorer = page.get_by_role("region", name="File explorer", exact=True)
+    expect(explorer).to_be_visible()
+    expect(explorer.get_by_text(path, exact=True)).to_be_visible(timeout=15_000)
+    hide = viewer.get_by_role("button", name="Hide file explorer", exact=True)
+    hide.scroll_into_view_if_needed()
+    expect(hide).to_be_in_viewport()
+    expect(viewer).to_contain_text("Explorer toggle retained viewer", timeout=30_000)
+    page.screenshot(
+        path=str(
+            Path(request.config.getoption("output"))
+            / f"explorer-open-{'phone' if mobile else 'desktop'}.png"
+        ),
+        animations="disabled",
+    )
+    hide.click()
+    expect(explorer).to_be_hidden()
+    expect(viewer).to_have_attribute("data-toggle-identity", "retained")
+    if not mobile:
+        panel = page.get_by_role("complementary", name="Workspace")
+        panel.get_by_role("button", name="Full screen", exact=True).click()
+        expect(explorer).to_be_hidden()
+        panel.get_by_role("button", name="Exit full screen", exact=True).click()
+    viewer.get_by_role("button", name="Show file explorer", exact=True).click()
+    expect(explorer).to_be_visible()
+    expect(viewer).to_have_attribute("data-toggle-identity", "retained")
+    page.reload()
+    expect(explorer).to_be_visible(timeout=30_000)
+    hide.scroll_into_view_if_needed()
+    hide.click()
+    page.reload()
+    expect(viewer.get_by_role("button", name="Show file explorer", exact=True)).to_be_visible(
+        timeout=30_000
+    )
+    expect(explorer).to_be_hidden()
+    expect(viewer).to_contain_text("Explorer toggle retained viewer", timeout=30_000)
+    page.screenshot(
+        path=str(
+            Path(request.config.getoption("output"))
+            / f"explorer-toggle-{'phone' if mobile else 'desktop'}.png"
+        ),
+        animations="disabled",
+    )
