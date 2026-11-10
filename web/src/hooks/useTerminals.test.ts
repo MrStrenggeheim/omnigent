@@ -40,6 +40,7 @@ vi.mock("@/hooks/RunnerHealthProvider", () => ({
   useSessionRunnerOnline: vi.fn(() => undefined),
 }));
 import { useSessionRunnerOnline } from "@/hooks/RunnerHealthProvider";
+import type { WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 
 const runnerOnlineMock = vi.mocked(useSessionRunnerOnline);
 
@@ -412,7 +413,99 @@ describe("deleteTerminal", () => {
 
   it("throws on a non-404 failure", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse(null, { ok: false, status: 500 }));
-    await expect(deleteTerminal("conv_abc", "terminal_bash_s1")).rejects.toThrow(/delete failed/);
+    await expect(deleteTerminal("conv_abc", "terminal_bash_s1")).rejects.toMatchObject({
+      message: "500 OK",
+      status: 500,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a session network failure without attempting workspace reconciliation", async () => {
+    const failure = new TypeError("Failed to fetch");
+    fetchMock.mockRejectedValueOnce(failure);
+    await expect(deleteTerminal("conv_abc", "terminal_bash_s1")).rejects.toBe(failure);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  const workspace: WorkbenchWorkspace = {
+    id: "workspace/a",
+    root: "/a",
+    host_id: "host-a",
+    target_kind: "host",
+    capabilities: ["terminals"],
+  };
+  const terminalPath = "/v1/workbench-workspaces/workspace%2Fa/terminals/shell%2Fid";
+
+  it.each([
+    [
+      403,
+      { error: { code: "forbidden", message: "Workspace is read-only" } },
+      "Workspace is read-only",
+    ],
+    [409, { detail: "Workspace host changed" }, "Workspace host changed"],
+  ] as const)(
+    "preserves a %s rejection without checking or retrying the stop",
+    async (status, body, message) => {
+      fetchMock.mockResolvedValueOnce(mockResponse(body, { ok: false, status }));
+      await expect(deleteTerminal("chat", "shell/id", workspace)).rejects.toMatchObject({
+        status,
+        message,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(terminalPath);
+    },
+  );
+
+  describe.each(["server", "network"] as const)("lost %s stop acknowledgment", (failureKind) => {
+    beforeEach(() => {
+      if (failureKind === "network") {
+        fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      } else {
+        fetchMock.mockResolvedValueOnce(
+          mockResponse({ detail: "Workspace host is offline" }, { ok: false, status: 503 }),
+        );
+      }
+    });
+
+    it.each([{ state: "exited" }, { metadata: { state: "stopped" } }, null])(
+      "accepts a confirmed ended or absent terminal: %j",
+      async (record) => {
+        fetchMock.mockResolvedValueOnce(
+          mockResponse(record, record === null ? { ok: false, status: 404 } : undefined),
+        );
+        await expect(deleteTerminal("chat", "shell/id", workspace)).resolves.toBeUndefined();
+        expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([terminalPath, terminalPath]);
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "DELETE" });
+        expect(fetchMock.mock.calls[1][1]?.method ?? "GET").toBe("GET");
+      },
+    );
+
+    it.each([
+      { state: "running", running: true },
+      { state: "running", running: false, connectivity: "disconnected" },
+      { state: "unknown", metadata: { state: "exited" }, running: false },
+      { running: false },
+    ])("preserves the original error when exit is unconfirmed: %j", async (record) => {
+      fetchMock.mockResolvedValueOnce(mockResponse(record));
+      await expect(deleteTerminal("chat", "shell/id", workspace)).rejects.toThrow(
+        failureKind === "network" ? "Failed to fetch" : "Workspace host is offline",
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([403, 503, "network", "invalid JSON"] as const)(
+      "preserves the original failure when reconciliation fails: %s",
+      async (failure) => {
+        if (failure === "network") fetchMock.mockRejectedValueOnce(new Error("Read failed"));
+        else if (failure === "invalid JSON")
+          fetchMock.mockResolvedValueOnce(new Response("invalid"));
+        else fetchMock.mockResolvedValueOnce(mockResponse(null, { ok: false, status: failure }));
+        await expect(deleteTerminal("chat", "shell/id", workspace)).rejects.toThrow(
+          failureKind === "network" ? "Failed to fetch" : "Workspace host is offline",
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      },
+    );
   });
 });
 

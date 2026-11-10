@@ -1,4 +1,5 @@
 import { setPanelFolder } from "@/lib/panelFolder";
+import { toast } from "@/lib/notifications";
 import type * as IdentityModule from "@/lib/identity";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -21,6 +22,7 @@ vi.mock("@/lib/identity", async (importOriginal) => ({
   authenticatedFetch: fetchMock,
 }));
 vi.mock("@/hooks/RunnerHealthProvider", () => ({ useSessionRunnerOnline: vi.fn() }));
+vi.mock("@/lib/notifications", () => ({ toast: { error: vi.fn() } }));
 
 const workspaceA: WorkbenchWorkspace = {
   id: "workspace-a",
@@ -87,6 +89,7 @@ function cache() {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  vi.mocked(toast.error).mockReset();
   vi.mocked(useSessionRunnerOnline).mockReturnValue(undefined);
 });
 afterEach(() => {
@@ -207,15 +210,57 @@ describe("workspace terminal mutations", () => {
   );
 
   it.each(["create", "delete"] as const)(
-    "preserves a successful %s when an older list request resolves afterward",
+    "keeps the original %s target when selection changes while queries are being cancelled",
     async (operation) => {
+      const cancelled = deferred<void>();
+      fetchMock.mockResolvedValue(response(resource("created")));
+      const { wrapper, client } = cache();
+      client.setQueryData(key(workspaceA), [info("existing")]);
+      client.setQueryData(key(workspaceB), [info("existing", workspaceB)]);
+      const cancelQueries = client.cancelQueries.bind(client);
+      const cancel = vi.spyOn(client, "cancelQueries").mockImplementationOnce(async (filters) => {
+        await cancelQueries(filters);
+        await cancelled.promise;
+      });
+      const { result, rerender } = renderHook(
+        ({ workspace }) => ({
+          create: useCreateTerminal("chat", workspace),
+          delete: useDeleteTerminal("chat", workspace),
+        }),
+        { wrapper, initialProps: { workspace: workspaceA } },
+      );
+      act(() => result.current[operation].mutate(operation === "create" ? "shell" : "existing"));
+      await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+      expect(fetchMock).not.toHaveBeenCalled();
+      rerender({ workspace: workspaceB });
+      await act(async () => cancelled.resolve());
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        `/v1/workbench-workspaces/workspace-a/terminals${operation === "delete" ? "/existing" : ""}`,
+      );
+      expect(client.getQueryData(key(workspaceA))).toEqual(
+        operation === "create" ? [info("existing"), info("created")] : [],
+      );
+      expect(client.getQueryData(key(workspaceB))).toEqual([info("existing", workspaceB)]);
+    },
+  );
+
+  it.each([
+    ["create", "before"],
+    ["delete", "before"],
+    ["create", "during"],
+    ["delete", "during"],
+  ] as const)(
+    "preserves a successful %s when a list started %s the mutation resolves afterward",
+    async (operation, phase) => {
       const oldList = deferred<Response>();
+      const mutation = deferred<Response>();
       fetchMock.mockImplementation((_path: string, init?: RequestInit) =>
-        init?.method ? Promise.resolve(response(resource("created"))) : oldList.promise,
+        init?.method ? mutation.promise : oldList.promise,
       );
       const { wrapper, client } = cache();
       client.setQueryData(key(workspaceA), [info("existing")]);
-      await client.invalidateQueries({ queryKey: key(workspaceA) });
+      if (phase === "before") await client.invalidateQueries({ queryKey: key(workspaceA) });
       const { result } = renderHook(
         () => ({
           list: useTerminals("chat", { workspace: workspaceA }),
@@ -224,9 +269,23 @@ describe("workspace terminal mutations", () => {
         }),
         { wrapper },
       );
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      if (phase === "before") await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      let pending!: Promise<TerminalInfo | void>;
+      act(() => {
+        pending = result.current[operation].mutateAsync(
+          operation === "create" ? "shell" : "existing",
+        );
+      });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(phase === "before" ? 2 : 1));
+      if (phase === "during") {
+        act(() => {
+          void client.refetchQueries({ queryKey: key(workspaceA), exact: true });
+        });
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      }
       await act(async () => {
-        await result.current[operation].mutateAsync(operation === "create" ? "shell" : "existing");
+        mutation.resolve(response(resource("created")));
+        await pending;
       });
       const expected = operation === "create" ? [info("existing"), info("created")] : [];
       expect(client.getQueryData(key(workspaceA))).toEqual(expected);
@@ -235,6 +294,93 @@ describe("workspace terminal mutations", () => {
       });
       await waitFor(() => expect(result.current.list.isFetching).toBe(false));
       expect(client.getQueryData(key(workspaceA))).toEqual(expected);
+    },
+  );
+
+  it.each(["exited", "stopped"])(
+    "reconciles a timed-out stop as %s in its original workspace without a stale poll restoring the tab",
+    async (state) => {
+      const stop = deferred<Response>();
+      const check = deferred<Response>();
+      const staleList = deferred<Response>();
+      fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+        if (init?.method === "DELETE") return stop.promise;
+        if (path.endsWith("/existing")) return check.promise;
+        return staleList.promise;
+      });
+      const { wrapper, client } = cache();
+      client.setQueryData(key(workspaceA), [info("existing")]);
+      client.setQueryData(key(workspaceB), [info("existing", workspaceB)]);
+      const { result, rerender } = renderHook(
+        ({ workspace }) => ({
+          delete: useDeleteTerminal("chat", workspace),
+          // Another pane can keep this workspace's inventory active after selection changes.
+          list: useTerminals(null, { workspace: workspaceA }),
+        }),
+        { wrapper, initialProps: { workspace: workspaceA } },
+      );
+      act(() => result.current.delete.mutate("existing"));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      // A poll can begin after onMutate cancelled the earlier inventory request.
+      let poll!: Promise<void>;
+      act(() => {
+        poll = client.refetchQueries({ queryKey: key(workspaceA), exact: true });
+      });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      rerender({ workspace: workspaceB });
+      await act(async () =>
+        stop.resolve(response({ detail: "Stop acknowledgment timed out" }, 504)),
+      );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      expect(fetchMock.mock.calls[2][0]).toBe(
+        "/v1/workbench-workspaces/workspace-a/terminals/existing",
+      );
+      await act(async () => check.resolve(response(resource("existing", workspaceA, state))));
+      await waitFor(() => expect(client.getQueryData(key(workspaceA))).toEqual([]));
+      await act(async () => {
+        staleList.resolve(response({ data: [resource("existing")] }));
+        await poll;
+      });
+      expect(client.getQueryData(key(workspaceA))).toEqual([]);
+      expect(result.current.list.terminals).toEqual([]);
+      expect(client.getQueryData(key(workspaceB))).toEqual([info("existing", workspaceB)]);
+      expect(toast.error).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [403, "Workspace is read-only", undefined],
+    [503, "Workspace host is offline", "running"],
+    [504, "Stop acknowledgment timed out", "unknown"],
+  ] as const)(
+    "reports the actual %s failure and refreshes only the captured workspace",
+    async (status, message, state) => {
+      const stop = deferred<Response>();
+      fetchMock.mockReturnValueOnce(stop.promise);
+      if (state) fetchMock.mockResolvedValueOnce(response(resource("existing", workspaceA, state)));
+      const { wrapper, client } = cache();
+      client.setQueryData(key(workspaceA), [info("existing")]);
+      client.setQueryData(key(workspaceB), [info("existing", workspaceB)]);
+      const invalidate = vi.spyOn(client, "invalidateQueries");
+      const { result, rerender } = renderHook(
+        ({ workspace }) => useDeleteTerminal("chat", workspace),
+        { wrapper, initialProps: { workspace: workspaceA } },
+      );
+      act(() => result.current.mutate("existing"));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      rerender({ workspace: workspaceB });
+      await act(async () => stop.resolve(response({ detail: message }, status)));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+      expect(toast.error).toHaveBeenCalledWith("Could not close the shell", {
+        description: `${message} Refresh the shell list to check its state before retrying.`,
+      });
+      expect(invalidate).toHaveBeenCalledExactlyOnceWith({
+        queryKey: key(workspaceA),
+        exact: true,
+      });
+      expect(client.getQueryData(key(workspaceA))).toEqual([info("existing")]);
+      expect(client.getQueryData(key(workspaceB))).toEqual([info("existing", workspaceB)]);
+      expect(fetchMock).toHaveBeenCalledTimes(state ? 2 : 1);
     },
   );
 });

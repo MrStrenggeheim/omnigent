@@ -8,7 +8,7 @@ import { isTempConvId } from "@/lib/tempConversationId";
 import { terminalInfoFromResource, terminalsQueryKey, type TerminalInfo } from "@/lib/terminals";
 import { useWorkbenchWorkspace, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
-import { showToast } from "@/components/ui/toast";
+import { toast } from "@/lib/notifications";
 
 export { terminalInfoFromResource, terminalsQueryKey, type TerminalInfo } from "@/lib/terminals";
 
@@ -316,6 +316,13 @@ export function useCreateTerminal(
   const folder = usePanelFolder(workspace?.id, workspace?.root ?? null);
   const queryClient = useQueryClient();
   return useMutation({
+    // A selection change must not replace a pending mutation's target or callbacks.
+    mutationKey: [
+      "create-terminal",
+      workspace?.id ?? null,
+      workspace ? null : conversationId,
+      folder,
+    ],
     mutationFn: (terminal: string) => createTerminal(conversationId, terminal, workspace, folder),
     onMutate: async () => {
       const key = workspace
@@ -324,13 +331,28 @@ export function useCreateTerminal(
       await queryClient.cancelQueries({ queryKey: key, exact: true });
       return { key };
     },
-    onSuccess: (info, _terminal, context) => {
+    onSuccess: async (info, _terminal, context) => {
       const key = context.key;
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
       const current = queryClient.getQueryData<TerminalInfo[]>(key) ?? [];
       if (current.some((t) => t.id === info.id)) return;
       queryClient.setQueryData<TerminalInfo[]>(key, [...current, info]);
     },
   });
+}
+
+async function terminalHasEnded(path: string): Promise<boolean> {
+  try {
+    const check = await authenticatedFetch(path);
+    if (check.status === 404) return true;
+    if (check.ok) {
+      const record = await check.json();
+      return ["exited", "stopped"].includes(record.state ?? record.metadata?.state);
+    }
+  } catch {
+    // A failed read cannot confirm exit; preserve the original stop failure.
+  }
+  return false;
 }
 
 /**
@@ -353,14 +375,21 @@ export async function deleteTerminal(
   terminalId: string,
   workspace?: WorkbenchWorkspace | null,
 ): Promise<void> {
-  const res = await authenticatedFetch(
-    workspace
-      ? `/v1/workbench-workspaces/${encodeURIComponent(workspace.id)}/terminals/${encodeURIComponent(terminalId)}`
-      : `/v1/sessions/${encodeURIComponent(conversationId)}/resources/terminals/${encodeURIComponent(terminalId)}`,
-    { method: "DELETE" },
-  );
+  const path = workspace
+    ? `/v1/workbench-workspaces/${encodeURIComponent(workspace.id)}/terminals/${encodeURIComponent(terminalId)}`
+    : `/v1/sessions/${encodeURIComponent(conversationId)}/resources/terminals/${encodeURIComponent(terminalId)}`;
+  let res: Response;
+  try {
+    res = await authenticatedFetch(path, { method: "DELETE" });
+  } catch (error) {
+    if (workspace && (await terminalHasEnded(path))) return;
+    throw error;
+  }
   if (!res.ok && res.status !== 404) {
-    throw new Error(`terminal delete failed: ${res.status} ${res.statusText}`);
+    const failure = await apiErrorFromResponse(res);
+    // A lost stop response may still have ended the process; reconcile its captured owner.
+    if (workspace && res.status >= 500 && (await terminalHasEnded(path))) return;
+    throw failure;
   }
 }
 
@@ -382,6 +411,7 @@ export function useDeleteTerminal(
   const workspace = useWorkbenchWorkspace(explicitWorkspace);
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: ["delete-terminal", workspace?.id ?? null, workspace ? null : conversationId],
     mutationFn: (terminalId: string) => deleteTerminal(conversationId, terminalId, workspace),
     onMutate: async () => {
       const key = workspace
@@ -390,19 +420,22 @@ export function useDeleteTerminal(
       await queryClient.cancelQueries({ queryKey: key, exact: true });
       return { key };
     },
-    onSuccess: (_result, terminalId, context) => {
+    onSuccess: async (_result, terminalId, context) => {
       const key = context.key;
+      // Polls started during the stop must not restore the closed tab afterward.
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
       const current = queryClient.getQueryData<TerminalInfo[]>(key) ?? [];
       queryClient.setQueryData<TerminalInfo[]>(
         key,
         current.filter((t) => t.id !== terminalId),
       );
     },
-    // The kill round-trips to the runner and can fail (offline runner, 403 for
-    // a non-editor, 500). Surface it — otherwise the tab silently reappears
-    // once ``isPending`` clears and the user has no idea the shell survived.
-    onError: () => {
-      showToast("Couldn't close the shell — it's still running.", { duration: 0 });
+    // A failed stop leaves the process state unconfirmed; show the actual cause.
+    onError: (error, _terminalId, context) => {
+      if (context?.key) void queryClient.invalidateQueries({ queryKey: context.key, exact: true });
+      toast.error("Could not close the shell", {
+        description: `${error.message} Refresh the shell list to check its state before retrying.`,
+      });
     },
   });
 }

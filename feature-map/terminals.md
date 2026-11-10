@@ -7,6 +7,8 @@ New manual shells start in the selected panel folder; browsing later leaves exis
 
 ## Sub-features
 
+- `close-reconciliation`: a failed close reports its actual cause; a lost acknowledgement counts as success only when the original workspace confirms the terminal exited or disappeared; stale polls cannot resurrect the closed tab.
+
 - `agent-terminal-view`: the Chat/Terminal switcher shows the harness terminal
   and returns to chat with the terminal's content kept. States: starting up
   (no Resume action), stopped (Resume offered), connected.
