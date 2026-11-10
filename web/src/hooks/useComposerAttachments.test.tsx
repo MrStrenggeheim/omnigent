@@ -22,9 +22,11 @@ function pngFile(name = "shot.png"): File {
   return new File([new Uint8Array(10)], name, { type: "image/png" });
 }
 
-/** An unsupported file — validation rejects it before any upload exists. */
+/** An oversized file — validation rejects it before uploading. */
 function videoFile(name = "clip.mp4"): File {
-  return new File([new Uint8Array(10)], name, { type: "video/mp4" });
+  const file = new File([new Uint8Array(10)], name, { type: "video/mp4" });
+  Object.defineProperty(file, "size", { value: 51 * 1024 * 1024 });
+  return file;
 }
 
 /** Clipboard items as a real paste carries them: text and/or file entries. */
@@ -69,7 +71,7 @@ function withPolicy(policy: FilesystemAttachmentsInfo) {
 }
 
 describe("useComposerAttachments", () => {
-  it("validates added and pasted files against the server's policy", () => {
+  it("accepts added and pasted files independently of model delivery policy", () => {
     const { result } = renderHook(() => useComposerAttachments(), {
       wrapper: withPolicy({ extensions: [".gz"], all_types: false }),
     });
@@ -78,16 +80,16 @@ describe("useComposerAttachments", () => {
     const zip = new File([new Uint8Array(4)], "bundle.zip", { type: "application/zip" });
 
     act(() => result.current.addFiles([gz, zip]));
-    expect(result.current.files).toEqual([gz]);
-    expect(result.current.attachmentError).toContain("bundle.zip");
-    expect(result.current.accept?.split(",")).toContain(".gz");
+    expect(result.current.files).toEqual([gz, zip]);
+    expect(result.current.attachmentError).toBeNull();
+    expect(result.current.accept).toBeUndefined();
 
     const pasted = new File([new Uint8Array(4)], "more.gz", { type: "application/gzip" });
     act(() => result.current.onPaste(pasteEvent({ files: [pasted] }).event));
-    expect(result.current.files).toEqual([gz, pasted]);
+    expect(result.current.files).toEqual([gz, zip, pasted]);
   });
 
-  it("rechecks files added while the server's policy was loading", () => {
+  it("retains accepted files when model policy finishes loading", () => {
     let info: ServerInfo | "loading" = "loading";
     const onRemoved = vi.fn();
     const { result, rerender } = renderHook(() => useComposerAttachments({ onRemoved }), {
@@ -107,9 +109,9 @@ describe("useComposerAttachments", () => {
     };
     rerender();
 
-    expect(result.current.files).toEqual([notes]);
-    expect(result.current.attachmentError).toContain("bundle.zip");
-    expect(onRemoved).toHaveBeenCalledOnce();
+    expect(result.current.files).toEqual([notes, zip]);
+    expect(result.current.attachmentError).toBeNull();
+    expect(onRemoved).not.toHaveBeenCalled();
   });
 
   it("starts empty by default and seeds from initialFiles", () => {

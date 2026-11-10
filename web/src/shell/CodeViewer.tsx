@@ -1,3 +1,5 @@
+import { previewSourceMarkers, renderedMarkdownSelection } from "./markdownPreviewSelection";
+import { FileSelectionMenu, FileSelectionScope } from "./FileSelectionMenu";
 // Syntax-highlighted file body with find-in-file, text-selection comments,
 // and interleaved comment indicators.
 //
@@ -12,8 +14,6 @@
 
 import { useFileViewer, type FilePosition } from "./FileViewerContext";
 import { isFilePositionPending } from "./filePositionState";
-import { createPortal } from "react-dom";
-import { ADD_COMMENT_BUTTON_CLASS_NAME } from "./addCommentButtonStyles";
 import {
   createContext,
   isValidElement,
@@ -30,16 +30,7 @@ import {
   type RefObject,
   type UIEvent,
 } from "react";
-import {
-  AtSignIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  MessageSquarePlusIcon,
-  SearchIcon,
-  XIcon,
-} from "lucide-react";
-import { useChatStore } from "@/store/chatStore";
-import { nativeCodingAgentForHarness } from "@/lib/nativeCodingAgents";
+import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react";
 import { queryIdentity, useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import type { BundledLanguage, ThemedToken } from "shiki";
 import { highlightCode } from "@/components/ai-elements/code-block";
@@ -82,10 +73,8 @@ import { useScrollRestore } from "./useScrollRestore";
 import { PreviewSearchBar } from "./PreviewSearchBar";
 import { renderLineTokens } from "./codeViewerRendering";
 import { HtmlCommentViewer } from "./HtmlCommentViewer";
-import { PreviewCommentBanner } from "./PreviewCommentBanner";
 import { TruncatedBanner } from "./TruncatedBanner";
 import { useLightbox } from "@/components/ImageLightbox";
-import { getEmbedRoot } from "@/lib/host";
 import { hasCommandModifier } from "@/lib/hotkeys";
 import { MarkdownTableOfContents } from "./MarkdownTableOfContents";
 import { VideoPlayer } from "@/components/VideoPlayer";
@@ -264,14 +253,19 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 };
 
-function MarkdownPreview({
+export function MarkdownPreview({
   content,
   path,
   rootRef,
   onScroll,
   tocOpen,
   onTocOpenChange,
+  commentActions,
 }: {
+  commentActions?: {
+    conversationId: string;
+    onSetActiveSelection: CodeViewerProps["onSetActiveSelection"];
+  };
   content: string;
   /** Workspace path of the previewed file, e.g. ``"docs/README.md"``. */
   path: string | null;
@@ -283,25 +277,73 @@ function MarkdownPreview({
   // Rewrite explicit TeX delimiters (`\(…\)`, `\[…\]`) to `$$…$$` before
   // rendering, the same as chat, so agent-authored formulas render here too;
   // remark-math only honours `$` delimiters. Safe outside code/existing math.
-  const rendered = useMemo(() => normalizeExplicitMathDelimiters(content), [content]);
+  const normalized = useMemo(() => {
+    const offsets: number[] = [];
+    return { text: normalizeExplicitMathDelimiters(content, offsets), offsets };
+  }, [content]);
+  const rehype = useMemo(
+    () => [...(MARKDOWN_REHYPE_PLUGINS ?? []), previewSourceMarkers(content, normalized.offsets)],
+    [content, normalized.offsets],
+  );
+  const localRoot = useRef<HTMLDivElement>(null);
+  const previewRoot = rootRef ?? localRoot;
+  const canComment = useCanEdit(commentActions?.conversationId ?? "");
+  const [selected, setSelected] = useState<ReturnType<typeof renderedMarkdownSelection>>(null);
+  useEffect(() => {
+    const update = () => {
+      if (document.activeElement?.closest("[data-file-selection-menu]")) return;
+      if (commentActions && canComment && previewRoot.current)
+        setSelected(renderedMarkdownSelection(previewRoot.current, content));
+    };
+    document.addEventListener("selectionchange", update);
+    return () => document.removeEventListener("selectionchange", update);
+  }, [commentActions, canComment, previewRoot, content]);
+  useEffect(() => setSelected(null), [content, path]);
+
   return (
     <div className="flex h-full">
       <div
-        ref={rootRef}
+        ref={previewRoot}
+        onMouseUp={() => {
+          if (commentActions && canComment && previewRoot.current)
+            setSelected(renderedMarkdownSelection(previewRoot.current, content));
+        }}
+        onKeyUp={() => {
+          if (commentActions && canComment && previewRoot.current)
+            setSelected(renderedMarkdownSelection(previewRoot.current, content));
+        }}
+        onScroll={(event) => {
+          setSelected(null);
+          onScroll?.(event);
+        }}
         data-preview-scroll
-        onScroll={onScroll}
         className="markdown-preview flex-1 px-6 py-4 overflow-auto prose dark:prose-invert prose-sm max-w-none"
       >
         <MarkdownPreviewPathContext.Provider value={path}>
           <ReactMarkdown
             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+            rehypePlugins={rehype}
             components={MARKDOWN_COMPONENTS}
           >
-            {rendered}
+            {normalized.text}
           </ReactMarkdown>
         </MarkdownPreviewPathContext.Provider>
       </div>
+      {selected && commentActions && (
+        <FileSelectionMenu
+          x={selected.rect.x}
+          y={selected.rect.y}
+          getText={() => selected.text}
+          onComment={() =>
+            commentActions.onSetActiveSelection({
+              start_index: selected.start_index,
+              end_index: selected.end_index,
+              anchor_content: selected.anchor_content,
+            })
+          }
+          onClose={() => setSelected(null)}
+        />
+      )}
       {tocOpen && (
         <aside className="w-64 shrink-0">
           <MarkdownTableOfContents
@@ -332,7 +374,7 @@ function PreviewWithSearch({
   scrollReady,
   tocOpen,
   onTocOpenChange,
-  commentHint,
+  commentActions,
 }: {
   content: string;
   /** Workspace path of the previewed file, for resolving relative links. */
@@ -348,12 +390,10 @@ function PreviewWithSearch({
   scrollReady: boolean;
   tocOpen: boolean;
   onTocOpenChange: (open: boolean) => void;
-  /**
-   * When present, shows a banner pointing users at the editor for commenting
-   * (the rendered preview can't anchor text-selection comments). Omitted for
-   * notebooks, which have no comment surface.
-   */
-  commentHint?: { conversationId: string; onSwitchToEdit: () => void };
+  commentActions?: {
+    conversationId: string;
+    onSetActiveSelection: CodeViewerProps["onSetActiveSelection"];
+  };
 }) {
   const previewRef = useRef<HTMLDivElement>(null);
   // The preview div (not the FileViewer content area) is the real scroller
@@ -378,6 +418,7 @@ function PreviewWithSearch({
       onScroll={handleScroll}
       tocOpen={tocOpen}
       onTocOpenChange={onTocOpenChange}
+      commentActions={commentActions}
     />
   );
   // The find bar sits above the preview; a truncated preview also shows the
@@ -386,14 +427,6 @@ function PreviewWithSearch({
     <div className="flex h-full flex-col">
       {bar}
       {truncated && <TruncatedBanner />}
-      {/* A truncated file can't be edited (or commented on) in the editor
-          either, so the hint would send the user to a dead end — suppress it. */}
-      {commentHint && !truncated && (
-        <PreviewCommentBanner
-          conversationId={commentHint.conversationId}
-          onSwitchToEdit={commentHint.onSwitchToEdit}
-        />
-      )}
       <div className="min-h-0 flex-1">{preview}</div>
     </div>
   );
@@ -527,7 +560,23 @@ export interface CodeViewerProps {
   onRequestEditMode?: () => void;
 }
 
-export function CodeViewer({
+export function CodeViewer(props: Parameters<typeof CodeViewerContent>[0]) {
+  const workspace = useWorkbenchWorkspace();
+  const value = useMemo(
+    () => ({
+      conversationId: props.conversationId,
+      path: props.path,
+      workspaceRoot: workspace?.root ?? null,
+    }),
+    [props.conversationId, props.path, workspace?.root],
+  );
+  return (
+    <FileSelectionScope value={value}>
+      <CodeViewerContent {...props} />
+    </FileSelectionScope>
+  );
+}
+function CodeViewerContent({
   position,
   conversationId,
   path,
@@ -549,7 +598,6 @@ export function CodeViewer({
   pendingBodyRef,
   tocOpen = false,
   onTocToggle,
-  onRequestEditMode,
 }: CodeViewerProps) {
   const workspace = useWorkbenchWorkspace();
   const resourceIdentity = queryIdentity(workspace, conversationId);
@@ -642,15 +690,6 @@ export function CodeViewer({
     line.scrollIntoView({ block: "center" });
     revealedPositionRef.current = position;
   }, [position, showMonaco, viewMode, fileQuery.isSuccess, rawLines]);
-
-  // "Attach to agent" delivers a "[Attached: path:start-end]" marker the
-  // composer reads — only the native coding-agent harnesses act on it, so
-  // gate the button to them (same set as the "@"-mention feature).
-  const sessionHarness = useChatStore((s) => s.sessionHarness);
-  // ``!!path`` mirrors the Monaco hook's guard: without it an empty path would
-  // emit a malformed ``[Attached: :start-end]`` marker. ``path`` is typed
-  // non-optional here, but the guard keeps the two surfaces in lockstep.
-  const canAttachToAgent = !!path && nativeCodingAgentForHarness(sessionHarness) !== undefined;
 
   // Kick off Shiki highlighting whenever content or language changes.
   useEffect(() => {
@@ -995,10 +1034,8 @@ export function CodeViewer({
         scrollReady={fileQuery.data !== undefined}
         tocOpen={tocOpen}
         onTocOpenChange={(open) => !open && onTocToggle?.()}
-        commentHint={
-          !isNotebook && onRequestEditMode
-            ? { conversationId, onSwitchToEdit: onRequestEditMode }
-            : undefined
+        commentActions={
+          !isNotebook && !truncated ? { conversationId, onSetActiveSelection } : undefined
         }
       />
     );
@@ -1260,73 +1297,24 @@ export function CodeViewer({
         })}
       </div>
 
-      {/* Floating selection actions — rendered into document.body so that
-          CSS transforms on ancestor elements don't break fixed positioning. */}
-      {selectionAnchor &&
-        createPortal(
-          <div
-            className="fixed z-50 flex items-center gap-1"
-            style={{
-              // Clamp so the (one- or two-) button group can't clip off the
-              // right edge near the viewport boundary. Width is an estimate of
-              // the rendered buttons ("Add comment" ≈ 130px, + "Attach to
-              // agent" ≈ 150px).
-              left: Math.min(
-                selectionAnchor.x,
-                Math.max(8, window.innerWidth - (canAttachToAgent ? 288 : 138)),
-              ),
-              top: selectionAnchor.y,
-              transform: "translateY(-100%)",
-            }}
-          >
-            <button
-              data-add-comment-btn
-              type="button"
-              className={ADD_COMMENT_BUTTON_CLASS_NAME}
-              onClick={() => {
-                onSetActiveSelection({
-                  start_index: selectionAnchor.start_index,
-                  end_index: selectionAnchor.end_index,
-                  anchor_content: selectionAnchor.anchor_content,
-                });
-                setSelectionAnchor(null);
-                window.getSelection()?.removeAllRanges();
-              }}
-            >
-              <MessageSquarePlusIcon className="size-3.5" />
-              Add comment
-            </button>
-            {canAttachToAgent && (
-              <button
-                data-attach-agent-btn
-                type="button"
-                className={ADD_COMMENT_BUTTON_CLASS_NAME}
-                onClick={() => {
-                  // Convert the selection's char offsets to a 1-based inclusive
-                  // line span. ``end_index`` is exclusive, so step back one char
-                  // (clamped) before mapping so a trailing newline doesn't bleed
-                  // into the next line.
-                  const startLine = indexToLine(selectionAnchor.start_index, rawLines);
-                  const endLine = indexToLine(
-                    Math.max(selectionAnchor.start_index, selectionAnchor.end_index - 1),
-                    rawLines,
-                  );
-                  useChatStore.getState().addComposerAttachment({
-                    path,
-                    isDir: false,
-                    lineRange: { start: startLine, end: endLine },
-                  });
-                  setSelectionAnchor(null);
-                  window.getSelection()?.removeAllRanges();
-                }}
-              >
-                <AtSignIcon className="size-3.5" />
-                Attach to agent
-              </button>
-            )}
-          </div>,
-          getEmbedRoot() ?? document.body,
-        )}
+      {selectionAnchor && (
+        <FileSelectionMenu
+          x={selectionAnchor.x}
+          y={selectionAnchor.y}
+          getText={() => selectionAnchor.anchor_content}
+          onComment={() =>
+            onSetActiveSelection({
+              start_index: selectionAnchor.start_index,
+              end_index: selectionAnchor.end_index,
+              anchor_content: selectionAnchor.anchor_content,
+            })
+          }
+          onClose={() => {
+            setSelectionAnchor(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+        />
+      )}
     </>
   );
 }

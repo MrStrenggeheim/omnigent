@@ -1325,6 +1325,12 @@ function LandingNavigationProbe() {
   );
 }
 
+function oversizedAttachment() {
+  const file = new File(["small test payload"], "clip.mp4", { type: "video/mp4" });
+  Object.defineProperty(file, "size", { value: 51 * 1024 * 1024 });
+  return file;
+}
+
 function renderLanding(
   infoOverrides: Partial<ServerInfo> = {},
   route = "/",
@@ -9084,13 +9090,13 @@ describe("NewChatLandingScreen attachments", () => {
   // the user never wanted.
   it("rejects an unsupported attachment instead of attaching it", () => {
     renderLanding();
-    const clip = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const clip = oversizedAttachment();
     fireEvent.change(screen.getByTestId("new-chat-landing-file-input"), {
       target: { files: [clip] },
     });
     expect(screen.queryByText("clip.mp4")).toBeNull();
     expect(screen.getByTestId("new-chat-landing-attachment-error").textContent).toContain(
-      "archives, office documents, and databases are supported",
+      "too large",
     );
   });
 
@@ -9105,19 +9111,14 @@ describe("NewChatLandingScreen attachments", () => {
   ])("offers the server's filesystem attachment types in the file picker", (expected) => {
     renderLanding({ filesystem_attachments: expected.policy });
     const accept = screen.getByTestId("new-chat-landing-file-input").getAttribute("accept");
-    if (expected.offered === null) {
-      expect(accept).toBeNull();
-      return;
-    }
-    expect(accept?.split(",")).toEqual(expect.arrayContaining(expected.offered));
-    for (const extension of expected.withheld) expect(accept).not.toContain(extension);
+    expect(accept).toBeNull();
   });
 
   it("keeps the supported files from a mixed drop and names the rejected one", () => {
     renderLanding();
     const composer = screen.getByTestId("new-chat-landing-composer");
     const ok = new File(["hello"], "notes.txt", { type: "text/plain" });
-    const clip = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const clip = oversizedAttachment();
     fireEvent.drop(composer, { dataTransfer: fileDrag([ok, clip]) });
     expect(screen.getByText("notes.txt")).toBeTruthy();
     expect(screen.queryByText("clip.mp4")).toBeNull();
@@ -9134,7 +9135,7 @@ describe("NewChatLandingScreen attachments", () => {
     // nothing else clears the notice. Left sticky it reads as a blocker on a
     // composer that can actually be submitted.
     renderLanding();
-    const clip = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const clip = oversizedAttachment();
     fireEvent.change(screen.getByTestId("new-chat-landing-file-input"), {
       target: { files: [clip] },
     });
@@ -9223,7 +9224,7 @@ describe("NewChatLandingScreen attachments", () => {
     fireEvent.change(screen.getByTestId("new-chat-landing-file-input"), {
       target: { files: [ok] },
     });
-    const clip = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const clip = oversizedAttachment();
     fireEvent.change(screen.getByTestId("new-chat-landing-file-input"), {
       target: { files: [clip] },
     });

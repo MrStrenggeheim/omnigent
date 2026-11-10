@@ -1,3 +1,4 @@
+import { useWrapPreference } from "@/hooks/useWrapPreference";
 // Tool-call renderer. Renders each call as a single muted-text trigger
 // line (status icon + truncated `name(argsSummary)`); clicking expands an
 // indented panel with the parameters JSON and output preview. The big
@@ -214,7 +215,7 @@ export function ToolCard({
         duration={displayDuration}
         onBodyClick={onBodyClick}
       />
-      <CollapsibleContent className="mt-1 space-y-2 py-1 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=open]:animate-in">
+      <CollapsibleContent className="mt-1 ml-1 space-y-2 border-l-2 border-border pl-3 py-1 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=open]:animate-in">
         {shellCall !== null ? (
           <ShellTerminalPanel
             command={shellCall.command}
@@ -427,7 +428,8 @@ function ShellTerminalPanel({
   output: string | null;
   state: ToolState;
 }) {
-  const [wrap, setWrap] = useState(true);
+  const [wrap, setWrap] = useWrapPreference("tool-input");
+  const [outputWrap, setOutputWrap] = useWrapPreference("tool-output");
   const [showRaw, setShowRaw] = useState(false);
   const terminalIsDark = useTerminalIsDark();
   const appIsDark = useResolvedThemeMode() === "dark";
@@ -519,18 +521,28 @@ function ShellTerminalPanel({
           />
         </div>
         {hasOutput && (
-          <OutputSection
-            output={parsed.text}
-            renderPanel={(text) => (
-              <CodeBlockContent
-                code={dropTrailingPartialEscape(text)}
-                language="ansi"
-                wrap={wrap}
-                colorScheme={pinnedScheme}
-                className={cn(TERMINAL_PRE_CLASS, "pt-0 pb-2")}
+          <div className="border-t border-border/60 pt-1" data-tool-section="output">
+            <div className="flex items-center justify-between px-3 text-xs text-muted-foreground">
+              <span>Output</span>
+              <WrapTextButton
+                onToggle={() => setOutputWrap((value) => !value)}
+                wrap={outputWrap}
+                kind="output"
               />
-            )}
-          />
+            </div>
+            <OutputSection
+              output={parsed.text}
+              renderPanel={(text) => (
+                <CodeBlockContent
+                  code={dropTrailingPartialEscape(text)}
+                  language="ansi"
+                  wrap={outputWrap}
+                  colorScheme={pinnedScheme}
+                  className={cn(TERMINAL_PRE_CLASS, "pt-0 pb-2")}
+                />
+              )}
+            />
+          </div>
         )}
         {parsed !== null && !hasOutput && (
           <div className="px-3 pb-2 font-mono text-muted-foreground text-xs">(no output)</div>
@@ -660,7 +672,9 @@ function CodePanel({
   // Soft-wrap long lines by default so the panel never needs horizontal
   // scrolling to read; the toggle restores the scrolling view for when
   // column alignment matters (same affordance as chat code blocks).
-  const [wrap, setWrap] = useState(true);
+  const [wrap, setWrap] = useWrapPreference(
+    title.includes("output") || title === "Output" ? "tool-output" : "tool-input",
+  );
   return (
     <CodeBlock code={text} language={language} wrap={wrap}>
       <CodeBlockHeader>
@@ -676,8 +690,16 @@ function CodePanel({
   );
 }
 
-function WrapTextButton({ wrap, onToggle }: { wrap: boolean; onToggle: () => void }) {
-  const label = wrap ? "Disable word wrap" : "Enable word wrap";
+function WrapTextButton({
+  wrap,
+  onToggle,
+  kind,
+}: {
+  wrap: boolean;
+  onToggle: () => void;
+  kind?: string;
+}) {
+  const label = `${wrap ? "Disable" : "Enable"} ${kind ? `${kind} ` : ""}word wrap`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>

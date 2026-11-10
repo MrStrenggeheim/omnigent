@@ -1,3 +1,4 @@
+import { FileSelectionMenu } from "./FileSelectionMenu";
 // Render a PDF file inline via react-pdf (pdf.js). Mirrors ImageViewer's blob
 // lifecycle: build an object URL from the file response, revoke on cleanup, and
 // treat a truncated (partial, unparseable) byte stream as an error.
@@ -11,18 +12,15 @@
 // code/markdown/HTML). Saved comments paint browser-only highlight overlays on
 // top of the rendered pages — nothing is written into the PDF bytes.
 
-import { createPortal } from "react-dom";
-import { ADD_COMMENT_BUTTON_CLASS_NAME } from "./addCommentButtonStyles";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import { MessageSquarePlusIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { MinusIcon, PlusIcon } from "lucide-react";
 import { fileContentToBlob, type FileContentResponse } from "@/hooks/useFileContent";
 import type { Comment } from "@/hooks/useComments";
 import { useCanEdit } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
-import { getEmbedRoot } from "@/lib/host";
 import { cn } from "@/lib/utils";
 import type { ActiveSelection } from "./codeViewerHelpers";
 import {
@@ -385,26 +383,15 @@ export function PdfViewer({
         )}
       </div>
 
-      {floating &&
-        canEdit &&
-        onSetActiveSelection &&
-        createPortal(
-          <button
-            data-add-comment-btn
-            type="button"
-            className={`fixed z-50 ${ADD_COMMENT_BUTTON_CLASS_NAME}`}
-            style={{ left: floating.x, top: floating.y, transform: "translateY(-100%)" }}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              onSetActiveSelection(floating.selection);
-              setFloating(null);
-            }}
-          >
-            <MessageSquarePlusIcon className="size-3.5" />
-            Add comment
-          </button>,
-          getEmbedRoot() ?? document.body,
-        )}
+      {floating && canEdit && onSetActiveSelection && (
+        <FileSelectionMenu
+          x={floating.x}
+          y={floating.y}
+          getText={() => window.getSelection()?.toString() ?? ""}
+          onComment={() => onSetActiveSelection(floating.selection)}
+          onClose={() => setFloating(null)}
+        />
+      )}
     </div>
   );
 }

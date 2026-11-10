@@ -1,3 +1,4 @@
+import { ChatAttachment } from "@/components/ChatAttachment";
 // Bubble rendering, scroll helpers, and the working-indicator cluster for the
 // chat transcript. Extracted from ChatPage.tsx so <Transcript> can import them
 // without the ChatPage ↔ Transcript module cycle. ChatPage re-exports these for
@@ -57,7 +58,6 @@ import { cn } from "@/lib/utils";
 import { mentionItemPath, type MentionItem } from "@/lib/composerMentions";
 import type { AnyBlock, ImageContentBlock, MessageContentBlock } from "@/lib/blocks";
 import {
-  attachmentLabel,
   ELICITATION_RESPONSE_PREFIX,
   hasPendingOwnElicitation,
   imagePreview,
@@ -81,7 +81,7 @@ import { useWorkingLabelTick } from "@/hooks/useWorkingLabelTick";
 import { useForkDialog } from "@/shell/ForkDialogContext";
 import { useTerminalFirst } from "@/shell/TerminalFirstContext";
 import { DisabledActionTooltip } from "@/components/DisabledActionTooltip";
-import { InlineImage, SessionImage } from "@/components/SessionImage";
+import { InlineImage } from "@/components/SessionImage";
 import { buildMessageDeepLink } from "@/lib/messageDeepLink";
 import { copyText } from "@/lib/clipboard";
 import { copyMarkdown } from "@/lib/copyMarkdown";
@@ -833,18 +833,7 @@ function UserBubble({ bubble }: { bubble: Extract<Bubble, { kind: "user" }> }) {
                 ).map(({ key, item: img }) => {
                   const preview = imagePreview(img);
                   if (preview.kind === "uploaded") {
-                    return (
-                      <SessionImage
-                        key={key}
-                        path={
-                          sessionId
-                            ? `/v1/sessions/${encodeURIComponent(sessionId)}/resources/files/${encodeURIComponent(preview.fileId)}/content`
-                            : undefined
-                        }
-                        alt={preview.alt}
-                        className="rounded-md object-contain"
-                      />
-                    );
+                    return <ChatAttachment key={key} sessionId={sessionId} attachment={img} />;
                   }
                   if (preview.kind === "inline") {
                     return (
@@ -866,7 +855,7 @@ function UserBubble({ bubble }: { bubble: Extract<Bubble, { kind: "user" }> }) {
               <div className="mb-1.5 flex flex-wrap gap-1.5">
                 {keyedAttachments(fileChips, (att) => att.file_id ?? att.filename).map(
                   ({ key, item: att }) => (
-                    <AttachmentChip key={key} icon={FileTextIcon} label={attachmentLabel(att)} />
+                    <ChatAttachment key={key} sessionId={sessionId} attachment={att} />
                   ),
                 )}
               </div>
@@ -911,6 +900,7 @@ function UserBubble({ bubble }: { bubble: Extract<Bubble, { kind: "user" }> }) {
                     </pre>
                   ) : (
                     <FilePathAwareMessageResponse
+                      sourceItemId={bubble.itemId}
                       breaks
                       mode="static"
                       remarkRehypeOptions={USER_MESSAGE_REMARK_REHYPE_OPTIONS}

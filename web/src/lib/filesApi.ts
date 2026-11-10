@@ -14,7 +14,7 @@ export async function uploadFile(sessionId: string, file: File): Promise<Uploade
   const filename = attachmentFilename(file);
   form.append("file", file, filename);
   const res = await authenticatedFetch(
-    `/v1/sessions/${encodeURIComponent(sessionId)}/resources/files`,
+    `/v1/sessions/${encodeURIComponent(sessionId)}/resources/files?presentation=true`,
     {
       method: "POST",
       body: form,

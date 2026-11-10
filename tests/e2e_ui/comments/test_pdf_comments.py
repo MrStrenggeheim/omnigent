@@ -127,7 +127,7 @@ def test_pdf_text_selection_add_comment_and_highlight(
     )
     _select_pdf_text(page, file_viewer, _ANCHOR_TEXT)
 
-    add_comment_btn = page.get_by_role("button", name=re.compile("Add comment", re.IGNORECASE))
+    add_comment_btn = page.get_by_role("menuitem", name=re.compile("Add comment", re.IGNORECASE))
     expect(add_comment_btn).to_be_visible(timeout=10_000)
     add_comment_btn.click()
 

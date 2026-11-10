@@ -1,3 +1,4 @@
+import { FileSelectionScope } from "./FileSelectionMenu";
 import { FileContentReaderContext, type FileContentReader } from "./FileContentReader";
 import { createPortal } from "react-dom";
 // Right-panel file viewer with Shiki syntax highlighting and a comments side panel.
@@ -422,10 +423,20 @@ export function FileViewer(props: FileViewerProps) {
     : props.agentId === undefined
       ? boundAgentId
       : props.agentId;
+  const selectionSource = useMemo(
+    () => ({
+      conversationId: props.conversationId,
+      path: props.path,
+      workspaceRoot: workspace?.root ?? null,
+    }),
+    [props.conversationId, props.path, workspace?.root],
+  );
   return (
-    <CommentSenderProvider sessionId={props.conversationId} agentId={agentId}>
-      <FileViewerBody {...props} agentId={agentId} recipientValid={recipientValid} />
-    </CommentSenderProvider>
+    <FileSelectionScope value={selectionSource}>
+      <CommentSenderProvider sessionId={props.conversationId} agentId={agentId}>
+        <FileViewerBody {...props} agentId={agentId} recipientValid={recipientValid} />
+      </CommentSenderProvider>
+    </FileSelectionScope>
   );
 }
 

@@ -1,3 +1,4 @@
+import { FILE_ANNOTATION_EVENT, type FileAnnotation } from "@/shell/FileSelectionMenu";
 import { WorkspaceSwitchControl } from "@/components/composer/WorkspaceSwitchControl";
 import { SelectionPopup } from "@/components/chat/SelectionPopup";
 import { useLoadedConversations } from "@/hooks/useSidebarData";
@@ -3499,6 +3500,28 @@ function ComposerImpl(
       }
     },
   }));
+
+  useEffect(() => {
+    const ask = (event: Event) => {
+      const annotation = (event as CustomEvent<FileAnnotation>).detail;
+      if (
+        !annotation ||
+        annotation.conversationId !== composerSessionId ||
+        disabled ||
+        isReadOnly ||
+        unreachable
+      )
+        return;
+      appendQuote(
+        `Annotation from ${annotation.path}\n\n${annotation.text}${annotation.workspaceRoot ? `\n\nWorkspace: ${annotation.workspaceRoot}` : ""}`,
+      );
+      dirtyRef.current = true;
+      replyQuoteInsertedRef.current = true;
+      textareaRef.current = tailTextareaRef.current;
+    };
+    window.addEventListener(FILE_ANNOTATION_EVENT, ask);
+    return () => window.removeEventListener(FILE_ANNOTATION_EVENT, ask);
+  }, [composerSessionId, disabled, isReadOnly, unreachable, appendQuote]);
 
   // Apply the caret after the updated draft has rendered and auto-grown.
   useLayoutEffect(() => {

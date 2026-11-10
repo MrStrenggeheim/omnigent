@@ -1,3 +1,4 @@
+import { FileSelectionMenu } from "./FileSelectionMenu";
 // Comment-enabled HTML preview: renders agent-generated HTML in the same
 // sandboxed iframe as the read-only preview, but injects a bridge script so
 // users can select rendered text and attach review comments — parity with the
@@ -9,14 +10,11 @@
 // over a private MessageChannel. See htmlCommentBridge.ts for the protocol and
 // trust model.
 
-import { createPortal } from "react-dom";
-import { ADD_COMMENT_BUTTON_CLASS_NAME } from "./addCommentButtonStyles";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquarePlusIcon } from "lucide-react";
 import type { Comment } from "@/hooks/useComments";
 import { useCanEdit } from "@/hooks/usePermissions";
 import { useIsEmbedded } from "@/lib/embedded";
-import { getEmbedRoot, getOmnigentHtmlPreviewFrame } from "@/lib/host";
+import { getOmnigentHtmlPreviewFrame } from "@/lib/host";
 import { randomUUID } from "@/lib/randomUUID";
 import { type ActiveSelection, HTML_PREVIEW_SANDBOX } from "./codeViewerHelpers";
 import {
@@ -291,28 +289,21 @@ export function HtmlCommentViewer({
     <div className="flex h-full flex-col">
       {truncated && <TruncatedBanner />}
       <div className="min-h-0 flex-1">{preview}</div>
-      {floating &&
-        canEdit &&
-        createPortal(
-          <button
-            data-add-comment-btn
-            type="button"
-            className={`fixed z-50 ${ADD_COMMENT_BUTTON_CLASS_NAME}`}
-            style={{ left: floating.x, top: floating.y, transform: "translateY(-100%)" }}
-            onClick={() => {
-              onSetActiveSelection({
-                start_index: floating.start_index,
-                end_index: floating.end_index,
-                anchor_content: floating.anchor_content,
-              });
-              setFloating(null);
-            }}
-          >
-            <MessageSquarePlusIcon className="size-3.5" />
-            Add comment
-          </button>,
-          getEmbedRoot() ?? document.body,
-        )}
+      {floating && canEdit && (
+        <FileSelectionMenu
+          x={floating.x}
+          y={floating.y}
+          getText={() => floating.anchor_content}
+          onComment={() =>
+            onSetActiveSelection({
+              start_index: floating.start_index,
+              end_index: floating.end_index,
+              anchor_content: floating.anchor_content,
+            })
+          }
+          onClose={() => setFloating(null)}
+        />
+      )}
     </div>
   );
 }

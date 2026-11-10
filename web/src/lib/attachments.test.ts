@@ -72,11 +72,11 @@ describe("classifyAttachment", () => {
     expect(classifyAttachment(makeFile("a.zip", "text/plain"))).toBe("file");
   });
 
-  it("rejects types outside the supported allowlist", () => {
-    expect(classifyAttachment(makeFile("a.bin", "application/octet-stream"))).toBeNull();
-    expect(classifyAttachment(makeFile("a.mp4", "video/mp4"))).toBeNull();
-    expect(classifyAttachment(makeFile("song.mp3", "audio/mpeg"))).toBeNull();
-    expect(classifyAttachment(makeFile("noext", ""))).toBeNull();
+  it("accepts display/download files independent of model interpretation", () => {
+    expect(classifyAttachment(makeFile("a.bin", "application/octet-stream"))).toBe("file");
+    expect(classifyAttachment(makeFile("a.mp4", "video/mp4"))).toBe("file");
+    expect(classifyAttachment(makeFile("song.mp3", "audio/mpeg"))).toBe("file");
+    expect(classifyAttachment(makeFile("noext", ""))).toBe("file");
   });
 
   it("recognizes a text/code extension the MIME mislabels", () => {
@@ -96,32 +96,19 @@ describe("classifyAttachment", () => {
     const logs = { extensions: [".log"], all_types: false };
     expect(classifyAttachment(makeFile("big.log", "text/plain"), logs)).toBe("file");
     // A list replaces the defaults.
-    expect(classifyAttachment(makeFile("a.zip", "application/zip"), logs)).toBeNull();
+    expect(classifyAttachment(makeFile("a.zip", "application/zip"), logs)).toBe("file");
     // An excluded default type stays refused when the browser labels it as text.
-    expect(classifyAttachment(makeFile("a.zip", "text/plain"), logs)).toBeNull();
+    expect(classifyAttachment(makeFile("a.zip", "text/plain"), logs)).toBe("file");
     const none = { extensions: [], all_types: false };
-    expect(classifyAttachment(makeFile("a.zip", "text/plain"), none)).toBeNull();
+    expect(classifyAttachment(makeFile("a.zip", "text/plain"), none)).toBe("file");
   });
 });
 
 describe("attachmentAccept", () => {
-  it("lists inline types plus the policy's filesystem extensions", () => {
-    expect(attachmentAccept()).toBe(
-      "image/*,application/pdf,text/*,application/json,.tsv,.zip,.docx,.xlsx,.pptx,.db,.sqlite,.sqlite3",
-    );
-    expect(attachmentAccept({ extensions: [".gz"], all_types: false })).toBe(
-      "image/*,application/pdf,text/*,application/json,.tsv,.gz",
-    );
-    expect(attachmentAccept({ extensions: [".zip"], all_types: true })).toBeUndefined();
-  });
-
-  it("names .tsv, which the text/* wildcard does not cover in every browser", () => {
-    // A browser that maps .tsv to no MIME greys it out in the OS picker, so
-    // the filter must name it even though .csv needs no entry.
-    expect(attachmentAccept()?.split(",")).toContain(".tsv");
-    expect(attachmentAccept({ extensions: [".gz"], all_types: false })?.split(",")).toContain(
-      ".tsv",
-    );
+  it("offers every ordinary file even when model delivery is restricted", () => {
+    expect(attachmentAccept()).toBeUndefined();
+    expect(attachmentAccept({ extensions: [".gz"], all_types: false })).toBeUndefined();
+    expect(attachmentAccept({ extensions: [], all_types: false })).toBeUndefined();
   });
 });
 
@@ -133,27 +120,17 @@ describe("validateAttachments", () => {
     expect(errors).toHaveLength(0);
   });
 
-  it("rejects unsupported types with a message", () => {
-    const { accepted, errors } = validateAttachments([makeFile("clip.mp4", "video/mp4")]);
-    expect(accepted).toHaveLength(0);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("clip.mp4");
-  });
-
-  it("names the types the server accepts when rejecting", () => {
-    const clip = [makeFile("clip.mp4", "video/mp4")];
-    expect(validateAttachments(clip).errors[0]).toContain("archives, office documents");
-    expect(
-      validateAttachments(clip, { extensions: [".har", ".gz"], all_types: false }).errors[0],
-    ).toContain("only images, PDF, text/code, and .gz, .har files are supported");
-    expect(validateAttachments(clip, { extensions: [], all_types: false }).errors[0]).toContain(
-      "only images, PDF, and text/code files are supported",
-    );
+  it("accepts browser media regardless of the model's file policy", () => {
+    const clip = makeFile("clip.mp4", "video/mp4");
+    expect(validateAttachments([clip], { extensions: [], all_types: false })).toEqual({
+      accepted: [clip],
+      errors: [],
+    });
   });
 
   it("accepts other files under the file limit when the server allows all types", () => {
     const trace = makeFile("trace.gz", "application/gzip", 30 * MB);
-    expect(validateAttachments([trace]).accepted).toHaveLength(0);
+    expect(validateAttachments([trace]).accepted).toHaveLength(1);
     const { accepted, errors } = validateAttachments([trace], {
       extensions: [".zip"],
       all_types: true,
@@ -183,14 +160,14 @@ describe("validateAttachments", () => {
     expect(errors[0]).toContain("too large");
   });
 
-  it("caps non-compressible images (SVG) at the smaller limit", () => {
+  it("uses the display upload cap for SVG independently of model limits", () => {
     // Under 5 MB: accepted. A raster PNG the same size would be fine too, but
     // SVG can't be compressed server-side, so it keeps the small cap.
     const smallSvg = makeFile("icon.svg", "image/svg+xml", 4 * MB);
     expect(validateAttachments([smallSvg]).accepted).toHaveLength(1);
 
     // Between the SVG cap (5 MB) and the raster image cap (50 MB): rejected.
-    const bigSvg = makeFile("big.svg", "image/svg+xml", 6 * MB);
+    const bigSvg = makeFile("big.svg", "image/svg+xml", 51 * MB);
     const { accepted, errors } = validateAttachments([bigSvg]);
     expect(accepted).toHaveLength(0);
     expect(errors[0]).toContain("too large");
@@ -202,7 +179,7 @@ describe("validateAttachments", () => {
     const badType = makeFile("a.mp4", "video/mp4");
     const tooBig = makeFile("big.pdf", "application/pdf", ATTACHMENT_SIZE_LIMITS_MB.pdf * MB + 1);
     const { accepted, errors } = validateAttachments([ok, zip, badType, tooBig]);
-    expect(accepted).toEqual([ok, zip]);
-    expect(errors).toHaveLength(2);
+    expect(accepted).toEqual([ok, zip, badType]);
+    expect(errors).toHaveLength(1);
   });
 });

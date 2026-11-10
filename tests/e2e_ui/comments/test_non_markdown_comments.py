@@ -133,7 +133,7 @@ def test_monaco_non_markdown_add_comment(
     # The floating "Add comment" button is portalled to document.body. It runs
     # its action on mousedown (Playwright's click fires mousedown first), so a
     # plain click opens the CommentsPanel with the selection as pending anchor.
-    add_comment_btn = page.get_by_role("button", name=re.compile("Add comment", re.IGNORECASE))
+    add_comment_btn = page.get_by_role("menuitem", name=re.compile("Add comment", re.IGNORECASE))
     expect(add_comment_btn).to_be_visible()
     add_comment_btn.click()
 

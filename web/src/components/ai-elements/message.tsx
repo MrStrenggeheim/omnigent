@@ -1,4 +1,5 @@
-"use client";
+import { useWrapPreference } from "@/hooks/useWrapPreference";
+("use client");
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
@@ -592,8 +593,8 @@ function ChatCodeBlockPre({ children }: ComponentProps<"pre">) {
   // Soft-wrap long lines by default so users don't have to scroll horizontally
   // to read code blocks. The toggle restores Streamdown's native
   // horizontal-scroll view for when column alignment matters.
-  const [wrap, setWrap] = useState(true);
-  const toggleWrap = useCallback(() => setWrap((w) => !w), []);
+  const [wrap, setWrap] = useWrapPreference("chat");
+  const toggleWrap = useCallback(() => setWrap((w) => !w), [setWrap]);
   const block = isValidElement(children)
     ? cloneElement(children, { "data-block": "true" } as Record<string, unknown>)
     : children;

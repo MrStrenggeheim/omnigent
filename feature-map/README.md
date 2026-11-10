@@ -113,6 +113,8 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 ## Features
 
+- [Chat attachments](./chat-attachments.md) covers persistent files, safe previews, native agent uploads and captured workspace references.
+
 - [Independent workspaces](./workbench-workspaces.md) covers selected resource targets, persistent file/search state and independently owned manual terminals.
 - [Chat activity](./chat-activity.md) covers agents, live shell sessions and retained command/shell history.
 

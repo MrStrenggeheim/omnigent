@@ -13,7 +13,7 @@ and the recording protocol for comparing revisions.
 - `edit-save`: typing preserves the caret and autosave survives reopening.
 - `find`: search finds edited content without typing into the document.
 - `modes`: Edit, Source, and Preview retain the same saved content.
-- `review`: selected text anchors a comment; an unsent draft remains editable.
+- `review`: rendered Preview, Edit and Source selections use a shared Add comment / Ask in chat menu; comments anchor to source offsets and annotation quotes preserve the file/workspace provenance.
 - `responsive`: desktop and mobile show the file and retain edits and drafts.
 - `load`: fixed mixed-content documents expose parsing and rendering costs.
 - `offline`: unsaved edits remain guarded when the workspace cannot save.
@@ -47,6 +47,9 @@ Build the exact checkout and use its frozen dependency lock. The browser-contrac
 journeys below need no server: they run the production SPA with a sealed mock
 backend, a fresh browser context, and a fixed Markdown fixture. Server-backed
 journeys require an isolated verification instance.
+
+- Preview selection, repeated-word source anchoring and annotated draft on desktop/phone: `tests/e2e_ui/files/test_chat_attachments.py::test_preview_selection_comments_and_annotated_chat_draft`.
+- Shared menu scope, pointer/keyboard handling and position: `web/src/shell/FileSelectionMenu.test.tsx`.
 
 ### Standard comparison journey
 

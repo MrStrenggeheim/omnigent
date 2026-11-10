@@ -1,3 +1,4 @@
+import type { ChatAttachmentContent } from "./chatAttachments";
 import type { NativePermissionDelivery } from "./nativePermissionDelivery";
 // Block walker — converts a flat `AnyBlock[]` into a list of bubble
 // groups for the JSX layer to map over.
@@ -71,6 +72,7 @@ export interface RelatedRenderError extends RenderErrorDetails {
 export type RenderItem =
   | {
       kind: "text";
+      attachments?: ChatAttachmentContent[];
       itemId: string | null;
       text: string;
       final: boolean;
@@ -1528,9 +1530,7 @@ function isAssistantSideBlock(b: AnyBlock): boolean {
     // routing_decision is a standalone top-level chip, not an assistant item.
     b.type !== "routing_decision" &&
     b.type !== "response_start" &&
-    b.type !== "response_end" &&
-    // FileBlock is currently deferred from rendering; skip silently.
-    b.type !== "file"
+    b.type !== "response_end"
   );
 }
 
@@ -1623,7 +1623,12 @@ function buildAssistantItems(
           // textItem() always returns a `text` kind for text-block runs,
           // but TS doesn't narrow on the helper's return type — assert.
           if (item.kind !== "text") continue;
-          if (!(item.text === "" && item.final && hasNonEmptyTextDone)) {
+          if (!(
+            item.text === "" &&
+            !item.attachments?.length &&
+            item.final &&
+            hasNonEmptyTextDone
+          )) {
             items.push(item);
           }
           chunkStart = k + 1;
@@ -1659,6 +1664,29 @@ function buildAssistantItems(
             liveToolCallIds.has(ex.callId),
           ),
         );
+        if (ex.name === "upload_file" || ex.name.endsWith("__upload_file")) {
+          const result = crossBubbleResults.get(`${b.ctx.responseId}:${ex.callId}`);
+          if (result) {
+            try {
+              const record = JSON.parse(result.output);
+              if (typeof record.file_id === "string")
+                items.push({
+                  kind: "text",
+                  itemId: result.ctx.itemId,
+                  text: "",
+                  final: true,
+                  attachments: [
+                    {
+                      file_id: record.file_id,
+                      filename: typeof record.filename === "string" ? record.filename : undefined,
+                    },
+                  ],
+                });
+            } catch {
+              /* Tool failures remain visible in the tool output. */
+            }
+          }
+        }
       }
       i += 1;
       continue;
@@ -1695,6 +1723,17 @@ function buildAssistantItems(
       continue;
     }
 
+    if (b.type === "file") {
+      items.push({
+        kind: "text",
+        itemId: b.ctx.itemId,
+        text: "",
+        final: true,
+        attachments: [{ file_id: b.fileId, filename: b.filename ?? undefined }],
+      });
+      i += 1;
+      continue;
+    }
     if (b.type === "terminal_command") {
       items.push({
         kind: "terminal_command",
@@ -1826,6 +1865,7 @@ function textItem(run: AnyBlock[]): RenderItem {
         kind: "text",
         itemId: b.ctx.itemId,
         text: b.fullText,
+        ...(b.attachments?.length ? { attachments: b.attachments } : {}),
         final: true,
         ...(b.previewInterrupted ? { previewInterrupted: true } : {}),
       };

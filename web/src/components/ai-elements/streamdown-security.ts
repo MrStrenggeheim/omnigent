@@ -120,8 +120,9 @@ export const CHAT_LINK_SAFETY: LinkSafetyConfig = { enabled: false };
 export function rewriteFileUriLinks() {
   return (tree: HastElement) => {
     visitElements(tree, (node) => {
-      if (node.tagName !== "a") return;
-      const href = node.properties?.href;
+      if (node.tagName !== "a" && node.tagName !== "img") return;
+      const attribute = node.tagName === "img" ? "src" : "href";
+      const href = node.properties?.[attribute];
       if (typeof href !== "string") return;
       // A basename citation looks like a URL scheme to sanitize (README.md:12).
       const citation = splitWorkspaceFileCitation(href);
@@ -137,7 +138,7 @@ export function rewriteFileUriLinks() {
       if (!/^file:/i.test(href)) return;
       const path = fileUriToLocalPath(href);
       if (!path) return;
-      node.properties = { ...node.properties, href: path };
+      node.properties = { ...node.properties, [attribute]: path };
     });
   };
 }
@@ -260,6 +261,32 @@ function restoreGitHubAttachmentImages() {
   };
 }
 
+export const WORKSPACE_IMAGE_ATTR = "data-omnigent-image";
+function parkWorkspaceImages() {
+  return (tree: HastElement) =>
+    visitElements(tree, (node) => {
+      const src = node.properties?.src;
+      if (
+        node.tagName !== "img" ||
+        typeof src !== "string" ||
+        NON_FILE_HREF.test(src) ||
+        src.includes("?") ||
+        src.includes("#")
+      )
+        return;
+      node.tagName = "omnigent-workspace-image";
+      node.properties = { alt: node.properties?.alt, [WORKSPACE_IMAGE_ATTR]: decodeFilePath(src) };
+    });
+}
+function restoreWorkspaceImages() {
+  return (tree: HastElement) =>
+    visitElements(tree, (node) => {
+      if (node.tagName !== "omnigent-workspace-image") return;
+      node.tagName = "img";
+      node.properties = { ...node.properties, src: "#omnigent-file" };
+    });
+}
+
 function visitElements(node: HastElement, visitor: (node: HastElement) => void): void {
   if (node.type === "element") visitor(node);
   for (const child of node.children ?? []) {
@@ -306,6 +333,7 @@ function createStreamdownRehypePlugins(
     // stripped any dangerous href, leaving nothing to hand over for such a link.
     if (markFileLinks) {
       plugins.push(markWorkspaceFileLinks);
+      plugins.push(parkWorkspaceImages);
     }
     if (allowGitHubAttachmentImages) plugins.push(parkGitHubAttachmentImages);
 
@@ -317,6 +345,7 @@ function createStreamdownRehypePlugins(
       plugin[0],
       { ...plugin[1], allowedImagePrefixes: [] },
     ] satisfies StreamdownPluginTuple);
+    if (markFileLinks) plugins.push(restoreWorkspaceImages);
     if (allowGitHubAttachmentImages) plugins.push(restoreGitHubAttachmentImages);
   }
 

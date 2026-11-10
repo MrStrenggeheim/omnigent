@@ -1,3 +1,4 @@
+import { attachmentsFromContent } from "./chatAttachments";
 // Translate persisted `ConversationItem`s into a flat `AnyBlock[]` —
 // the same shape the live `BlockStream` reducer produces during
 // streaming. The store holds a single block list regardless of source
@@ -91,10 +92,30 @@ const ANSWER_SEPARATOR = '"="';
  */
 export function itemsToBlocks(items: ConversationItem[]): AnyBlock[] {
   const blocks: AnyBlock[] = [];
-  const outputs = toolOutputsByCallId(items);
-  const agents = agentNamesByResponseId(items);
-  for (const item of items) {
+  const normalizedItems = items.map((item) => {
+    const raw = item as unknown as { type: string; item?: Record<string, unknown> };
+    return raw.type === "native_tool" && raw.item
+      ? ({
+          ...raw.item,
+          id: item.id,
+          response_id: item.response_id,
+          status: item.status,
+        } as ConversationItem)
+      : item;
+  });
+  const outputs = toolOutputsByCallId(normalizedItems);
+  const agents = agentNamesByResponseId(normalizedItems);
+  for (const item of normalizedItems) {
     if (!item.response_id) continue;
+    const attachments = (item as unknown as Record<string, unknown>).omnigent_attachments;
+    if (Array.isArray(attachments))
+      blocks.push({
+        type: "text_done",
+        ctx: ctxFor(item),
+        fullText: "",
+        hasCodeBlocks: false,
+        attachments,
+      });
     if (isSlashCommandItem(item)) {
       const echo = skillEchoBlock(item);
       if (echo !== null) blocks.push(echo);
@@ -358,6 +379,7 @@ function assistantMessageToBlock(item: MessageItem): TextDone {
     type: "text_done",
     ctx: ctxFor(item),
     fullText: text,
+    attachments: attachmentsFromContent(item.content),
     hasCodeBlocks: text.includes("```"),
     ...(item.interrupted === true ? { interrupted: true } : {}),
   };

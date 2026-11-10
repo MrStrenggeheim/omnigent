@@ -1,3 +1,4 @@
+import { FileSelectionMenu } from "./FileSelectionMenu";
 // TipTap comment interaction layer: floating "Add Comment" button,
 // pending decoration lifecycle, click-outside handling, and scroll-to-active.
 //
@@ -12,16 +13,12 @@
 // comments, activeSelection, or pendingRange changes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { ADD_COMMENT_BUTTON_CLASS_NAME } from "./addCommentButtonStyles";
-import { MessageSquarePlusIcon } from "lucide-react";
 import type { Editor } from "@tiptap/react";
 import type { ReactElement, RefObject } from "react";
 import type { Comment } from "@/hooks/useComments";
 import type { ActiveSelection } from "./codeViewerHelpers";
 import { commentDecorationKey, type CommentDecorationState } from "./TipTapCommentExtension";
 import { computeSelectionData } from "./TipTapEditorHelpers";
-import { getEmbedRoot } from "@/lib/host";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,7 +194,10 @@ export function MarkdownCommentPlugin({
       setButtonPos({ top: rect.top - 36, left: rect.left });
     };
 
-    const hideButton = () => setTimeout(() => setButtonPos(null), 150);
+    const hideButton = () =>
+      setTimeout(() => {
+        if (!document.activeElement?.closest("[data-file-selection-menu]")) setButtonPos(null);
+      }, 150);
 
     editor.on("selectionUpdate", updateButton);
     editor.on("blur", hideButton);
@@ -237,22 +237,21 @@ export function MarkdownCommentPlugin({
 
   if (!buttonPos) return null;
 
-  return createPortal(
-    <button
-      type="button"
-      data-add-comment-btn
-      // onMouseDown + e.preventDefault() keeps the editor focused so the
-      // PM selection is still live when handleAddComment reads it.
-      onMouseDown={(e) => {
-        e.preventDefault();
-        handleAddComment();
-      }}
-      className={`fixed z-50 ${ADD_COMMENT_BUTTON_CLASS_NAME}`}
-      style={{ left: buttonPos.left, top: buttonPos.top, transform: "translateY(-100%)" }}
-    >
-      <MessageSquarePlusIcon className="size-3.5" />
-      Add comment
-    </button>,
-    getEmbedRoot() ?? document.body,
+  return (
+    <FileSelectionMenu
+      x={buttonPos.left}
+      y={buttonPos.top}
+      onComment={handleAddComment}
+      getText={() =>
+        editor
+          ? editor.state.doc.textBetween(
+              editor.state.selection.from,
+              editor.state.selection.to,
+              "\n",
+            )
+          : ""
+      }
+      onClose={() => setButtonPos(null)}
+    />
   );
 }

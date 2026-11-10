@@ -1,10 +1,9 @@
-// DOM smoke tests for the terminal-command card rendered for !cmd inputs.
-
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TerminalCommandCard } from "./TerminalCommandCard";
 
 afterEach(cleanup);
+beforeEach(() => localStorage.clear());
 
 describe("TerminalCommandCard", () => {
   it("kind='input' renders the command text with a $ prefix", () => {
@@ -61,5 +60,68 @@ describe("TerminalCommandCard", () => {
       screen.getAllByText((_, node) => Boolean(node?.textContent?.includes("command not found")))
         .length,
     ).toBeGreaterThan(0);
+  });
+
+  it("keeps command input and combined stdout/stderr wrapping independent and remembered", () => {
+    const cards = (
+      <>
+        <TerminalCommandCard kind="input" input="long command" stdout={null} stderr={null} />
+        <TerminalCommandCard
+          kind="output"
+          input={null}
+          stdout="standard output"
+          stderr="error output"
+        />
+      </>
+    );
+    const { container, unmount } = render(cards);
+    fireEvent.click(screen.getByRole("button", { name: "output" }));
+    const inputToggle = screen.getByRole("button", { name: "Toggle command input word wrap" });
+    const outputToggles = screen.getAllByRole("button", {
+      name: "Toggle command output word wrap",
+    });
+    const command = screen.getByText("long command");
+    const outputPanels = Array.from(container.querySelectorAll("pre"));
+    expect(outputPanels).toHaveLength(2);
+    expect(command.classList.contains("whitespace-pre-wrap")).toBe(true);
+    expect(command.classList.contains("wrap-anywhere")).toBe(true);
+    expect(outputPanels.every((panel) => panel.classList.contains("whitespace-pre-wrap"))).toBe(
+      true,
+    );
+
+    fireEvent.click(inputToggle);
+    expect(inputToggle.getAttribute("aria-pressed")).toBe("false");
+    expect(command.classList.contains("whitespace-pre")).toBe(true);
+    expect(outputToggles.every((toggle) => toggle.getAttribute("aria-pressed") === "true")).toBe(
+      true,
+    );
+
+    fireEvent.click(outputToggles[1]);
+    expect(outputToggles.every((toggle) => toggle.getAttribute("aria-pressed") === "false")).toBe(
+      true,
+    );
+    expect(outputPanels.every((panel) => !panel.classList.contains("whitespace-pre-wrap"))).toBe(
+      true,
+    );
+    expect(inputToggle.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(inputToggle);
+    expect(outputToggles.every((toggle) => toggle.getAttribute("aria-pressed") === "false")).toBe(
+      true,
+    );
+    expect(localStorage.getItem("omnigent:wrap:chat")).toBeNull();
+    unmount();
+    render(cards);
+    fireEvent.click(screen.getByRole("button", { name: "output" }));
+    expect(
+      screen
+        .getByRole("button", { name: "Toggle command input word wrap" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen
+        .getAllByRole("button", { name: "Toggle command output word wrap" })
+        .every((toggle) => toggle.getAttribute("aria-pressed") === "false"),
+    ).toBe(true);
   });
 });

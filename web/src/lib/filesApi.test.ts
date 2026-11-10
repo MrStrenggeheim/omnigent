@@ -21,7 +21,7 @@ describe("uploadFile filenames", () => {
     const uploaded = await uploadFile("session/1", file);
 
     expect(authenticatedFetch).toHaveBeenCalledWith(
-      "/v1/sessions/session%2F1/resources/files",
+      "/v1/sessions/session%2F1/resources/files?presentation=true",
       expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
     );
     const form = vi.mocked(authenticatedFetch).mock.calls[0]![1]!.body as FormData;

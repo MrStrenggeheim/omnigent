@@ -562,19 +562,20 @@ describe("CodeViewer markdown preview links", () => {
   });
 });
 
-describe("CodeViewer markdown preview comment hint", () => {
+describe("CodeViewer markdown preview commenting", () => {
   // The rendered preview can't anchor text-selection comments, so it points the
   // user at the editor instead of offering a second, fuzzier comment surface.
-  it("shows the switch-to-edit hint in markdown preview", () => {
+  it("keeps Markdown preview directly commentable without a mode-switch banner", () => {
     renderViewer("# doc", true, "notes.md", { viewMode: "preview", onRequestEditMode: () => {} });
-    expect(screen.getByRole("button", { name: /switch to edit mode/i })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /switch to edit mode/i })).toBeNull();
+    expect(document.querySelector("[data-source-start]")).not.toBeNull();
   });
 
-  it("switches to the editor when the hint is clicked", () => {
+  it("keeps preview rendering active without requesting an edit-mode switch", () => {
     const onRequestEditMode = vi.fn();
     renderViewer("# doc", true, "notes.md", { viewMode: "preview", onRequestEditMode });
-    fireEvent.click(screen.getByRole("button", { name: /switch to edit mode/i }));
-    expect(onRequestEditMode).toHaveBeenCalledOnce();
+    expect(screen.getByText("doc")).toBeInTheDocument();
+    expect(onRequestEditMode).not.toHaveBeenCalled();
   });
 
   it("hides the hint for read-only viewers", () => {

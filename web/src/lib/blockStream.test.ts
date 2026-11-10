@@ -1991,3 +1991,41 @@ describe("BlockStream — naming a turn already in flight", () => {
     expect(blocks.filter((b) => b.type === "reasoning_start")).toHaveLength(1);
   });
 });
+
+it("keeps file-only assistant attachments in the live stream before reload", () => {
+  const blocks = reduce([
+    {
+      type: "message_done",
+      itemId: "attached-message",
+      responseId: "attachment-response",
+      content: [{ type: "output_file", file_id: "stored-image", filename: "native.png" }],
+    },
+  ]);
+  expect(blocks).toContainEqual(
+    expect.objectContaining({
+      type: "text_done",
+      fullText: "",
+      attachments: [{ type: "output_file", file_id: "stored-image", filename: "native.png" }],
+    }),
+  );
+});
+it("retains attachments when a streamed text message finalizes without duplicating its text", () => {
+  const blocks = reduce([
+    { type: "response_created", response: makeResponse() },
+    { type: "text_delta", delta: "Finished image" },
+    {
+      type: "message_done",
+      itemId: "message",
+      responseId: "resp_1",
+      content: [
+        { type: "output_text", text: "Finished image" },
+        { type: "output_file", file_id: "stored", filename: "chart.png" },
+      ],
+    },
+  ]);
+  const final = blocks.filter((block): block is TextDone => block.type === "text_done");
+  expect(final).toHaveLength(1);
+  expect(final[0]?.attachments).toEqual([
+    { type: "output_file", file_id: "stored", filename: "chart.png" },
+  ]);
+});

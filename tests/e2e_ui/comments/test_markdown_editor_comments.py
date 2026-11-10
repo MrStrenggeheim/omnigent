@@ -164,7 +164,7 @@ def test_markdown_rich_text_editor_add_comment(
     selectable.select_text()
 
     # After mouseup the floating "Add comment" button appears (via portal).
-    add_comment_btn = page.get_by_role("button", name=re.compile("Add comment", re.IGNORECASE))
+    add_comment_btn = page.get_by_role("menuitem", name=re.compile("Add comment", re.IGNORECASE))
     expect(add_comment_btn).to_be_visible()
 
     # The button must be positioned ABOVE the selection (y < selection top).
@@ -281,7 +281,7 @@ def test_heading_text_anchor_content_excludes_prefix(
     expect(heading_locator).to_be_visible()
     heading_locator.select_text()
 
-    add_comment_btn = page.get_by_role("button", name=re.compile("Add comment", re.IGNORECASE))
+    add_comment_btn = page.get_by_role("menuitem", name=re.compile("Add comment", re.IGNORECASE))
     expect(add_comment_btn).to_be_visible()
     add_comment_btn.click()
 

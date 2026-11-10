@@ -171,7 +171,17 @@ def switch_markdown_view_mode(page: Page, file_viewer: Locator, mode: str) -> No
     :param mode: One of ``"Preview"``, ``"Edit"``, ``"Source"``.
     :returns: None.
     """
-    file_viewer.get_by_role("button", name=re.compile(r"^View mode")).first.click()
+    # The same picker is inline at wide widths and a submenu in the compact header.
+    page.evaluate(
+        "() => document.fonts.ready.then(() => new Promise(resolve => "
+        "requestAnimationFrame(() => requestAnimationFrame(resolve))))"
+    )
+    inline = file_viewer.get_by_role("button", name=re.compile(r"^View mode")).first
+    if inline.is_visible():
+        inline.click()
+    else:
+        file_viewer.get_by_role("button", name="More actions", exact=True).click()
+        page.get_by_role("menuitem", name="View mode", exact=True).click()
     page.get_by_role("menuitem", name=mode, exact=True).click()
 
 

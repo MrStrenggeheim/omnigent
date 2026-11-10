@@ -53,3 +53,15 @@ describe("normalizeExplicitMathDelimiters — dollar handling", () => {
     expect(normalizeExplicitMathDelimiters("`$LLM_API_KEY`")).toBe("`$LLM_API_KEY`");
   });
 });
+
+it("protects absolute-value bars in table formulas while retaining code and ordinary cell separators", () => {
+  const markdown = String.raw`| Choice | Meaning |
+| --- | --- |
+| Absolute: $$|\hat y-y|$$ | Linear |
+| Explicit: \( |x| \) | Magnitude |
+| Code: \`|x|\` | Literal |`;
+  const normalized = normalizeExplicitMathDelimiters(markdown);
+  expect(normalized).toContain(String.raw`$$\vert \hat y-y\vert $$`);
+  expect(normalized).toContain(String.raw`$$ \vert x\vert  $$`);
+  expect(normalized).toContain(String.raw`| Code: \`|x|\` | Literal |`);
+});

@@ -1,3 +1,4 @@
+import type { ChatAttachmentContent } from "./chatAttachments";
 import type { NativePermissionDelivery } from "./nativePermissionDelivery";
 // Mirrors sdks/python-client/omnigent_client/_blocks.py.
 //
@@ -77,6 +78,13 @@ export interface ImageContentBlock {
 export type MessageContentBlock =
   | { type: "input_text"; text: string }
   | ImageContentBlock
+  | {
+      type: "output_file" | "output_image";
+      file_id?: string;
+      filename?: string;
+      image_url?: string;
+      file_data?: string;
+    }
   | { type: "input_file"; file_id?: string; filename?: string }
   | { type: "output_text"; text: string };
 
@@ -381,6 +389,7 @@ export interface TextChunk {
 
 /** Complete text from a text-streaming section. */
 export interface TextDone {
+  attachments?: ChatAttachmentContent[];
   type: "text_done";
   ctx: BlockContext;
   fullText: string;

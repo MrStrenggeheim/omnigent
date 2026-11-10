@@ -1,12 +1,13 @@
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FileViewerContext } from "@/shell/FileViewerContext";
 import type { RenderItem } from "@/lib/renderItems";
 import { writeTerminalThemeMode } from "@/lib/terminalThemePreferences";
 import { ToolCard, ToolGroupSummary, formatToolDuration, getOutputPreview } from "./ToolCard";
 
+beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
 // Render helper: ToolCard reads a Tooltip (trigger title) so it needs the
@@ -277,7 +278,7 @@ describe("ToolCard shell terminal panel", () => {
     expand(container);
     fireEvent.click(screen.getByRole("button", { name: "Raw" }));
     expect(screen.getByText("Parameters")).toBeInTheDocument();
-    expect(screen.getByText("Output")).toBeInTheDocument();
+    expect(screen.getAllByText("Output").length).toBeGreaterThan(0);
     expect(container.textContent).toContain("\\u001b[1ma.txt\\u001b[0m");
   });
 

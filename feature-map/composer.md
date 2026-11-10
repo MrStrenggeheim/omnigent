@@ -10,6 +10,9 @@ and steers messages while the agent is busy.
 
 ## Sub-features
 
+- `wrap-preferences`: chat code/text, tool/command input and tool/command output remember independent word-wrap choices across reloads.
+- `file-annotations`: Ask in chat from a file selection adds a source-annotated quote to the current draft without sending it.
+
 - `single-surface-controls`: both composers place workspace selection between machine and permissions inside the input card; context usage sits between model selection and Send, with no top workspace shelf.
 - `retained-status`: worktree and PR controls remain inside the composer; task, subagent-attention and goal controls sit immediately left of model selection without adding a row; queued messages and child context dock directly onto the card.
 

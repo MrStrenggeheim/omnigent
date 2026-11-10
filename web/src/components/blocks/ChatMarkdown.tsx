@@ -1,3 +1,5 @@
+import { ChatAttachmentContext, ChatAttachment } from "@/components/ChatAttachment";
+import { useScopedConversationId } from "@/components/chat/conversationScope";
 // Markdown rendering for chat text: assistant bubbles, user bubbles, and any
 // other surface that shows agent-authored markdown.
 //
@@ -11,7 +13,7 @@
 // without importing the block dispatcher that renders them.
 
 import type React from "react";
-import { useMemo } from "react";
+import { useMemo, useContext } from "react";
 import { CopyIcon, GitPullRequestIcon } from "lucide-react";
 import { toast } from "@/lib/notifications";
 import { defaultRemarkPlugins } from "streamdown";
@@ -22,6 +24,7 @@ import {
   shortFileCitationLabel,
   splitWorkspaceFileCitation,
   WORKSPACE_FILE_LINK_ATTR,
+  WORKSPACE_IMAGE_ATTR,
 } from "@/components/ai-elements/streamdown-security";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import {
@@ -44,7 +47,11 @@ import {
   useIsChangedPath,
   useWorkspacePaths,
 } from "@/shell/FileViewerContext";
-import { resolveChatFilePath, useWorkspaceFileExists } from "@/hooks/useWorkspaceChangedFiles";
+import {
+  looksLikeWorkspaceFilePath,
+  resolveChatFilePath,
+  useWorkspaceFileExists,
+} from "@/hooks/useWorkspaceChangedFiles";
 import { showToast } from "@/components/ui/toast";
 
 // Streamdown hands each component override the source hast node alongside the
@@ -178,8 +185,24 @@ function WorkspacePathInlineCode({
   // A backtick span is prose by default (`git status`, `useState`), so a
   // non-openable one just stays styled inline code — only an explicit
   // markdown link (WorkspaceFileLink) earns dead-path feedback.
-  const { open: openWorkspaceFile } = useWorkspaceFileOpener(text);
-
+  const scope = useContext(ChatAttachmentContext);
+  const { open: openWorkspaceFile } = useWorkspaceFileOpener(scope.itemId ? "" : text);
+  const citedPath = splitWorkspaceFileCitation(text).path;
+  if (
+    scope.itemId &&
+    (looksLikeWorkspaceFilePath(citedPath) ||
+      (citedPath.startsWith("/") && !citedPath.startsWith("//") && !/\s/.test(citedPath)))
+  ) {
+    return (
+      <ChatAttachment
+        compact
+        sessionId={scope.sessionId}
+        itemId={scope.itemId}
+        reference={citedPath}
+        label={<code className={className}>{text}</code>}
+      />
+    );
+  }
   if (openWorkspaceFile) {
     const shortLabel = shortFileCitationLabel(text);
     // Rendered as an inline <code> (not a <button>): a button is laid out as
@@ -286,16 +309,38 @@ function WorkspaceFileLink({
 }: WithHastNode<React.ComponentPropsWithoutRef<"a">>) {
   const marked = (props as Record<string, unknown>)[WORKSPACE_FILE_LINK_ATTR];
   const path = typeof marked === "string" ? marked : "";
+  const attachmentScope = useContext(ChatAttachmentContext);
   const {
     open: openWorkspaceFile,
     unopenable,
     resolvedPath,
     copyPath,
-  } = useWorkspaceFileOpener(path, true);
+  } = useWorkspaceFileOpener(attachmentScope.itemId ? "" : path, true);
   // Scopes the desktop in-app browser route to this conversation's view.
   const conversationId = useFileViewerConversationId();
   const { root, home } = useWorkspacePaths();
 
+  if (path && attachmentScope.itemId) {
+    const stored = path.match(/^\/v1\/sessions\/([^/]+)\/resources\/files\/([^/]+)\/content$/);
+    if (stored && decodeURIComponent(stored[1]) === attachmentScope.sessionId)
+      return (
+        <ChatAttachment
+          sessionId={attachmentScope.sessionId}
+          attachment={{
+            file_id: decodeURIComponent(stored[2]),
+            filename: typeof children === "string" ? children : undefined,
+          }}
+        />
+      );
+    return (
+      <ChatAttachment
+        sessionId={attachmentScope.sessionId}
+        itemId={attachmentScope.itemId}
+        reference={splitWorkspaceFileCitation(path).path}
+        label={children}
+      />
+    );
+  }
   if (!path) {
     if (typeof href === "string" && isRemoteVideoUrl(href)) {
       return (
@@ -490,6 +535,12 @@ function ZoomableMarkdownImage({
   node: _node,
   ...props
 }: WithHastNode<React.ComponentProps<"img">>) {
+  const scope = useContext(ChatAttachmentContext);
+  const reference = (props as Record<string, unknown>)[WORKSPACE_IMAGE_ATTR];
+  if (typeof reference === "string")
+    return (
+      <ChatAttachment sessionId={scope.sessionId} itemId={scope.itemId} reference={reference} />
+    );
   const resolvedSrc = typeof src === "string" ? src : undefined;
   return <ZoomableImage {...props} src={resolvedSrc} alt={alt ?? ""} />;
 }
@@ -595,9 +646,15 @@ function PlainTextFallback({ text }: { text: string }) {
 export function FilePathAwareMessageResponse({
   children,
   breaks = false,
+  sourceItemId = null,
   ...props
-}: React.ComponentProps<typeof MessageResponse> & { breaks?: boolean }) {
+}: React.ComponentProps<typeof MessageResponse> & {
+  breaks?: boolean;
+  sourceItemId?: string | null;
+}) {
   const components = FILE_PATH_AWARE_COMPONENTS;
+  const sessionId = useScopedConversationId();
+  const scope = useMemo(() => ({ sessionId, itemId: sourceItemId }), [sessionId, sourceItemId]);
 
   // Extend (don't replace) Streamdown's defaults so remark-gfm survives;
   // append remark-breaks only when `breaks` is requested. When `breaks` is
@@ -634,8 +691,15 @@ export function FilePathAwareMessageResponse({
   }
 
   return (
-    <MessageResponse {...props} components={components} remarkPlugins={remarkPlugins} markFileLinks>
-      {isString ? throttledText : children}
-    </MessageResponse>
+    <ChatAttachmentContext.Provider value={scope}>
+      <MessageResponse
+        {...props}
+        components={components}
+        remarkPlugins={remarkPlugins}
+        markFileLinks
+      >
+        {isString ? throttledText : children}
+      </MessageResponse>
+    </ChatAttachmentContext.Provider>
   );
 }

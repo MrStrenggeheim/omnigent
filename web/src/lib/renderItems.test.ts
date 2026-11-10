@@ -442,7 +442,7 @@ describe("sub-agent timeline events", () => {
         items: [{ kind: "subagent_activity" }, { kind: "subagent_activity" }, { kind: "text" }],
       },
     ]);
-    // A file block renders nothing, so it doesn't hide the work after it.
+    // File artifacts remain visible alongside the following work.
     const file: AnyBlock = {
       type: "file",
       ctx: ctx({ itemId: "file" }),
@@ -450,7 +450,14 @@ describe("sub-agent timeline events", () => {
       filename: null,
     };
     expect(buildStreamed([notices[0]!, file, answer])).toMatchObject([
-      { kind: "assistant", items: [{ kind: "subagent_activity" }, { kind: "text" }] },
+      {
+        kind: "assistant",
+        items: [
+          { kind: "subagent_activity" },
+          { kind: "text", attachments: [{ file_id: "f" }] },
+          { kind: "text" },
+        ],
+      },
     ]);
   });
 

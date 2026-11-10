@@ -1,3 +1,4 @@
+import { FileSelectionMenu } from "./FileSelectionMenu";
 // Shared comment-interaction layer for any Monaco code editor surface.
 //
 // Used by both MonacoCodeEditor (the file editor's modified buffer) and
@@ -12,15 +13,9 @@
 // button as a portal node for the caller to render.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { ADD_COMMENT_BUTTON_CLASS_NAME } from "./addCommentButtonStyles";
-import { AtSignIcon, MessageSquarePlusIcon } from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
 import type { Comment } from "@/hooks/useComments";
 import type { ActiveSelection } from "./codeViewerHelpers";
-import { getEmbedRoot } from "@/lib/host";
-import { useChatStore } from "@/store/chatStore";
-import { nativeCodingAgentForHarness } from "@/lib/nativeCodingAgents";
 
 // The IStandaloneCodeEditor instance, derived from the onMount signature so we
 // don't deep-import Monaco's types here. The diff editor's getModifiedEditor()
@@ -123,10 +118,7 @@ export function useMonacoCommentLayer({
   onSetActiveSelection,
   canComment,
   pendingBodyRef,
-  path,
 }: UseMonacoCommentLayerOptions): React.ReactNode {
-  const sessionHarness = useChatStore((s) => s.sessionHarness);
-  const canAttachToAgent = !!path && nativeCodingAgentForHarness(sessionHarness) !== undefined;
   const decorationsRef = useRef<DecorationsCollection | null>(null);
   // Floating "Add comment" button position in viewport coords, or null.
   const [buttonPos, setButtonPos] = useState<{ left: number; top: number } | null>(null);
@@ -193,7 +185,11 @@ export function useMonacoCommentLayer({
       // mousedown with preventDefault (which keeps the editor focused, so
       // clicking it doesn't blur) — no delay is needed, and skipping the timer
       // avoids a state update firing after unmount.
-      ed.onDidBlurEditorWidget(() => setButtonPos(null)),
+      ed.onDidBlurEditorWidget(() => {
+        queueMicrotask(() => {
+          if (!document.activeElement?.closest("[data-file-selection-menu]")) setButtonPos(null);
+        });
+      }),
       ed.onMouseUp((e) => {
         const model = ed.getModel();
         if (!model) return;
@@ -284,71 +280,20 @@ export function useMonacoCommentLayer({
     setButtonPos(null);
   }, [editorRef]);
 
-  // Tag the selected line span into the chat composer. Monaco gives line
-  // numbers directly; a selection ending at column 1 of a line means the last
-  // line's content isn't included, so step back a line in that case.
-  const handleAttachToAgent = useCallback(() => {
-    const ed = editorRef.current;
-    const sel = ed?.getSelection();
-    if (!ed || !sel || sel.isEmpty() || !path) return;
-    const start = sel.getStartPosition();
-    const end = sel.getEndPosition();
-    const endLine =
-      end.column === 1 && end.lineNumber > start.lineNumber ? end.lineNumber - 1 : end.lineNumber;
-    useChatStore.getState().addComposerAttachment({
-      path,
-      isDir: false,
-      lineRange: { start: start.lineNumber, end: endLine },
-    });
-    setButtonPos(null);
-  }, [editorRef, path]);
-
   if (!buttonPos) return null;
   // Rendered into document.body so ancestor CSS transforms don't break fixed
   // positioning.
-  return createPortal(
-    <div
-      className="fixed z-50 flex items-center gap-1"
-      style={{
-        // Clamp so the (one- or two-) button group can't clip off the right
-        // edge near the viewport boundary (mirrors CodeViewer's clamp).
-        left: Math.min(
-          buttonPos.left,
-          Math.max(8, window.innerWidth - (canAttachToAgent ? 288 : 138)),
-        ),
-        top: buttonPos.top,
-        transform: "translateY(-100%)",
+  return (
+    <FileSelectionMenu
+      x={buttonPos.left}
+      y={buttonPos.top}
+      onComment={handleAddComment}
+      getText={() => {
+        const editor = editorRef.current;
+        const selection = editor?.getSelection();
+        return selection ? (editor?.getModel()?.getValueInRange(selection) ?? "") : "";
       }}
-    >
-      <button
-        data-add-comment-btn
-        type="button"
-        // preventDefault on mousedown keeps the editor selection live so
-        // handleAddComment can read it.
-        onMouseDown={(e) => {
-          e.preventDefault();
-          handleAddComment();
-        }}
-        className={ADD_COMMENT_BUTTON_CLASS_NAME}
-      >
-        <MessageSquarePlusIcon className="size-3.5" />
-        Add comment
-      </button>
-      {canAttachToAgent && (
-        <button
-          data-attach-agent-btn
-          type="button"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            handleAttachToAgent();
-          }}
-          className={ADD_COMMENT_BUTTON_CLASS_NAME}
-        >
-          <AtSignIcon className="size-3.5" />
-          Attach to agent
-        </button>
-      )}
-    </div>,
-    getEmbedRoot() ?? document.body,
+      onClose={() => setButtonPos(null)}
+    />
   );
 }

@@ -1,44 +1,14 @@
-/**
- * Client-side attachment validation: which files can be attached, and how
- * large each type may be.
- *
- * This mirrors the authoritative server-side checks in
- * omnigent/runtime/content_resolver.py (`attachment_upload_limit`) and the
- * upload route (415 for unsupported types, 413 for oversized). Keeping a
- * copy here lets us reject a bad file at paste/drop/pick time — before a
- * slow upload — with a friendly message. The server still enforces; this is
- * UX only. Keep the limits in sync with the Python constants.
- */
+/** Browser upload limits are independent of model delivery. The server validates stored bytes. */
 
 import type { FilesystemAttachmentsInfo } from "@/lib/capabilities";
 
-/**
- * Per-type upload size limits, in megabytes. Mirrors the server caps.
- *
- * Compressible raster images accept a large upload — the server
- * downscales/re-encodes an oversized one under the provider's per-image limit
- * before storing it, so screenshots and retina captures no longer need to be
- * shrunk by hand. Other image types (SVG, …) can't be shrunk, so they keep the
- * smaller `UNCOMPRESSED_IMAGE_LIMIT_MB` cap (see `validateAttachments`).
- *
- * These are fixed client-side ceilings, so a deployment that raises a server
- * limit (e.g. `filesystem_attachment_max_bytes`) also needs these raised for the
- * extra allowance to be usable from the web UI.
- */
+/** Every display attachment accepts at most 50 MB; model delivery has separate limits. */
 export const ATTACHMENT_SIZE_LIMITS_MB = {
   image: 50,
-  pdf: 20,
-  text: 10,
+  pdf: 50,
+  text: 50,
   file: 50,
 } as const;
-
-// Raster image types the server can compress under the model limit; only these
-// get the large image cap. Mirrors _COMPRESSIBLE_IMAGE_MIMES on the server.
-const COMPRESSIBLE_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
-// Image types we don't compress (SVG, …) keep this smaller cap. Mirrors
-// IMAGE_UNCOMPRESSED_UPLOAD_BYTES on the server.
-const UNCOMPRESSED_IMAGE_LIMIT_MB = 5;
 
 export type AttachmentCategory = keyof typeof ATTACHMENT_SIZE_LIMITS_MB;
 
@@ -167,23 +137,13 @@ const DEFAULT_FILESYSTEM_ATTACHMENT_EXTENSIONS = new Set([
 // Text/code extensions a browser may not map to a `text/*` type, which then
 // greys the file out in the OS picker. `.csv` rides `text/*` everywhere; `.tsv`
 // does not, so the filter has to name it.
-const UNMAPPED_TEXT_EXTENSIONS = [".tsv"];
 
 /**
  * The attach button's file-picker filter for *policy*, or `undefined` to
  * offer every file when the server delivers all types as files.
  */
-export function attachmentAccept(policy?: FilesystemAttachmentsInfo | null): string | undefined {
-  if (policy?.all_types) return undefined;
-  const extensions = policy ? policy.extensions : [...DEFAULT_FILESYSTEM_ATTACHMENT_EXTENSIONS];
-  return [
-    "image/*",
-    "application/pdf",
-    "text/*",
-    "application/json",
-    ...UNMAPPED_TEXT_EXTENSIONS,
-    ...extensions,
-  ].join(",");
+export function attachmentAccept(_policy?: FilesystemAttachmentsInfo | null): string | undefined {
+  return undefined;
 }
 
 function extensionOf(filename: string): string {
@@ -192,15 +152,14 @@ function extensionOf(filename: string): string {
 }
 
 /**
- * Classify a file into an attachment category, or `null` if its type is not
- * supported (e.g. audio, video, unrecognised binaries). Files requiring local
+ * Classify browser previews without excluding files unsupported by the selected model. Files requiring local
  * tools are identified by extension; other types also use the browser MIME.
  * `policy` is the server's filesystem attachment policy from `/v1/info`.
  */
 export function classifyAttachment(
   file: File,
   policy?: FilesystemAttachmentsInfo | null,
-): AttachmentCategory | null {
+): AttachmentCategory {
   const type = file.type || "";
   const ext = extensionOf(file.name || "");
   const filesystemExtensions = policy
@@ -210,7 +169,7 @@ export function classifyAttachment(
   // Match the server even when a browser mislabels a ZIP as text/plain.
   if (filesystemExtensions.has(ext)) return "file";
   // A default filesystem type the server leaves out is refused, not inlined.
-  if (DEFAULT_FILESYSTEM_ATTACHMENT_EXTENSIONS.has(ext)) return null;
+  if (DEFAULT_FILESYSTEM_ATTACHMENT_EXTENSIONS.has(ext)) return "file";
   if (type.startsWith("image/")) return "image";
   if (type === "application/pdf" || ext === ".pdf") return "pdf";
   if (
@@ -220,21 +179,7 @@ export function classifyAttachment(
   ) {
     return "text";
   }
-  return policy?.all_types ? "file" : null;
-}
-
-/** The attachment types *policy* accepts, for rejection messages. */
-function supportedAttachmentTypes(policy?: FilesystemAttachmentsInfo | null): string {
-  const extensions = policy ? [...policy.extensions].sort() : null;
-  const isDefault =
-    extensions === null ||
-    (extensions.length === DEFAULT_FILESYSTEM_ATTACHMENT_EXTENSIONS.size &&
-      extensions.every((ext) => DEFAULT_FILESYSTEM_ATTACHMENT_EXTENSIONS.has(ext)));
-  if (isDefault) {
-    return "images, PDF, text/code, archives, office documents, and databases";
-  }
-  if (extensions.length === 0) return "images, PDF, and text/code files";
-  return `images, PDF, text/code, and ${extensions.join(", ")} files`;
+  return "file";
 }
 
 export interface AttachmentValidation {
@@ -246,8 +191,7 @@ export interface AttachmentValidation {
 
 /**
  * Split *files* into accepted attachments and rejection messages. A file is
- * rejected when its type is unsupported, or when it exceeds the per-type
- * size limit.
+ * rejected when it exceeds the browser upload size limit.
  */
 export function validateAttachments(
   files: File[],
@@ -259,18 +203,7 @@ export function validateAttachments(
   for (const file of files) {
     const name = file.name || "file";
     const category = classifyAttachment(file, policy);
-    if (category === null) {
-      errors.push(
-        `"${name}" can't be attached: only ${supportedAttachmentTypes(policy)} are supported.`,
-      );
-      continue;
-    }
-    // Non-compressible images (SVG, …) can't be shrunk server-side, so they
-    // keep the smaller cap; compressible raster images get the large cap.
-    const limitMb =
-      category === "image" && !COMPRESSIBLE_IMAGE_MIMES.has(file.type || "")
-        ? UNCOMPRESSED_IMAGE_LIMIT_MB
-        : ATTACHMENT_SIZE_LIMITS_MB[category];
+    const limitMb = ATTACHMENT_SIZE_LIMITS_MB[category];
     if (file.size > limitMb * 1024 * 1024) {
       const limitLabel = category === "file" ? "files" : `${category} files`;
       errors.push(`"${name}" is too large — the limit for ${limitLabel} is ${limitMb} MB.`);

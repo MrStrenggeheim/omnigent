@@ -1,3 +1,5 @@
+import { ChatAttachment, type AttachmentContent } from "@/components/ChatAttachment";
+import { useScopedConversationId } from "@/components/chat/conversationScope";
 // Dispatch from a `RenderItem` to the right component. Pure switch on
 // `item.kind`. Compaction renders as a standalone `Bubble` in
 // `ChatPage`, not as an inline render item — no case for it here.
@@ -854,11 +856,18 @@ function renderItem(
           className={cn("min-w-0", followsText && "mt-2")}
         >
           <FilePathAwareMessageResponse
+            sourceItemId={item.itemId}
             className="chat-markdown"
             mode={isTextStreaming ? "streaming" : "static"}
           >
             {item.text}
           </FilePathAwareMessageResponse>
+          {item.attachments?.map((attachment, attachmentIndex) => (
+            <AssistantAttachment
+              key={attachment.file_id ?? attachmentIndex}
+              attachment={attachment}
+            />
+          ))}
           {item.previewInterrupted && item.itemId?.startsWith("live:") && (
             <div
               role="status"
@@ -914,7 +923,11 @@ function renderItem(
           key={key}
           name={item.label}
           nativeToolType={item.toolType}
-          arguments={item.data}
+          arguments={Object.fromEntries(
+            Object.entries(item.data).filter(
+              ([field]) => !["result", "omnigent_attachments"].includes(field),
+            ),
+          )}
           output={null}
           state="output-available"
         />
@@ -994,4 +1007,9 @@ function keyFor(item: RenderItem, index: number): string {
   if (item.kind === "tool") return `tool:${item.execution.callId}`;
   if (item.kind === "elicitation") return `elicitation:${item.elicitationId}`;
   return `${item.kind}:${index}`;
+}
+
+function AssistantAttachment({ attachment }: { attachment: AttachmentContent }) {
+  const sessionId = useScopedConversationId();
+  return <ChatAttachment sessionId={sessionId} attachment={attachment} />;
 }

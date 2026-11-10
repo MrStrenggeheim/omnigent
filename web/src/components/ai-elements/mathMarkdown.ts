@@ -19,8 +19,28 @@ const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
  * `$$…$$` inside a paragraph stays inline math, so a converted `\(x\)` reads as
  * inline math and only a `$$` opening its own line renders as a display block.
  */
-export function normalizeExplicitMathDelimiters(text: string): string {
+export function normalizeExplicitMathDelimiters(text: string, sourceOffsets?: number[]): string {
+  const tableLines = new Set<number>();
+  let offset = 0;
+  const lines = text.split("\n");
+  let inTable = false;
+  for (let line = 0; line < lines.length; line += 1) {
+    if (/^\s*\|?\s*:?-{3,}:?\s*\|/.test(lines[line])) {
+      inTable = true;
+      if (line > 0) tableLines.add(offset - lines[line - 1].length - 1);
+    } else if (!lines[line].includes("|")) inTable = false;
+    if (inTable) tableLines.add(offset);
+    offset += lines[line].length + 1;
+  }
+  let tableLine = false;
+  let explicitMath = false;
   let result = "";
+  function emit(value: string, from: number, consumed = value.length) {
+    result += value;
+    if (sourceOffsets)
+      for (let offset = 0; offset < value.length; offset++)
+        sourceOffsets.push(from + Math.min(offset, consumed - 1));
+  }
   // The marker (`` ``` `` / `~~~` run) that opened the current fenced block, or
   // "" when outside a fence. CommonMark closes a fence only with the same char
   // and a run at least as long, so a stray `~~~` inside a ``` block stays code.
@@ -35,6 +55,7 @@ export function normalizeExplicitMathDelimiters(text: string): string {
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i];
     const atLineStart = i === 0 || text[i - 1] === "\n";
+    if (atLineStart) tableLine = tableLines.has(i);
 
     if (!inlineCodeTicks && atLineStart) {
       const fence = text.slice(i).match(FENCE_RE);
@@ -45,13 +66,13 @@ export function normalizeExplicitMathDelimiters(text: string): string {
         } else if (marker[0] === openFence[0] && marker.length >= openFence.length) {
           openFence = "";
         }
-        result += fence[0];
+        emit(fence[0], i);
         i += fence[0].length - 1;
         continue;
       }
     }
     if (openFence) {
-      result += char;
+      emit(char, i);
       continue;
     }
 
@@ -63,17 +84,17 @@ export function normalizeExplicitMathDelimiters(text: string): string {
       } else if (run === inlineCodeTicks) {
         inlineCodeTicks = 0;
       }
-      result += text.slice(i, i + run);
+      emit(text.slice(i, i + run), i);
       i += run - 1;
       continue;
     }
     if (inlineCodeTicks) {
-      result += char;
+      emit(char, i);
       continue;
     }
 
     if (char === "\\" && (text[i + 1] === "\\" || text[i + 1] === "$")) {
-      result += text.slice(i, i + 2);
+      emit(text.slice(i, i + 2), i);
       i += 1;
       continue;
     }
@@ -85,7 +106,7 @@ export function normalizeExplicitMathDelimiters(text: string): string {
       // span state alone: "$5 … $10" must not swallow the text in between, and a
       // `\(x\)` after it still converts.
       if (run > 1) inMath = !inMath;
-      result += text.slice(i, i + run);
+      emit(text.slice(i, i + run), i);
       i += run - 1;
       continue;
     }
@@ -93,13 +114,18 @@ export function normalizeExplicitMathDelimiters(text: string): string {
     if (!inMath) {
       const pair = text.slice(i, i + 2);
       if (pair === "\\(" || pair === "\\)" || pair === "\\[" || pair === "\\]") {
-        result += "$$";
+        explicitMath = pair === "\\(" || pair === "\\[";
+        emit("$$", i, 2);
         i += 1;
         continue;
       }
     }
 
-    result += char;
+    // GFM splits cells before inline math runs. TeX's equivalent delimiter
+    // avoids treating an absolute-value bar as a new table column.
+    if (char === "|" && tableLine && (inMath || explicitMath) && text[i - 1] !== "\\") {
+      emit("\\vert ", i, 1);
+    } else emit(char, i);
   }
 
   return result;

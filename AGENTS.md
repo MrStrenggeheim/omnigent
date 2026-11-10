@@ -115,6 +115,12 @@ test baselines, not merely to obtain a public demo URL. If attachment upload is
 unavailable, explain the limitation and ask for help instead of committing the
 files as a workaround.
 
+## Request backlog
+
+Use `/home/agent/knowledge/infrastructure/omnigent/development-tasks.md` as the active request checklist.
+Record new requests received during work immediately, including deferred discussions.
+Before completing a turn, reconcile every unchecked request with implementation and verification; report outstanding items explicitly.
+
 ## Finishing a task
 
 When you finish a task, print instructions to the user on how to test it: the

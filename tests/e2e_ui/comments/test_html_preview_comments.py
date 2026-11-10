@@ -140,7 +140,7 @@ def test_html_preview_add_comment(
 
     # The floating "Add comment" button is portalled to the PARENT document
     # (not inside the frame), so find it on the page.
-    add_comment_btn = page.get_by_role("button", name="Add comment")
+    add_comment_btn = page.get_by_role("menuitem", name="Add comment")
     expect(add_comment_btn).to_be_visible(timeout=10_000)
     add_comment_btn.click()
 
@@ -282,7 +282,7 @@ def _add_comment_on(file_viewer, page: Page, locator_id: str, body: str) -> None
     """Select the element with ``locator_id`` in the frame and add ``body``."""
     preview = file_viewer.frame_locator('iframe[title="HTML preview"]')
     preview.locator(f"#{locator_id}").select_text()
-    add_btn = page.get_by_role("button", name="Add comment")
+    add_btn = page.get_by_role("menuitem", name="Add comment")
     expect(add_btn).to_be_visible(timeout=10_000)
     add_btn.click()
     textarea = file_viewer.locator("textarea[placeholder='Add a comment…']")

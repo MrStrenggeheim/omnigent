@@ -263,9 +263,9 @@ describe("useMonacoCommentLayer — add-comment button", () => {
     const onSet = vi.fn();
     renderLayer(fake, { canComment: true, onSetActiveSelection: onSet });
     act(() => fake.fire("selection"));
-    const btn = document.querySelector("[data-add-comment-btn]") as HTMLElement;
+    const btn = document.querySelector("[data-file-selection-menu] button") as HTMLElement;
     act(() => {
-      btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
     expect(onSet).toHaveBeenCalledWith({
       start_index: 1,

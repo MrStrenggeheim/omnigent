@@ -282,6 +282,12 @@ function activeRow(): HTMLElement | null {
   return document.querySelector('[data-active="true"]');
 }
 
+function oversizedAttachment() {
+  const file = new File(["small test payload"], "clip.mp4", { type: "video/mp4" });
+  Object.defineProperty(file, "size", { value: 51 * 1024 * 1024 });
+  return file;
+}
+
 function renderWithTooltips(ui: ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
 }
@@ -5584,7 +5590,7 @@ describe("Composer file-attachment focus", () => {
     fireEvent.change(fileInput(), { target: { files: [trace] } });
 
     expect(screen.getByText("trace.gz")).toBeTruthy();
-    expect(screen.queryByText(/can't be attached/)).toBeNull();
+    expect(screen.queryByText(/too large/)).toBeNull();
   });
 
   it("focuses the textarea after a file is attached", () => {
@@ -5625,7 +5631,7 @@ describe("Composer file-attachment focus", () => {
     ta.blur();
     expect(document.activeElement).not.toBe(ta);
 
-    const bad = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const bad = oversizedAttachment();
     fireEvent.change(fileInput(), { target: { files: [bad] } });
 
     expect(document.activeElement).not.toBe(ta);
@@ -5680,13 +5686,13 @@ describe("Composer file-attachment focus", () => {
     // nothing else clears the notice. Left sticky it reads as a blocker on a
     // composer that can actually be submitted.
     render(<Composer {...composerProps()} />);
-    const bad = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const bad = oversizedAttachment();
     fireEvent.change(fileInput(), { target: { files: [bad] } });
-    expect(screen.getByText(/can't be attached/)).toBeTruthy();
+    expect(screen.getByText(/too large/)).toBeTruthy();
 
     fireEvent.change(textarea(), { target: { value: "never mind, just a question" } });
 
-    expect(screen.queryByText(/can't be attached/)).toBeNull();
+    expect(screen.queryByText(/too large/)).toBeNull();
   });
 
   it("clears the rejection notice when the accepted chip is removed", () => {
@@ -5695,14 +5701,14 @@ describe("Composer file-attachment focus", () => {
     // composer's mixed-drop behavior).
     render(<Composer {...composerProps()} />);
     const ok = new File(["hello"], "notes.txt", { type: "text/plain" });
-    const bad = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const bad = oversizedAttachment();
     fireEvent.change(fileInput(), { target: { files: [ok, bad] } });
     expect(screen.getByText("notes.txt")).toBeTruthy();
-    expect(screen.getByText(/can't be attached/)).toBeTruthy();
+    expect(screen.getByText(/too large/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove notes.txt" }));
 
-    expect(screen.queryByText(/can't be attached/)).toBeNull();
+    expect(screen.queryByText(/too large/)).toBeNull();
   });
 });
 
@@ -5744,7 +5750,7 @@ describe("Composer paste", () => {
   it("leaves a text-only paste to the browser", () => {
     render(<Composer {...composerProps()} />);
     expect(fireEvent.paste(textarea(), pastePayload({ text: "hello world" }))).toBe(true);
-    expect(screen.queryByText(/can't be attached/)).toBeNull();
+    expect(screen.queryByText(/too large/)).toBeNull();
     expect(textarea().value).toBe("");
   });
 
@@ -5807,7 +5813,7 @@ describe("Composer failed-send attachment restore", () => {
   it("restores the retriable files and flags the ones current limits reject", () => {
     render(<Composer {...composerProps()} />);
     const ok = new File(["hello"], "notes.txt", { type: "text/plain" });
-    const bad = new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" });
+    const bad = oversizedAttachment();
     act(() =>
       useChatStore.setState({
         failedSendDraft: { conversationId: "conv_test", text: "", files: [ok, bad] },
@@ -5816,7 +5822,7 @@ describe("Composer failed-send attachment restore", () => {
 
     expect(screen.getByText("notes.txt")).toBeTruthy();
     expect(screen.queryByText("clip.mp4")).toBeNull();
-    expect(screen.getByText(/can't be attached/)).toBeTruthy();
+    expect(screen.getByText(/too large/)).toBeTruthy();
     // The store entry drained on restore, so the draft can't come back twice.
     expect(useChatStore.getState().failedSendDraft).toBeNull();
   });
@@ -5853,15 +5859,15 @@ describe("Composer failed-send attachment restore", () => {
         failedSendDraft: {
           conversationId: "conv_test",
           text: "",
-          files: [new File([new Uint8Array(10)], "clip.mp4", { type: "video/mp4" })],
+          files: [oversizedAttachment()],
         },
       }),
     );
-    expect(screen.getByText(/can't be attached/)).toBeTruthy();
+    expect(screen.getByText(/too large/)).toBeTruthy();
 
     fireEvent.change(textarea(), { target: { value: "never mind, just a question" } });
 
-    expect(screen.queryByText(/can't be attached/)).toBeNull();
+    expect(screen.queryByText(/too large/)).toBeNull();
   });
 });
 
@@ -7397,8 +7403,8 @@ describe("Composer attachment picker", () => {
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     // Without these the OS picker hides the very files the server now accepts.
-    expect(input.accept).toContain(".zip");
-    expect(input.accept).toContain(".docx");
+    expect(input.accept).toBe("");
+    expect(input).not.toHaveAttribute("accept");
   });
 });
 

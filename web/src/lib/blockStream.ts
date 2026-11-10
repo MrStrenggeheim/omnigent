@@ -1,3 +1,4 @@
+import { attachmentsFromContent } from "./chatAttachments";
 // Mirrors sdks/python-client/omnigent_client/_stream.py.
 //
 // Hand-ported. When _stream.py changes, update this file and add or
@@ -621,6 +622,17 @@ function* processEvent(state: ReducerState, event: StreamEvent): Generator<AnyBl
 
     // ── Native tools ────────────────────────────────
     case "native_tool_call": {
+      const attachments = Array.isArray(event.data.omnigent_attachments)
+        ? attachmentsFromContent(event.data.omnigent_attachments)
+        : [];
+      if (attachments.length)
+        yield {
+          type: "text_done",
+          ctx: ctx(state, event.itemId || null, event.responseId || null),
+          fullText: "",
+          hasCodeBlocks: false,
+          attachments,
+        } satisfies TextDone;
       if (event.toolType !== "subagent_activity") adoptResponseIdIfUnset(state, event.responseId);
       yield {
         type: "native_tool",
@@ -697,6 +709,7 @@ function* processEvent(state: ReducerState, event: StreamEvent): Generator<AnyBl
 
     // ── Message done ────────────────────────────────
     case "message_done": {
+      const attachments = attachmentsFromContent(event.content);
       const isResponseSwitch = !!event.responseId && event.responseId !== state.responseId;
       const hadOpenText = state.inText;
       // Snapshot accumulated text BEFORE closeText resets state.fullText —
@@ -712,7 +725,11 @@ function* processEvent(state: ReducerState, event: StreamEvent): Generator<AnyBl
       if (hadOpenText) {
         // On a response switch, event.itemId belongs to the new message — don't
         // attach it to the old text block being closed.
-        yield* closeText(state, isResponseSwitch ? null : event.itemId || null);
+        for (const block of closeText(state, isResponseSwitch ? null : event.itemId || null)) {
+          yield block.type === "text_done" && !isResponseSwitch && attachments.length
+            ? { ...block, attachments }
+            : block;
+        }
       }
 
       // A message_done with a new id is a genuine turn transition (the
@@ -740,13 +757,24 @@ function* processEvent(state: ReducerState, event: StreamEvent): Generator<AnyBl
       // would duplicate the assistant message in the UI. Triggered when
       // ``response.created`` is lost on the session stream (the turn-1
       // race against fresh subscribe registration).
-      if (hadOpenText && text === accumulatedFromDeltas) return;
+      if (hadOpenText && text === accumulatedFromDeltas) {
+        if (attachments.length)
+          yield {
+            type: "text_done",
+            ctx: ctx(state, event.itemId || null),
+            fullText: "",
+            hasCodeBlocks: false,
+            attachments,
+          } satisfies TextDone;
+        return;
+      }
 
-      if (text) {
+      if (text || attachments.length) {
         yield {
           type: "text_done",
           ctx: ctx(state, event.itemId || null),
           fullText: text,
+          ...(attachments.length ? { attachments } : {}),
           hasCodeBlocks: text.includes("```"),
         } satisfies TextDone;
       }
