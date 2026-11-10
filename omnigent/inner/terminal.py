@@ -917,53 +917,61 @@ def reap_orphaned_terminals() -> int:
     """
     if not _tmux_available():
         return 0
-    reaped = 0
-    for entry in _terminals_tmp_root().glob(f"{_TERMINAL_DIR_PREFIX}*"):
-        claim = owner_claim.read_owner_claim(entry)
-        if claim is None or not owner_claim.owner_is_gone(claim, process_alive=_process_alive):
-            continue
-        socket_path = entry / "tmux.sock"
-        had_socket = socket_path.exists()
-        if had_socket:
-            try:
-                result = subprocess.run(
-                    ["tmux", "-S", str(socket_path), "kill-server"],
-                    check=False,
-                    capture_output=True,
-                    timeout=_REAP_KILL_TIMEOUT_S,
-                )
-            except (OSError, subprocess.TimeoutExpired):
+    return sum(
+        reap_orphaned_terminal(entry)
+        for entry in _terminals_tmp_root().glob(f"{_TERMINAL_DIR_PREFIX}*")
+    )
+
+
+def reap_orphaned_terminal(entry: Path) -> bool:
+    """Clean one terminal only when absent or its qualified owner is gone."""
+    try:
+        entry.lstat()
+    except FileNotFoundError:
+        return True
+    if entry.is_symlink():
+        return False
+    claim = owner_claim.read_owner_claim(entry)
+    if claim is None or not owner_claim.owner_is_gone(claim, process_alive=_process_alive):
+        return False
+    socket_path = entry / "tmux.sock"
+    had_socket = socket_path.exists()
+    if had_socket:
+        try:
+            result = subprocess.run(
+                ["tmux", "-S", str(socket_path), "kill-server"],
+                check=False,
+                capture_output=True,
+                timeout=_REAP_KILL_TIMEOUT_S,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            logger.warning("Could not reap terminal %s; preserving its socket for retry", entry)
+            return False
+        if result.returncode != 0 and socket_path.exists():
+            detail = result.stderr.decode(errors="replace").strip()
+            if not _tmux_reports_target_gone(detail):
+                # Keep the control socket until cleanup is confirmed.
                 logger.warning(
-                    "Could not reap terminal %s; preserving its socket for retry", entry
+                    "tmux orphan cleanup failed (rc=%s) for %s; preserving its socket for retry",
+                    result.returncode,
+                    entry,
                 )
-                continue
-            if result.returncode != 0 and socket_path.exists():
-                detail = result.stderr.decode(errors="replace").strip()
-                if not _tmux_reports_target_gone(detail):
-                    # Keep the control socket until cleanup is confirmed.
-                    logger.warning(
-                        "tmux orphan cleanup failed (rc=%s) for %s; preserving its "
-                        "socket for retry",
-                        result.returncode,
-                        entry,
-                    )
-                    continue
-        shutil.rmtree(entry, ignore_errors=True)
-        # Record what the sweep destroyed. The socket path is the join key
-        # against the owning session's "no server running on <socket>" exit,
-        # so a killed terminal ties to that session, not a mystery loss. A
-        # missing socket is called out explicitly so the line never implies
-        # a tmux server was killed when none existed.
-        logger.warning(
-            "orphan sweep reaped terminal instance dir %s "
-            "(tmux server socket %s%s, owner pid %s no longer running)",
-            entry.name,
-            socket_path,
-            "" if had_socket else " was already gone",
-            claim.pid,
-        )
-        reaped += 1
-    return reaped
+                return False
+    shutil.rmtree(entry, ignore_errors=True)
+    # Record what the sweep destroyed. The socket path is the join key
+    # against the owning session's "no server running on <socket>" exit,
+    # so a killed terminal ties to that session, not a mystery loss. A
+    # missing socket is called out explicitly so the line never implies
+    # a tmux server was killed when none existed.
+    logger.warning(
+        "orphan sweep reaped terminal instance dir %s "
+        "(tmux server socket %s%s, owner pid %s no longer running)",
+        entry.name,
+        socket_path,
+        "" if had_socket else " was already gone",
+        claim.pid,
+    )
+    return not entry.exists()
 
 
 def build_terminal_os_env_spec(
@@ -2006,7 +2014,7 @@ class TerminalInstance:
             self._egress_tmpdir = None
         self._stop_git_ssh()
 
-    async def close(self) -> None:
+    async def close(self, *, require_confirmed: bool = False) -> None:
         """Kill the tmux session and clean up."""
         try:
             if self.lifecycle_trace.note_cleanup():
@@ -2043,7 +2051,8 @@ class TerminalInstance:
             except _TmuxTargetGoneError:
                 close_state = "exited"
             except RuntimeError:
-                pass
+                if require_confirmed:
+                    raise
             else:
                 close_state = "exited"
         self.running = False

@@ -6,12 +6,14 @@ import asyncio
 import base64
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+import omnigent.inner.terminal as terminal_mod
 from omnigent.host.frames import (
     HostTerminalRequestFrame,
     HostTerminalResultFrame,
@@ -150,6 +152,125 @@ async def test_explicit_stop_retains_record_and_running_restart_is_unknown(tmp_p
         await registry.shutdown()
 
 
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux unavailable")
+async def test_restored_stop_confirms_missing_private_dir_and_retains_output(
+    tmp_path: Path,
+) -> None:
+    registry = HostWorkbenchTerminals(tmp_path / "terminals.json", ["bash"])
+    restored = None
+
+    def request(op, **params):
+        return HostTerminalRequestFrame("req", "workspace", str(tmp_path), op, params)
+
+    try:
+        created = (await registry.request(request("create", terminal="bash")))["terminal"]
+        terminal_id = created["id"]
+        assert registry._monitor is not None
+        registry._monitor.cancel()
+        await asyncio.gather(registry._monitor, return_exceptions=True)
+        record = registry.records[terminal_id]
+        record.output = "retained output before daemon restart"
+        registry._persist()
+        instance = registry.instances[terminal_id]
+        await instance.close()
+        assert not instance.private_dir.exists()
+        assert not instance.socket_path.exists()
+        assert json.loads(registry.path.read_text())[0]["state"] == "running"
+
+        restored = HostWorkbenchTerminals(registry.path, ["bash"])
+        assert restored.records[terminal_id].state == "unknown"
+        assert not restored.instances
+        stopped = (await restored.request(request("stop", terminal_id=terminal_id)))["terminal"]
+        assert stopped["state"] == "stopped"
+        assert not stopped["running"]
+        assert stopped["exited_at"] is not None
+        assert stopped["exit_code"] is None
+        assert stopped["output"] == record.output
+        assert stopped["id"] == terminal_id
+        repeated = (await restored.request(request("stop", terminal_id=terminal_id)))["terminal"]
+        assert repeated == stopped
+        reloaded = HostWorkbenchTerminals(restored.path, ["bash"])
+        assert reloaded.records[terminal_id].public() == stopped
+    finally:
+        await registry.shutdown()
+        if restored is not None:
+            await restored.shutdown()
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux unavailable")
+@pytest.mark.parametrize(
+    "owner",
+    ["dead", "active", "unverified", "cleanup-nonzero", "cleanup-spawn", "cleanup-timeout"],
+)
+async def test_restored_stop_only_cleans_verified_orphan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: str
+) -> None:
+    registry = HostWorkbenchTerminals(tmp_path / "terminals.json", ["bash"])
+    restored = None
+
+    def request(op, **params):
+        return HostTerminalRequestFrame("req", "workspace", str(tmp_path), op, params)
+
+    try:
+        created = (await registry.request(request("create", terminal="bash")))["terminal"]
+        terminal_id = created["id"]
+        assert registry._monitor is not None
+        registry._monitor.cancel()
+        await asyncio.gather(registry._monitor, return_exceptions=True)
+        instance = registry.instances[terminal_id]
+        record = registry.records[terminal_id]
+        record.output = "retained orphan output"
+        registry._persist()
+        restored = HostWorkbenchTerminals(registry.path, ["bash"])
+        assert restored.records[terminal_id].state == "unknown"
+        assert not restored.instances
+
+        with monkeypatch.context() as patch:
+            if owner == "dead" or owner.startswith("cleanup-"):
+                patch.setattr(terminal_mod, "_process_alive", lambda pid: False)
+            elif owner == "unverified":
+                (instance.private_dir / "owner.pid").write_text("unverified\n")
+            if owner.startswith("cleanup-"):
+
+                def fail_cleanup(*args, **kwargs):
+                    if owner == "cleanup-spawn":
+                        raise OSError("cannot spawn tmux")
+                    if owner == "cleanup-timeout":
+                        raise subprocess.TimeoutExpired("tmux", 10)
+                    return SimpleNamespace(returncode=1, stderr=b"permission denied")
+
+                patch.setattr(terminal_mod.subprocess, "run", fail_cleanup)
+            if owner == "dead":
+                stopped = (await restored.request(request("stop", terminal_id=terminal_id)))[
+                    "terminal"
+                ]
+                assert stopped["state"] == "stopped"
+                assert stopped["exited_at"] is not None
+                assert stopped["exit_code"] is None
+                assert stopped["output"] == record.output
+                assert not instance.private_dir.exists()
+                assert not await instance.is_alive()
+            else:
+                with pytest.raises(
+                    ValueError,
+                    match="Could not verify cleanup of the previous terminal; "
+                    "its owner may still be active",
+                ):
+                    await restored.request(request("stop", terminal_id=terminal_id))
+                unknown = restored.records[terminal_id]
+                assert unknown.state == "unknown"
+                assert unknown.exited_at is None
+                assert unknown.exit_code is None
+                assert unknown.output == record.output
+                assert instance.socket_path.exists()
+        if owner != "dead":
+            assert await instance.is_alive()
+    finally:
+        await registry.shutdown()
+        if restored is not None:
+            await restored.shutdown()
+
+
 async def test_host_allows_only_installed_shells(tmp_path: Path) -> None:
     registry = HostWorkbenchTerminals(tmp_path / "terminals.json", ["bash"])
     try:
@@ -221,6 +342,7 @@ async def test_stop_failure_does_not_report_success(tmp_path: Path) -> None:
                 )
             )
         assert record.state == "running"
+        instance.close.assert_awaited_once_with(require_confirmed=True)
         assert record.exited_at is None
         assert record.output == "last output"
     finally:

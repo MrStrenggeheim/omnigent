@@ -19,7 +19,11 @@ from fastapi import WebSocket
 
 from omnigent.host.frames import HostTerminalRequestFrame, HostTerminalStreamFrame
 from omnigent.inner.datamodel import OSEnvSpec, TerminalEnvSpec
-from omnigent.inner.terminal import TerminalInstance, create_terminal_instance
+from omnigent.inner.terminal import (
+    TerminalInstance,
+    create_terminal_instance,
+    reap_orphaned_terminal,
+)
 from omnigent.terminals.control_bridge import bridge_tmux_control_to_websocket
 from omnigent.terminals.ws_common import WS_CLOSE_TERMINAL_NOT_FOUND
 
@@ -274,13 +278,27 @@ class HostWorkbenchTerminals:
                 if instance is not None:
                     # Retain the last screen before explicit termination removes tmux.
                     self._persist()
-                    await instance.close()
+                    await instance.close(require_confirmed=True)
                     record.state = "stopped"
                     record.exited_at = time.time()
                     self._persist()
                     self.instances.pop(record.id, None)
                 elif record.state == "unknown":
-                    raise ConnectionError("terminal process state is unknown")
+                    directory = Path(record.private_dir)
+                    if (
+                        not record.private_dir
+                        or not directory.is_absolute()
+                        or Path(record.socket_path) != directory / "tmux.sock"
+                    ):
+                        raise ValueError("The previous terminal's process identity is unavailable")
+                    if not await asyncio.to_thread(reap_orphaned_terminal, directory):
+                        raise ValueError(
+                            "Could not verify cleanup of the previous terminal; "
+                            "its owner may still be active"
+                        )
+                    record.state = "stopped"
+                    record.exited_at = time.time()
+                    self._persist()
             elif frame.op not in {"get", "attach"}:
                 raise ValueError("unsupported terminal operation")
             return {"terminal": record.public()}

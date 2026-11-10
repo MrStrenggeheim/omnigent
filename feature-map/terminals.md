@@ -8,6 +8,7 @@ New manual shells start in the selected panel folder; browsing later leaves exis
 ## Sub-features
 
 - `close-reconciliation`: a failed close reports its actual cause; a lost acknowledgement counts as success only when the original workspace confirms the terminal exited or disappeared; stale polls cannot resurrect the closed tab.
+- `restart-close`: retained unknown shells can be closed after a host restart; absent private state is retired, verified orphan tmux servers are stopped, and uncertain ownership or failed termination preserves a retryable record.
 
 - `agent-terminal-view`: the Chat/Terminal switcher shows the harness terminal
   and returns to chat with the terminal's content kept. States: starting up
@@ -99,8 +100,10 @@ verify-env run -- python -m pytest <test> --ui-skip-build --video=on \
 - **`user-shell`:**
   `tests/e2e_ui/shells/test_new_shell.py::test_new_shell_launches_and_opens`,
   `tests/e2e_ui/shells/test_new_shell.py::test_new_shell_accepts_typed_command`.
-  Closing a shell has no e2e coverage: close its tab, confirm, and expect the
-  tab to disappear.
+  `tests/e2e_ui/files/test_workbench_ownership.py::test_manual_shell_close_stops_process_and_retains_history`
+  closes through the tab confirmation, checks retained stopped history, and reloads without restoring the tab.
+  `tests/host/test_workbench_terminals.py` covers explicit stop through a restored registry and verified orphan cleanup.
+  `tests/inner/test_terminal.py::test_confirmed_close_preserves_socket_on_kill_failure` checks that failed termination preserves the socket for retry.
 - **`agent-terminal-view`, `user-shell`, keyboard:** no e2e coverage; component
   tests `web/src/hooks/useViewModeToggleHotkey.test.tsx` and
   `web/src/hooks/useNewShellHotkey.test.tsx` (`pnpm --dir web test`). Manually,

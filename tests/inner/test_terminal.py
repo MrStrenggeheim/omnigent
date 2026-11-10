@@ -940,6 +940,35 @@ async def test_close_kills_tmux_when_socket_exists_after_running_cleared(tmp_pat
     assert not private_dir.exists()
 
 
+async def test_confirmed_close_preserves_socket_on_kill_failure(tmp_path: Path) -> None:
+    socket_path = tmp_path / "tmux.sock"
+    socket_path.touch()
+    instance = TerminalInstance(
+        name="manual",
+        session_key="main",
+        socket_path=socket_path,
+        private_dir=tmp_path,
+        running=True,
+    )
+
+    async def fail(*args: str) -> None:
+        raise RuntimeError("tmux permission denied")
+
+    instance._tmux = fail  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="permission denied"):
+        await instance.close(require_confirmed=True)
+    assert socket_path.exists()
+    assert instance.running
+
+    async def succeed(*args: str) -> None:
+        pass
+
+    instance._tmux = succeed  # type: ignore[method-assign]
+    await instance.close(require_confirmed=True)
+    assert not socket_path.exists()
+    assert not instance.running
+
+
 def test_capture_probe_logs_command_return_code_and_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

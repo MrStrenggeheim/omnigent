@@ -298,6 +298,47 @@ def test_browser_manual_shell_keeps_workspace_owner_after_chat_deletion(
         assert stopped.status_code == 200, stopped.text
 
 
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux unavailable")
+def test_manual_shell_close_stops_process_and_retains_history(
+    page: Page, ownership: Ownership
+) -> None:
+    rail = _open(page, ownership)
+    collection = f"/v1/workbench-workspaces/{ownership.workspaces[0]}/terminals"
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url.endswith(collection)
+    ) as created:
+        page.keyboard.press("Control+j")
+    assert created.value.ok, created.value.text()
+    terminal = created.value.json()
+    endpoint = collection + "/" + terminal["id"]
+    try:
+        expect(rail.locator(".xterm-screen")).to_be_visible(timeout=30_000)
+        # The shell's tab has a specific accessible label, unlike panel close controls.
+        label = terminal["name"] + " · " + terminal["session"]
+        close = rail.get_by_role("button", name="Close " + label, exact=True)
+        close.locator("..").hover()
+        close.click()
+        dialog = page.get_by_role("dialog", name="Close shell?")
+        expect(dialog).to_be_visible()
+        with page.expect_response(
+            lambda response: (
+                response.request.method == "DELETE" and response.url.endswith(endpoint)
+            )
+        ) as stopped:
+            dialog.get_by_role("button", name="Close shell", exact=True).click()
+        assert stopped.value.ok, stopped.value.text()
+        expect(close).to_have_count(0, timeout=15_000)
+        detail = ownership.client.get(endpoint)
+        detail.raise_for_status()
+        assert detail.json()["state"] == "stopped"
+        assert not detail.json()["running"]
+        page.reload()
+        expect(page.get_by_role("button", name="Close " + label, exact=True)).to_have_count(0)
+        assert ownership.client.get(endpoint).json()["state"] == "stopped"
+    finally:
+        ownership.client.delete(endpoint).raise_for_status()
+
+
 def test_explorer_size_and_menu_share_space_on_hover_and_focus(
     page: Page, ownership: Ownership
 ) -> None:
