@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeftIcon, SearchIcon, XIcon } from "lucide-react";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { conversationDisplayLabel } from "./sidebarNav";
 import { useContextSearch } from "./ContextSearchContext";
@@ -223,49 +225,37 @@ export function ContextSearchSidebar() {
         </div>
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>Search in</span>
-          <div
-            role="group"
-            aria-label="Search scope"
-            className="inline-flex rounded-md border bg-muted p-0.5"
-          >
+          <SegmentedControl aria-label="Search scope">
             {(
               [
                 ["current", "Current chat"],
                 ["all", "All chats"],
               ] as const
             ).map(([scope, label]) => (
-              <TooltipButton
+              <SegmentedControlItem
                 key={scope}
-                type="button"
-                aria-pressed={search.scope === scope}
+                label={label}
+                active={search.scope === scope}
                 disabled={scope === "current" && !search.activeSessionId}
                 onClick={() => search.setScope(scope)}
-                className={cn(
-                  "rounded px-2 py-1 text-xs disabled:opacity-40",
-                  search.scope === scope && "bg-background text-foreground shadow-sm",
-                )}
               >
                 {label}
-              </TooltipButton>
+              </SegmentedControlItem>
             ))}
-          </div>
+          </SegmentedControl>
         </div>
-        <div role="group" aria-label="Search categories" className="flex gap-1 border-b pb-2">
-          {categories.map(({ id, label }) => (
-            <TooltipButton
-              key={id}
-              type="button"
-              aria-pressed={search.category === id}
-              onClick={() => search.setCategory(id)}
-              className={cn(
-                "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent",
-                search.category === id && "bg-accent text-accent-foreground",
-              )}
-            >
-              {label}
-            </TooltipButton>
-          ))}
-        </div>
+        <Tabs
+          value={search.category}
+          onValueChange={(value) => search.setCategory(value as ContextSearchCategory)}
+        >
+          <TabsList variant="pill" aria-label="Search categories" className="gap-1 border-b pb-2">
+            {categories.map(({ id, label }) => (
+              <TabsTrigger key={id} value={id} className="px-2 py-1 text-xs">
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       </div>
       <div
         ref={results}

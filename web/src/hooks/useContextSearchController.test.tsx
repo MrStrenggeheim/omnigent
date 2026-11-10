@@ -376,7 +376,7 @@ describe("integrated search sidebar and match bar", () => {
     fireEvent.change(input, { target: { value: "settings" } });
     await screen.findByText("Go to Settings");
     expect(navigate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Actions", pressed: false }));
+    fireEvent.click(screen.getByRole("tab", { name: "Actions", selected: false }));
     expect(navigate).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(navigate).toHaveBeenCalledWith("/settings", expect.any(Function));

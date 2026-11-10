@@ -6,6 +6,7 @@ Find in a file, folder or conversation follows the last clicked or focused regio
 
 - `routing`: Ctrl/Cmd+F opens file find, folder content search or chat search according to the last interaction; hover alone does not change ownership.
 - `scopes`: Current chat and All chats share safe message snippets, chat-title results and explicit application actions.
+- `controls`: scope uses the same segmented control as Chat/Terminal; result categories use the existing tab treatment.
 - `navigation`: selecting a result reveals its exact message and occurrence, including older unloaded history and collapsed user prompts.
 - `synchronization`: the compact bar, sidebar selection, occurrence counter and stronger active highlight stay synchronized.
 - `preservation`: typing in All chats leaves the active conversation unchanged; navigation preserves drafts and file-change guards.

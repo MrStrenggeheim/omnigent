@@ -1,11 +1,9 @@
 import { CheckIcon, Loader2Icon, MessagesSquareIcon, TerminalIcon } from "lucide-react";
 import { ARIA_MOD_KEY, VIEW_MODE_TOGGLE_KEYS } from "@/components/KeyboardShortcut";
-import { Button } from "@/components/ui/button";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useViewModeToggleHotkey } from "@/hooks/useViewModeToggleHotkey";
-import { cn } from "@/lib/utils";
 import { useTerminalFirst } from "./TerminalFirstContext";
 
 const ignoreViewChange = () => {};
@@ -45,28 +43,33 @@ export function ViewModeToggle({ hotkeyEnabled = true, alwaysVisible = false } =
   const terminalLabel = terminalStartingUp ? "Terminal is starting up…" : "Terminal view";
 
   return (
-    <div
-      role="group"
+    <SegmentedControl
       aria-label="Switch between chat and terminal"
       data-testid="view-mode-toggle"
       // Two 36×24 segments separated by 2px make a flush 74×24 track.
       // Desktop-only — mobile folds the switch into the header kebab.
-      className="flex h-6 w-[74px] shrink-0 items-center gap-0.5 rounded-[6px] bg-muted p-0"
+      className="w-[74px]"
     >
-      <ViewModeSegment
+      <SegmentedControlItem
         label="Chat view"
         active={view === "chat"}
         onClick={() => setView("chat")}
-        testId="view-mode-chat"
+        data-testid="view-mode-chat"
+        iconOnly
+        aria-keyshortcuts={`${ARIA_MOD_KEY}+Alt+\\`}
+        shortcut={VIEW_MODE_TOGGLE_KEYS}
         componentId="chat.header.view_chat"
       >
         <MessagesSquareIcon className="size-4" />
-      </ViewModeSegment>
-      <ViewModeSegment
+      </SegmentedControlItem>
+      <SegmentedControlItem
         label={terminalLabel}
         active={view === "terminal"}
         onClick={() => setView("terminal")}
-        testId="view-mode-terminal"
+        data-testid="view-mode-terminal"
+        iconOnly
+        aria-keyshortcuts={`${ARIA_MOD_KEY}+Alt+\\`}
+        shortcut={VIEW_MODE_TOGGLE_KEYS}
         componentId="chat.header.view_terminal"
       >
         {terminalStartingUp ? (
@@ -74,63 +77,8 @@ export function ViewModeToggle({ hotkeyEnabled = true, alwaysVisible = false } =
         ) : (
           <TerminalIcon className="size-4" />
         )}
-      </ViewModeSegment>
-    </div>
-  );
-}
-
-/**
- * One segment of the switcher: an icon-only button whose name lives in a
- * tooltip. `aria-pressed` (not a radio) so each segment reads as an
- * independent toggle to AT, matching how it behaves — clicking the active
- * segment is a no-op rather than a selection change.
- */
-function ViewModeSegment({
-  label,
-  active,
-  onClick,
-  testId,
-  componentId,
-  children,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  testId: string;
-  componentId: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex">
-          <Button
-            type="button"
-            variant={active ? "secondary" : "ghost"}
-            size="icon-xs"
-            aria-label={label}
-            aria-pressed={active}
-            aria-keyshortcuts={`${ARIA_MOD_KEY}+Alt+\\`}
-            onClick={onClick}
-            data-testid={testId}
-            componentId={componentId}
-            className={cn(
-              "h-6 w-9 rounded-[6px] border px-2.5 py-0",
-              active
-                ? "border-border bg-background text-foreground shadow-sm hover:bg-background"
-                : "border-transparent text-muted-foreground hover:bg-transparent hover:text-foreground",
-            )}
-          >
-            {children}
-          </Button>
-        </span>
-      </TooltipTrigger>
-      {/* Bottom placement: the header sits at top-0, so a top-side tooltip
-          would render above the viewport edge and get clipped. */}
-      <TooltipContent side="bottom" shortcut={VIEW_MODE_TOGGLE_KEYS}>
-        <span>{label}</span>
-      </TooltipContent>
-    </Tooltip>
+      </SegmentedControlItem>
+    </SegmentedControl>
   );
 }
 
