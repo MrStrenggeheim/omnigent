@@ -2509,7 +2509,7 @@ describe("Composer shared visible controls", () => {
     expect(leading).toContainElement(screen.getByRole("button", { name: "Add" }));
     const harnessPicker = screen.getByTestId("composer-config-gear");
     expect(screen.queryByTestId("composer-settings")).toBeNull();
-    expect(trailing.firstElementChild).toContainElement(harnessPicker);
+    expect(trailing).toContainElement(harnessPicker);
     expect(actions.children).toHaveLength(3);
     expect(leading).toContainElement(workspace);
     expect(card).not.toContainElement(document.querySelector(".composer-workspace-surface"));
@@ -2651,6 +2651,11 @@ describe("Composer shared visible controls", () => {
     const context = screen.getByTestId("composer-context-ring");
     const background = screen.getByTestId("background-task-pill");
     const subagent = screen.getByTestId("subagent-task-pill");
+    const model = screen.getByTestId("composer-config-gear");
+    expect(screen.getByTestId("composer-action-row").lastElementChild).toContainElement(
+      taskIndicators,
+    );
+    expect(subagent.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(
       background.compareDocumentPosition(subagent) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);

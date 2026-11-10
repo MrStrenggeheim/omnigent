@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { BackgroundTaskInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store/chatStore";
+import { COMPOSER_COLLAPSED_LABEL_CLASS } from "./ChatComposer";
 
 function taskLabel(task: BackgroundTaskInfo): string {
   const description = task.description?.trim();
@@ -129,7 +130,7 @@ export function BackgroundTaskIndicator() {
             className="shrink-0 gap-1 px-1 font-normal tabular-nums text-muted-foreground md:px-2"
           >
             <SquareTerminalIcon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
-            {bgCount}
+            <span className={COMPOSER_COLLAPSED_LABEL_CLASS}>{bgCount}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent

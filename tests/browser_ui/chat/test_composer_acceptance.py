@@ -16,6 +16,61 @@ _MONITOR_TASK = {
 }
 
 
+@pytest.mark.parametrize("width", [375, 1280], ids=["phone", "desktop"])
+def test_failed_subagent_stays_beside_model_without_growing_composer(
+    page: Page, chat_session_contract: ChatSessionContract, width: int
+) -> None:
+    chat = chat_session_contract
+    children = []
+    chat.contract.json(
+        f"/v1/sessions/{chat.session_id}/child_sessions", lambda _request: {"data": children}
+    )
+    chat.contract.json("/v1/sessions/failed-child/child_sessions", {"data": []})
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(chat.url)
+    card = page.locator("[data-composer-card]")
+    expect(card).to_be_visible()
+    baseline = card.bounding_box()
+    assert baseline is not None
+    children.append(
+        {
+            "id": "failed-child",
+            "title": "Failed helper",
+            "task_summary": "Inspect failed helper",
+            "current_task_status": "failed",
+            "busy": False,
+            "pending_elicitations_count": 0,
+            "labels": {},
+        }
+    )
+    page.reload()
+    indicator = page.get_by_test_id("subagent-task-pill")
+    expect(indicator).to_have_attribute("data-state", "error")
+    expect(indicator).to_have_accessible_name("1 sub-agent: 1 needs attention")
+    model = page.get_by_test_id("composer-config-gear")
+    indicator_box, model_box, final = (
+        indicator.bounding_box(),
+        model.bounding_box(),
+        card.bounding_box(),
+    )
+    assert indicator_box is not None and model_box is not None and final is not None
+    assert indicator_box["x"] + indicator_box["width"] <= model_box["x"] + 1
+    assert (
+        abs(
+            indicator_box["y"]
+            + indicator_box["height"] / 2
+            - model_box["y"]
+            - model_box["height"] / 2
+        )
+        <= 1
+    )
+    assert final["height"] == pytest.approx(baseline["height"], abs=1)
+    indicator.click()
+    expect(page.get_by_role("link", name="Inspect failed helper", exact=True)).to_have_attribute(
+        "href", "/c/failed-child"
+    )
+
+
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize(
     ("viewport_width", "font_size", "pr_number", "font_family"),

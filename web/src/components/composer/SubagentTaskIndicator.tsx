@@ -9,9 +9,10 @@ import { Link, useLocation } from "@/lib/routing";
 import { sessionNavigationSearch } from "@/lib/sessionNavigation";
 import { cn } from "@/lib/utils";
 import { childStatus } from "@/shell/subagentStatus";
+import { COMPOSER_COLLAPSED_LABEL_CLASS } from "./ChatComposer";
 
 /**
- * Direct-child attention tally for the ComposerWorkspaceBar, sitting beside
+ * Direct-child attention tally beside the composer's model selector and
  * the background-task tally: a bot icon + count badge toggling a popover
  * listing each active, parked, disconnected, or errored child. Descendant
  * hierarchy remains in the Agents rail. Mirrors ``BackgroundTaskIndicator``
@@ -213,7 +214,7 @@ export function SubagentTaskIndicator({ conversationId }: { conversationId: stri
             )}
           >
             <BotIcon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
-            {count}
+            <span className={COMPOSER_COLLAPSED_LABEL_CLASS}>{count}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent

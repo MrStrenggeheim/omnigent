@@ -4091,14 +4091,6 @@ function ComposerImpl(
                   prNumberPrefix={composerGit.prNumberPrefix}
                   onOpen={openComposerGithubTab}
                 />
-                <div
-                  data-testid="composer-task-indicators"
-                  className="flex items-center gap-0 empty:hidden"
-                >
-                  <BackgroundTaskIndicator />
-                  <SubagentTaskIndicator conversationId={conversationId} />
-                  {goal && <GoalStatusPill goal={goal} onOpen={() => setGoalDialogOpen(true)} />}
-                </div>
               </div>
               {/* Pending attachments — image thumbnails (click to view) + file rows. */}
               <ComposerAttachments files={files} onRemove={removeFile} />
@@ -4225,6 +4217,14 @@ function ComposerImpl(
           ),
           trailing: (
             <>
+              <div
+                data-testid="composer-task-indicators"
+                className="flex shrink-0 items-center gap-0 empty:hidden"
+              >
+                <BackgroundTaskIndicator />
+                <SubagentTaskIndicator conversationId={conversationId} />
+                {goal && <GoalStatusPill goal={goal} onOpen={() => setGoalDialogOpen(true)} />}
+              </div>
               <div className="flex min-w-0 items-center rounded-lg">
                 <SessionHarnessPicker
                   busy={configBusy}
