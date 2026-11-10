@@ -1,7 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { CheckIcon, Link2Icon, WandSparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useResizableCommentsPanel } from "@/hooks/useResizableCommentsPanel";
 import { getCurrentAuthorId } from "@/lib/identity";
 import { cn } from "@/lib/utils";
@@ -198,7 +204,7 @@ export function CommentsPanel({
         {TABS.map((t) => {
           const count = t === "open" ? comments.length : addressedComments.length;
           return (
-            <button
+            <TooltipButton
               key={t}
               type="button"
               className={cn(
@@ -215,7 +221,7 @@ export function CommentsPanel({
                   {count}
                 </span>
               )}
-            </button>
+            </TooltipButton>
           );
         })}
       </div>
@@ -467,7 +473,7 @@ function CommentCard({
             {c.body}
           </p>
           {(clamped || expanded) && (
-            <button
+            <TooltipButton
               type="button"
               aria-expanded={expanded}
               className="cursor-pointer text-[10px] font-medium text-blue-600 hover:underline dark:text-blue-400"
@@ -477,7 +483,7 @@ function CommentCard({
               }}
             >
               {expanded ? "Show less" : "Show more"}
-            </button>
+            </TooltipButton>
           )}
         </div>
       )}
@@ -516,7 +522,7 @@ function CommentCard({
           {(onEdit || onDelete || onCopyLink) && (
             <div className="flex shrink-0 items-center gap-2 mr-0.5">
               {onEdit && (
-                <button
+                <TooltipButton
                   type="button"
                   className="cursor-pointer text-sm text-muted-foreground transition-colors hover:text-foreground"
                   onClick={(e) => {
@@ -525,10 +531,10 @@ function CommentCard({
                   }}
                 >
                   Edit
-                </button>
+                </TooltipButton>
               )}
               {onDelete && (
-                <button
+                <TooltipButton
                   type="button"
                   className="cursor-pointer text-sm text-muted-foreground transition-colors hover:text-destructive"
                   onClick={(e) => {
@@ -537,10 +543,10 @@ function CommentCard({
                   }}
                 >
                   Delete
-                </button>
+                </TooltipButton>
               )}
               {onCopyLink && (
-                <button
+                <TooltipButton
                   type="button"
                   aria-label="Copy link to comment"
                   className="cursor-pointer text-sm text-muted-foreground transition-colors hover:text-foreground"
@@ -556,7 +562,7 @@ function CommentCard({
                   }}
                 >
                   {linkCopied ? <CheckIcon className="size-3" /> : <Link2Icon className="size-3" />}
-                </button>
+                </TooltipButton>
               )}
             </div>
           )}

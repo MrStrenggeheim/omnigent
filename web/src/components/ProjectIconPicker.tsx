@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Emoji icon picker for projects. Two exports:
 //   - `EmojiPicker`: a themed emoji-mart picker, code-split so its ~600KB
 //     dataset never lands in the main bundle (loaded on first open).
@@ -118,7 +119,7 @@ export function ProjectLandingIcon({
       </div>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverAnchor asChild>
-          <button
+          <TooltipButton
             type="button"
             aria-label="Project icon"
             data-testid="project-icon-tile"
@@ -135,7 +136,7 @@ export function ProjectLandingIcon({
             ) : (
               <FolderIcon className="size-6 text-brand-accent" />
             )}
-          </button>
+          </TooltipButton>
         </PopoverAnchor>
         <PopoverContent
           align="center"

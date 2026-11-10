@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useServerInfo } from "@/lib/CapabilitiesContext";
 import { isFeatureEnabled } from "@/lib/capabilities";
@@ -917,14 +917,14 @@ function CredentialCard({
         Credential
       </h2>
       {onReconfigure ? (
-        <button
+        <TooltipButton
           type="button"
           aria-label="Reconfigure"
           className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-left transition-colors hover:bg-amber-500/15 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
           onClick={onReconfigure}
         >
           {body}
-        </button>
+        </TooltipButton>
       ) : (
         <div
           className={cn(

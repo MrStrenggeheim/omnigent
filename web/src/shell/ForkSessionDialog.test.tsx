@@ -257,6 +257,7 @@ describe("ForkSessionDialog", () => {
     expect(screen.queryByTestId("fork-session-host-select")).not.toBeInTheDocument();
     expect(screen.queryByTestId("fork-session-advanced-toggle")).not.toBeInTheDocument();
     fireEvent.click(submit);
+    fireEvent.keyDown(document, { key: "Tab" });
     fireEvent.focus(submit.parentElement!);
     fireEvent.keyDown(submit.parentElement!, { key: "Enter" });
     await waitFor(() =>
@@ -927,6 +928,7 @@ describe("ForkSessionDialog", () => {
       // The default — reusing the source directory — is announced inline;
       // hovering/focusing "working directory" reveals the full path in a tooltip.
       expect(screen.getByTestId("fork-session-reuse-dir-hint")).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "Tab" });
       fireEvent.focus(screen.getByTestId("fork-session-reuse-dir-path"));
       expect(await screen.findAllByText("/repo")).not.toHaveLength(0);
       // Name, working directory + git worktree are collapsed until expanded.

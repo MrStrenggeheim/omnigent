@@ -2,7 +2,13 @@ import { CircleHelpIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface SettingsLabelProps {
   label: string;
@@ -41,7 +47,7 @@ export function SettingsLabel({
         <TooltipProvider delayDuration={0}>
           <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
             <TooltipTrigger asChild>
-              <button
+              <TooltipButton
                 type="button"
                 aria-label={`About ${label}`}
                 data-testid={testId}
@@ -53,7 +59,7 @@ export function SettingsLabel({
                 }}
               >
                 <CircleHelpIcon className="size-3.5" />
-              </button>
+              </TooltipButton>
             </TooltipTrigger>
             <TooltipContent
               side="top"

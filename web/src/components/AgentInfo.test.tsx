@@ -732,7 +732,7 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     const dialog = screen.getByRole("dialog");
     // Filter to just Beta.
     fireEvent.change(within(dialog).getByPlaceholderText("Filter policies..."), {
@@ -770,7 +770,7 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByText("PII Factory"));
 
@@ -794,7 +794,7 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByText("Beta Guard"));
     // Config view: the filter list is gone, the "Change" affordance is shown.
@@ -816,7 +816,7 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -829,13 +829,13 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Alpha Guard"));
     // Close via Escape (equivalent to the X button's onOpenChange(false)).
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     expect(
       within(screen.getByRole("dialog")).getByPlaceholderText("Filter policies..."),
     ).toBeInTheDocument();
@@ -865,7 +865,7 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByText("Budget Guard"));
 
@@ -910,7 +910,7 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByText("Budget Guard"));
 
@@ -943,7 +943,7 @@ describe("SessionPoliciesSection", () => {
     ];
     renderContent("conv_pol");
 
-    fireEvent.click(screen.getByTitle("Add policy"));
+    fireEvent.click(screen.getByRole("button", { name: "Add policy" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Alpha Guard")).toBeInTheDocument();
   });

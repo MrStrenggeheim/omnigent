@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Hover-based table handles — row grip (left) and column handle (top).
 //
 // Row handle — vertical pill to the left of the hovered row.
@@ -238,7 +239,7 @@ function HandleMenu({
         "separator" in item ? (
           <div key={item.id} className="-mx-1 my-1 h-px bg-border" />
         ) : (
-          <button
+          <TooltipButton
             key={item.id}
             type="button"
             onMouseDown={(e) => e.preventDefault()}
@@ -255,7 +256,7 @@ function HandleMenu({
           >
             {item.icon}
             {item.label}
-          </button>
+          </TooltipButton>
         ),
       )}
     </div>,

@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Pieces the Summary tab's Reviewers and Labels sections share, so the two sit level
 // side by side and their chips look and behave alike.
 
@@ -41,7 +42,7 @@ export function PullRequestChipAction({
   onClick: () => void;
 }) {
   return (
-    <button
+    <TooltipButton
       type="button"
       aria-label={label}
       title={title}
@@ -49,6 +50,6 @@ export function PullRequestChipAction({
       className="shrink-0 cursor-pointer rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
     >
       <Icon aria-hidden className="size-3" />
-    </button>
+    </TooltipButton>
   );
 }

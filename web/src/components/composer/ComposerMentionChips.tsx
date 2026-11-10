@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { FileTextIcon, FolderIcon, XIcon } from "lucide-react";
 
 import { mentionItemPath, type MentionItem } from "@/lib/composerMentions";
@@ -46,14 +47,14 @@ export function ComposerMentionChips({
               :{item.lineRange.start}-{item.lineRange.end}
             </span>
           )}
-          <button
+          <TooltipButton
             type="button"
             onClick={() => onRemove(i)}
             className="ml-0.5 rounded-full hover:text-foreground"
             aria-label={`Remove ${item.path}`}
           >
             <XIcon className="size-3" />
-          </button>
+          </TooltipButton>
         </span>
       ))}
     </ComposerChipRow>

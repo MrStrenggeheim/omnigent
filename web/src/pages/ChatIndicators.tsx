@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useNotificationNotice } from "@/hooks/useNotificationNotice";
 import { Loader2Icon, WifiOffIcon } from "lucide-react";
 import { ConversationEmptyState } from "@/components/ai-elements/conversation";
@@ -102,7 +103,7 @@ export function ConnectionIndicator({
         {/* Reconnect affordance styled as the destructive error pill (never
               raw red text). Keeps its own click → reconnect dialog rather than
               the ErrorBanner's async Retry, since some states need the picker. */}
-        <button
+        <TooltipButton
           type="button"
           data-testid="disconnected-indicator"
           onClick={onShowReconnectHelp}
@@ -119,7 +120,7 @@ export function ConnectionIndicator({
               ? "Host is offline — click to reconnect"
               : "Agent disconnected — click to reconnect"}
           </span>
-        </button>
+        </TooltipButton>
       </div>
     );
   }

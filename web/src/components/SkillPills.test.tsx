@@ -1,20 +1,4 @@
-// Regression tests for the skill pill tooltip's light-mode legibility.
-//
-// The default tooltip surface is inverted in light mode — a near-black chip
-// with white text — and only becomes a light glass panel under `dark:`. This
-// bubble carries two-level content (name + description) and styled that
-// hierarchy with the page-surface tokens --foreground / --muted-foreground,
-// which put dark text on the dark chip: 1.23:1 for the name and 3.80:1 for the
-// description. Dark mode looked correct either way, because --foreground and
-// --popover-foreground resolve to the same near-white there, which is why the
-// bug shipped unnoticed.
-//
-// The fix takes the card surface instead of the chip, mirroring the sidebar's
-// session tooltip (shell/Sidebar.tsx) — the app's only other multi-line bubble.
-// Short one-line tooltips keep the chip.
-//
-// jsdom can't compute Tailwind styles, so contrast isn't directly testable;
-// these tests pin the class-level invariant that produced the bug.
+// Skill guidance must retain readable text on the canonical light tooltip surface.
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -77,15 +61,10 @@ describe("SkillPills", () => {
     expect(bubble().textContent).toContain(SKILLS[0].description);
   });
 
-  // The guards below are the bug itself. The bubble styles its two lines with
-  // page-surface text tokens, so it MUST also take the page-surface background;
-  // inheriting the chip is what made the text unreadable in light mode.
-  it("takes the card surface so its page-surface text tokens land on a light background", () => {
+  it("keeps readable text on the canonical light tooltip surface", () => {
     renderPills();
     fireEvent.focus(screen.getByTestId("skill-pill-cross-review"));
-    const cls = bubble().className;
-    expect(cls).toContain("bg-popover");
-    expect(cls).toContain("text-popover-foreground");
+    expect(bubble()).toHaveStyle({ backgroundColor: "#fff", color: "#30303a" });
   });
 
   it("does not fall back to the inverted chip surface", () => {

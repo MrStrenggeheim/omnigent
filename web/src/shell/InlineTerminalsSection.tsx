@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Shells tab content for the right-side rail: the session's shells as
 // rows. Clicking a shell row hands it to `onExpand`, which opens the
 // shell as a rail tab. On desktop, creating a new shell is done from the
@@ -50,7 +51,7 @@ export function InlineTerminalsSection({
           <NewTerminalButton conversationId={conversationId} onCreated={onExpand} variant="row" />
         )}
         {terminals.map((t) => (
-          <button
+          <TooltipButton
             key={terminalTabKey(t)}
             type="button"
             className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-accent/60"
@@ -61,7 +62,7 @@ export function InlineTerminalsSection({
             <span className="truncate text-sm text-muted-foreground/70">{t.name}</span>
             <span className="flex-1" />
             <TerminalStatusBadge status={getStatus(t)} />
-          </button>
+          </TooltipButton>
         ))}
       </div>
     </div>

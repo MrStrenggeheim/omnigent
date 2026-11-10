@@ -30,7 +30,7 @@ export function DisabledActionTooltip({
   return (
     <TooltipProvider>
       <Tooltip open={!!reason && open} onOpenChange={(value) => setOpen(!!reason && value)}>
-        <TooltipTrigger asChild>
+        <TooltipTrigger asChild suppressNestedTooltip={!!reason}>
           <span
             ref={triggerRef}
             role={reason && label ? "group" : "presentation"}

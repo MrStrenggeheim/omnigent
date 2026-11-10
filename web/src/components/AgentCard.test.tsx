@@ -1,5 +1,5 @@
 import type { SVGProps } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentCard } from "./AgentCard";
@@ -121,13 +121,12 @@ describe("AgentCard compact mode", () => {
     expect(card).toHaveAttribute("data-slot", "tooltip-trigger");
   });
 
-  it("renders the description inline with no tooltip in the default mode", () => {
+  it("renders the description inline in the default mode", () => {
     render(<AgentCard agent={withDescription} selected={false} onSelect={() => {}} />);
     const card = screen.getByTestId("agent-card-ag_1");
-    // Non-compact (AddAgentDialog) keeps the full card: description
-    // inline, and the card is not wrapped as a tooltip trigger.
+    // Non-compact (AddAgentDialog) keeps the full description inline.
     expect(card).toHaveTextContent("Multi-agent coding orchestrator.");
-    expect(card).not.toHaveAttribute("data-slot", "tooltip-trigger");
+    expect(card).toHaveAccessibleName("Nessie Multi-agent coding orchestrator.");
   });
 });
 
@@ -137,14 +136,14 @@ describe("AgentCard hover mode", () => {
     description: "Multi-agent coding orchestrator.",
   });
 
-  it("wraps the card in a hover flyout when hover is set and a description exists", () => {
-    // AddAgentDialog opts into the Cursor-style flyout. The card stays the
-    // full inline card AND becomes the hover-card trigger (asChild merges
-    // the slot marker onto the button), so hovering opens the flyout.
+  it("shows agent guidance on focus when hover is set and a description exists", async () => {
     render(<AgentCard agent={withDescription} selected={false} onSelect={() => {}} hover />);
     const card = screen.getByTestId("agent-card-ag_1");
     expect(card).toHaveTextContent("Multi-agent coding orchestrator."); // inline kept
-    expect(card).toHaveAttribute("data-slot", "hover-card-trigger");
+    fireEvent.focus(card);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Nessie");
+    expect(tooltip).toHaveTextContent("Multi-agent coding orchestrator.");
   });
 
   it("does not wrap when hover is set but the agent has no description", () => {

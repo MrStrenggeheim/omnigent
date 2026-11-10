@@ -1,6 +1,7 @@
 import { useState, type ComponentProps } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { useAgentTurnChoices } from "@/hooks/useWorkspaceComparisons";
 import {
   DEFAULT_DIFF_COMPARISON,
@@ -247,10 +248,12 @@ describe("DiffComparisonControls", () => {
         turnId,
       });
       expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Turn");
-      expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveAttribute(
-        "title",
-        expect.stringContaining(label === "Last agent turn" ? "Last completed agent turn" : label),
+      const trigger = screen.getByRole("button", { name: "Diff comparison" });
+      await userEvent.hover(trigger);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
+        label === "Last agent turn" ? "Last completed agent turn" : label,
       );
+      await userEvent.unhover(trigger);
       expect(
         screen.queryByText("Recorded agent edits · captured coverage"),
       ).not.toBeInTheDocument();

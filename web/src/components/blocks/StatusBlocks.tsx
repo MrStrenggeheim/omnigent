@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Inline status indicators for non-tool, non-text, non-reasoning blocks.
 // Each is small enough to live in one file.
 //
@@ -501,7 +502,7 @@ export function ErrorBanner({
         }}
       >
         <div className="flex w-full min-w-0 items-start gap-[4px]">
-          <button
+          <TooltipButton
             type="button"
             aria-expanded={expandable ? expanded : undefined}
             aria-controls={expandable && expanded ? messageId : undefined}
@@ -532,7 +533,7 @@ export function ErrorBanner({
             <span className="mr-[4px] flex min-w-0 flex-1 flex-col">
               <span
                 data-testid="error-headline"
-                title={headline}
+
                 className={cn(
                   "min-w-0 truncate whitespace-nowrap leading-6",
                   neutral ? "text-foreground" : "text-destructive",
@@ -541,7 +542,7 @@ export function ErrorBanner({
                 {headline}
               </span>
             </span>
-          </button>
+          </TooltipButton>
           {retryable ? (
             <Button
               type="button"
@@ -787,7 +788,7 @@ export function ErrorBanner({
                 style={{ borderColor: "var(--sidebar-edge-border, var(--border))" }}
               >
                 <CollapsibleTrigger asChild>
-                  <button
+                  <TooltipButton
                     type="button"
                     aria-controls={diagnosticsOpen ? diagnosticsId : undefined}
                     className="flex w-full cursor-pointer items-center justify-between gap-3 px-[12px] py-[8px] text-left text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -800,7 +801,7 @@ export function ErrorBanner({
                       )}
                       aria-hidden="true"
                     />
-                  </button>
+                  </TooltipButton>
                 </CollapsibleTrigger>
                 <CollapsibleContent id={diagnosticsId} className="min-w-0 px-[12px] pb-[12px]">
                   <Tabs

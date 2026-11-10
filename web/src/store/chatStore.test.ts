@@ -4076,7 +4076,7 @@ describe("chatStore — first message during native model startup", () => {
       const baseFetch = fetchMock.getMockImplementation()!;
       let releaseUpload!: () => void;
       fetchMock.mockImplementation((input, init) => {
-        if (String(input).endsWith("/resources/files")) {
+        if (String(input).endsWith("/resources/files?presentation=true")) {
           return new Promise<Response>((resolve) => {
             releaseUpload = () =>
               resolve(
@@ -5836,7 +5836,7 @@ describe("chatStore — send (file attachments)", () => {
 
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_existing/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_existing/resources/files?presentation=true")) {
         return mockResponse({
           id: "file_real_abc123",
           name: "photo.png",
@@ -5877,7 +5877,7 @@ describe("chatStore — send (file attachments)", () => {
     let uploadSeq = 0;
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_existing/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_existing/resources/files?presentation=true")) {
         await uploadGate;
         uploadSeq += 1;
         return mockResponse({
@@ -5917,7 +5917,7 @@ describe("chatStore — send (file attachments)", () => {
 
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_existing/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_existing/resources/files?presentation=true")) {
         return mockResponse({
           id: "file_real_xyz789",
           name: "screenshot.png",
@@ -5973,7 +5973,7 @@ describe("chatStore — send (file attachments)", () => {
     let releaseUpload: () => void = () => {};
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_upload/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_upload/resources/files?presentation=true")) {
         return new Promise<Response>((resolve) => {
           releaseUpload = () =>
             resolve(
@@ -6022,7 +6022,7 @@ describe("chatStore — send (file attachments)", () => {
 
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_existing/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_existing/resources/files?presentation=true")) {
         return mockResponse({
           id: "file_real_shot",
           name: "shot.png",
@@ -6086,7 +6086,7 @@ describe("chatStore — send (file attachments)", () => {
 
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_existing/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_existing/resources/files?presentation=true")) {
         return mockResponse({
           id: "file_real_native",
           name: "diagram.png",
@@ -6150,7 +6150,7 @@ describe("chatStore — send (file attachments)", () => {
     let failPost = true;
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_existing/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_existing/resources/files?presentation=true")) {
         uploads += 1;
         return mockResponse({
           id: "file_dedupe_send",
@@ -6184,7 +6184,7 @@ describe("chatStore — send (file attachments)", () => {
     });
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_existing/resources/files")) {
+      if (url.endsWith("/v1/sessions/conv_existing/resources/files?presentation=true")) {
         return mockResponse(
           {
             detail:
@@ -18561,7 +18561,7 @@ describe("chatStore — client-side message queue", () => {
       const posted: { text: string; stableId: string }[] = [];
       let failPosts = true;
       fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).endsWith("/resources/files")) {
+        if (String(input).endsWith("/resources/files?presentation=true")) {
           return mockResponse({
             id: "file_queue",
             name: file.name,
@@ -18618,7 +18618,9 @@ describe("chatStore — client-side message queue", () => {
       expect(posted[3]!.stableId).toBe(original[1]!.stableId);
       expect(useChatStore.getState().queuedMessages).toEqual([]);
       expect(
-        fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/resources/files")),
+        fetchMock.mock.calls.filter(([url]) =>
+          String(url).endsWith("/resources/files?presentation=true"),
+        ),
       ).toHaveLength(1);
     });
 
@@ -18628,7 +18630,7 @@ describe("chatStore — client-side message queue", () => {
         const file = new File(["png!"], "shot.png", { type: "image/png" });
         const posted: string[] = [];
         fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-          if (String(input).endsWith("/resources/files")) {
+          if (String(input).endsWith("/resources/files?presentation=true")) {
             return phase === "upload"
               ? mockResponse({ detail: "upload unavailable" }, { ok: false, status: 503 })
               : mockResponse({
@@ -19200,7 +19202,10 @@ describe("chatStore — background cross-session flush", () => {
     seedConversationsCache([conv("conv_active", "running"), conv("conv_bg", "idle")]);
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_bg/resources/files") && init?.method === "POST") {
+      if (
+        url.endsWith("/v1/sessions/conv_bg/resources/files?presentation=true") &&
+        init?.method === "POST"
+      ) {
         return mockResponse({
           id: "file_bg_1",
           name: "shot.png",
@@ -19243,7 +19248,10 @@ describe("chatStore — background cross-session flush", () => {
     let events = 0;
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_bg/resources/files") && init?.method === "POST") {
+      if (
+        url.endsWith("/v1/sessions/conv_bg/resources/files?presentation=true") &&
+        init?.method === "POST"
+      ) {
         return mockResponse({}, { ok: false, status: 500 });
       }
       if (/\/v1\/sessions\/conv_bg\/events$/.test(url) && init?.method === "POST") {
@@ -19277,7 +19285,10 @@ describe("chatStore — background cross-session flush", () => {
     let failPost = true;
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/conv_bg/resources/files") && init?.method === "POST") {
+      if (
+        url.endsWith("/v1/sessions/conv_bg/resources/files?presentation=true") &&
+        init?.method === "POST"
+      ) {
         uploads += 1;
         return mockResponse({
           id: "file_bg_dedupe",

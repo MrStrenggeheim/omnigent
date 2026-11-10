@@ -259,17 +259,17 @@ describe.each([true, false])("Mermaid fullscreen (embedded=%s)", (embedded) => {
         );
         const svg = container.querySelector('svg[id^="mermaid-"]')!;
         expect(svg.textContent).toContain("Alpha");
-        expect(screen.getAllByTitle("View fullscreen")).toHaveLength(1);
-        fireEvent.click(screen.getByTitle("View fullscreen"));
-        const exit = screen.getByTitle("Exit fullscreen");
+        expect(screen.getAllByRole("button", { name: "View fullscreen" })).toHaveLength(1);
+        fireEvent.click(screen.getByRole("button", { name: "View fullscreen" }));
+        const exit = screen.getByRole("button", { name: "Exit fullscreen" });
         const overlay = exit.parentElement!;
         expect(overlay.parentElement).toBe(embedded ? root : document.body);
         expect(overlay.querySelector('svg[id^="mermaid-"]')?.outerHTML).toBe(svg.outerHTML);
         fireEvent.click(exit);
-        expect(screen.queryByTitle("Exit fullscreen")).toBeNull();
-        fireEvent.click(screen.getByTitle("View fullscreen"));
+        expect(screen.queryByRole("button", { name: "Exit fullscreen" })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "View fullscreen" }));
         fireEvent.keyDown(window, { key: "Escape" });
-        expect(screen.queryByTitle("Exit fullscreen")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Exit fullscreen" })).toBeNull();
       } finally {
         cleanup();
         root.remove();
@@ -289,7 +289,7 @@ it("preserves ordinary code fences in reasoning", () => {
     </Reasoning>,
   );
   expect(container.querySelector('[data-streamdown="code-block"]')).toHaveTextContent("plain code");
-  expect(screen.queryByTitle("View fullscreen")).toBeNull();
+  expect(screen.queryByRole("button", { name: "View fullscreen" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Toggle word wrap" })).toBeNull();
 });
 

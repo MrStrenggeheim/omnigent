@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { usePanelEscapeClose } from "@/hooks/usePanelEscapeClose";
 import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side panel that hosts the xterm.js views for the
@@ -220,7 +221,7 @@ export function TerminalsPanel({
             const key = terminalTabKey(t);
             const isActive = key === activeKey;
             return (
-              <button
+              <TooltipButton
                 key={key}
                 type="button"
                 className={cn(
@@ -234,7 +235,7 @@ export function TerminalsPanel({
                 <span className="truncate text-sm text-muted-foreground/70">{t.name}</span>
                 <span className="flex-1" />
                 <TerminalStatusBadge status={getStatus(t)} />
-              </button>
+              </TooltipButton>
             );
           })}
         </div>

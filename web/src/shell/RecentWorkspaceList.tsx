@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useQueries } from "@tanstack/react-query";
 import { FolderGit2Icon, FolderIcon, FolderOpenIcon } from "lucide-react";
 
@@ -42,7 +43,7 @@ export function RecentWorkspaceList({
             className="group/recent p-0"
             data-testid={`recent-workspace-row-${index}`}
           >
-            <button
+            <TooltipButton
               type="button"
               className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[3px] text-left text-ui leading-4"
               onClick={() => onSelect(path)}
@@ -62,8 +63,8 @@ export function RecentWorkspaceList({
                 />
               )}
               <span className="truncate">{path}</span>
-            </button>
-            <button
+            </TooltipButton>
+            <TooltipButton
               type="button"
               className="mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/recent:opacity-100 group-focus-within/recent:opacity-100"
               aria-label={`Browse ${path}`}
@@ -72,7 +73,7 @@ export function RecentWorkspaceList({
               data-testid={`recent-workspace-browse-${index}`}
             >
               <FolderOpenIcon className="size-4" aria-hidden />
-            </button>
+            </TooltipButton>
           </MenuItem>
         );
       })}

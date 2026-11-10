@@ -340,9 +340,8 @@ describe("Composer status line (branch + context ring)", () => {
     );
   });
 
-  it("places the host in the action row below the shared workspace bar", () => {
-    // The host indicator moved out of the chat header into this tray; it
-    // sits immediately left of the worktree branch.
+  it("places the host before worktree controls in the composer action row", () => {
+    // Machine selection leads the consolidated composer controls.
     bindHost("mac-laptop");
     useComposerGitStatusMock.mockReturnValue(
       composerGitStatus({
@@ -357,7 +356,7 @@ describe("Composer status line (branch + context ring)", () => {
     const host = screen.getByTestId("composer-host-select");
     const branch = screen.getByTestId("composer-git-branch");
     expect(host).toHaveAccessibleName("Host mac-laptop, online");
-    expect(branch.compareDocumentPosition(host) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+    expect(host.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });

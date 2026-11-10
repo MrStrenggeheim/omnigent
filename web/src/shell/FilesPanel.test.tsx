@@ -705,7 +705,7 @@ describe("Explorer shared comparisons", () => {
     }
     const first = render(<Harness />);
     expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Git");
-    expect(screen.getByText("live.ts")).toHaveClass("text-amber-500");
+    expect(screen.getByText("live.ts")).toHaveClass("text-orange-500", "dark:text-orange-400");
     fireEvent.click(screen.getByRole("button", { name: "Switch view" }));
     expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
     expect(screen.getByTitle("Added")).toHaveTextContent("A");
@@ -958,7 +958,10 @@ describe("Explorer shared comparisons", () => {
       (_id, paths) => new Map(paths.map((path) => [path, directoryResult([file("repo/live.ts")])])),
     );
     fireEvent.click(screen.getByRole("button", { name: "repo/" }));
-    expect(await screen.findByText("live.ts")).toHaveClass("text-amber-500");
+    expect(await screen.findByText("live.ts")).toHaveClass(
+      "text-orange-500",
+      "dark:text-orange-400",
+    );
     expect(screen.queryByText("gone.ts")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "absent/" })).not.toBeInTheDocument();
     expect(useComparisonChangesMock).toHaveBeenLastCalledWith("git_actual_tree", {
@@ -1439,7 +1442,10 @@ describe("FilesPanel tree (Explore) search", () => {
 
     for (const name of ["cache/ignored.log", "cache/"]) {
       const button = screen.getByRole("button", { name });
-      expect(button).toHaveAttribute("title", "Ignored by Git");
+      expect(button).not.toHaveAttribute("title");
+      fireEvent.focus(button);
+      expect(screen.getByRole("tooltip")).toHaveTextContent("Ignored by Git");
+      fireEvent.blur(button);
       expect(button).toBeEnabled();
       expect(button.querySelector("svg")).toHaveClass("opacity-50");
       expect(button.querySelector("span")).toHaveClass("opacity-50");
@@ -1455,10 +1461,8 @@ describe("FilesPanel tree (Explore) search", () => {
     expect(onFileSelect).toHaveBeenCalledWith("cache/ignored.log");
     fireEvent.click(screen.getByRole("button", { name: "cache/" }));
     expect(screen.getByRole("searchbox", { name: "Search all files" })).toHaveValue("");
-    expect(screen.getByRole("button", { name: "cache/" })).toHaveAttribute(
-      "title",
-      "Ignored by Git",
-    );
+    fireEvent.focus(screen.getByRole("button", { name: "cache/" }));
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Ignored by Git");
   });
 
   it("shows search results as a flat list after the debounce fires", () => {

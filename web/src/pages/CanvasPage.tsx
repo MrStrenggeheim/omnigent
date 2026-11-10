@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * Canvas page (``/canvas``) — every top-level session as a draggable card on
  * a freeform React Flow surface, one canvas per project plus a **Main** canvas
@@ -110,7 +111,7 @@ function CanvasControls({
   const { zoomIn, zoomOut } = useReactFlow();
   return (
     <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1">
-      <button
+      <TooltipButton
         type="button"
         className={CONTROL_CLASS}
         onClick={() => {
@@ -120,8 +121,8 @@ function CanvasControls({
         aria-label="Zoom in"
       >
         <ZoomInIcon className="size-4" />
-      </button>
-      <button
+      </TooltipButton>
+      <TooltipButton
         type="button"
         className={CONTROL_CLASS}
         onClick={() => {
@@ -131,11 +132,11 @@ function CanvasControls({
         aria-label="Zoom out"
       >
         <ZoomOutIcon className="size-4" />
-      </button>
-      <button type="button" className={CONTROL_CLASS} onClick={onFit} aria-label="Fit view">
+      </TooltipButton>
+      <TooltipButton type="button" className={CONTROL_CLASS} onClick={onFit} aria-label="Fit view">
         <Maximize2Icon className="size-4" />
-      </button>
-      <button
+      </TooltipButton>
+      <TooltipButton
         type="button"
         className={CONTROL_CLASS}
         onClick={onReset}
@@ -143,7 +144,7 @@ function CanvasControls({
         title="Reset layout"
       >
         <RotateCcwIcon className="size-4" />
-      </button>
+      </TooltipButton>
     </div>
   );
 }
@@ -598,7 +599,7 @@ function CanvasSurface({ selectedSessionId }: { selectedSessionId?: string | nul
         className="flex items-center gap-2 overflow-x-auto px-6 py-3 [scrollbar-width:thin]"
       >
         <div role="tablist" className="flex gap-1">
-          <button
+          <TooltipButton
             type="button"
             role="tab"
             className={TAB_CLASS}
@@ -606,11 +607,11 @@ function CanvasSurface({ selectedSessionId }: { selectedSessionId?: string | nul
             onClick={() => selectCanvas(MAIN_CANVAS_ID)}
           >
             Main
-          </button>
+          </TooltipButton>
           {projects.map((project) => {
             const canvasId = projectCanvasId(project);
             return (
-              <button
+              <TooltipButton
                 key={canvasId}
                 type="button"
                 role="tab"
@@ -621,7 +622,7 @@ function CanvasSurface({ selectedSessionId }: { selectedSessionId?: string | nul
               >
                 <ProjectRowIcon icon={project.icon} />
                 <span className="truncate">{project.name}</span>
-              </button>
+              </TooltipButton>
             );
           })}
         </div>

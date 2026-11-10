@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useCallback, useContext, useEffect, useRef, useState, type RefObject } from "react";
 import { Loader2Icon } from "lucide-react";
 import { SidebarConfigContext } from "@/lib/sidebarConfig";
@@ -70,7 +71,7 @@ export function InfiniteScrollSentinel({
   }, [hasMore, budget, limit, load, scrollRoot, revision, scopeKey]);
   if (!hasMore) return null;
   return (
-    <button
+    <TooltipButton
       ref={ref}
       type="button"
       disabled={isFetching}
@@ -88,6 +89,6 @@ export function InfiniteScrollSentinel({
       ) : (
         "Load more"
       )}
-    </button>
+    </TooltipButton>
   );
 }

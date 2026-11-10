@@ -1,4 +1,4 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * A compact, left-aligned row of skill pills rendered inline on the
@@ -31,14 +31,14 @@ export function SkillPills({
       {skills.map((skill) => (
         <Tooltip key={skill.name}>
           <TooltipTrigger asChild>
-            <button
+            <TooltipButton
               type="button"
               data-testid={`skill-pill-${skill.name}`}
               onClick={() => onPick(skill.name)}
               className="pointer-events-auto rounded-md bg-brand-accent/10 px-2 py-1 text-ui leading-none text-brand-accent transition-colors hover:bg-brand-accent/15"
             >
               /{skill.name}
-            </button>
+            </TooltipButton>
           </TooltipTrigger>
           {/* Card surface, not the default tooltip chip: that chip is an
               inverted near-black box in light mode, which left this bubble's

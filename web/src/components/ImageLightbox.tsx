@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import * as React from "react";
 import {
   createContext,
@@ -63,7 +64,7 @@ export interface ZoomableImageProps extends React.ComponentProps<"img"> {
 export function ZoomableImage({ src, alt, className, ...imgProps }: ZoomableImageProps) {
   const { open } = useLightbox();
   return (
-    <button
+    <TooltipButton
       type="button"
       aria-label={alt ? `Zoom image: ${alt}` : "Zoom image"}
       className="m-0 inline-flex max-w-full cursor-zoom-in appearance-none border-0 bg-transparent p-0 leading-none"
@@ -72,7 +73,7 @@ export function ZoomableImage({ src, alt, className, ...imgProps }: ZoomableImag
       }}
     >
       <img {...imgProps} src={src} alt={alt} className={className} />
-    </button>
+    </TooltipButton>
   );
 }
 
@@ -199,14 +200,14 @@ function ZoomViewer({ image, onClose }: { image: LightboxImage; onClose: () => v
         >
           <ZoomOutIcon />
         </Button>
-        <button
+        <TooltipButton
           type="button"
           aria-label="Reset zoom"
           className="min-w-[3ch] cursor-pointer text-center text-sm tabular-nums text-muted-foreground hover:text-foreground"
           onClick={resetView}
         >
           {Math.round(zoom * 100)}%
-        </button>
+        </TooltipButton>
         <Button
           variant="ghost"
           size="icon-sm"

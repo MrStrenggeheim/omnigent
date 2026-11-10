@@ -505,10 +505,10 @@ describe("HeaderConversationMenu", () => {
     expect(screen.queryByText("Quarterly planning")).toBeNull();
   });
 
-  it("sizes the trigger and rows for touch on mobile only", () => {
+  it("keeps the header glyph compact and sizes menu rows for touch on mobile", () => {
     const view = renderMenu();
     const desktopTrigger = screen.getByRole("button", { name: "Conversation actions" });
-    expect(desktopTrigger.querySelector("svg")).toHaveClass("size-3.5");
+    expect(desktopTrigger.querySelector("svg")).toHaveClass("size-4");
     openMenu();
     expect(screen.getByRole("menuitem", { name: "Pin" })).not.toHaveClass("py-2");
 
@@ -518,7 +518,7 @@ describe("HeaderConversationMenu", () => {
     const mobileTrigger = screen.getByRole("button", { name: "Conversation actions" });
     // 44px tap-target floor on phones, matching the sibling header controls.
     expect(mobileTrigger).toHaveClass("max-md:size-11");
-    expect(mobileTrigger.querySelector("svg")).toHaveClass("size-5");
+    expect(mobileTrigger.querySelector("svg")).toHaveClass("size-4");
     openMenu();
     expect(screen.getByRole("menuitem", { name: "Pin" })).toHaveClass("gap-2.5", "px-2.5", "py-2");
   });

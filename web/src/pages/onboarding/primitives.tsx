@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import type { ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Download, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -80,9 +81,13 @@ export function ConnectStatus({
             ? "Finish signing in in your browser, then come back here."
             : "Waiting for the server…"}{" "}
         {onCancel && phase !== "cancelling" && (
-          <button type="button" onClick={onCancel} className="underline hover:text-foreground">
+          <TooltipButton
+            type="button"
+            onClick={onCancel}
+            className="underline hover:text-foreground"
+          >
             Cancel
-          </button>
+          </TooltipButton>
         )}
       </p>
       {error && (

@@ -138,7 +138,6 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -180,7 +179,7 @@ import {
   useStopSession,
 } from "@/hooks/useConversations";
 import { useHosts, type Host } from "@/hooks/useHosts";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useServerInfo } from "@/lib/CapabilitiesContext";
 import { isFeatureEnabled, isSingleUserMode, sandboxOptionLabel } from "@/lib/capabilities";
 import { useBranding } from "@/lib/branding";
@@ -1002,7 +1001,7 @@ function SidebarImpl({
       pointer events would win the tie inside the exposed strip and swallow the
       dismiss. Strictly between chat chrome and the drawer's z-50. */}
       {!inSettings && (
-        <button
+        <TooltipButton
           type="button"
           data-testid="sidebar-scrim"
           aria-label="Close sidebar"
@@ -2561,9 +2560,9 @@ function ConversationList({
       {allConversations.length === 0
         ? `Failed to load: ${conversationsQuery.error instanceof Error ? conversationsQuery.error.message : String(conversationsQuery.error)}`
         : "Some sessions could not be loaded."}{" "}
-      <button type="button" onClick={() => void conversationsQuery.refetch?.()}>
+      <TooltipButton type="button" onClick={() => void conversationsQuery.refetch?.()}>
         Retry
-      </button>
+      </TooltipButton>
     </p>
   ) : conversationsQuery.isLoading ? (
     <p role="status" className="px-2 py-1 text-muted-foreground text-sm">
@@ -3240,7 +3239,7 @@ function SectionHeader({
     ? "[@media((hover:hover)_and_(pointer:fine))]:md:group-has-[[data-header-controls]_:focus-visible]/header:opacity-0"
     : "[@media((hover:hover)_and_(pointer:fine))]:md:group-has-[[data-header-controls]:focus-within]/header:opacity-0";
   const button = (
-    <button
+    <TooltipButton
       ref={
         headerDrag
           ? (node) => {
@@ -3344,7 +3343,7 @@ function SectionHeader({
           <SessionStateBadge state={marker} />
         </span>
       )}
-    </button>
+    </TooltipButton>
   );
 
   return (
@@ -5276,14 +5275,14 @@ function ConversationRowImpl({
           bare link is rendered instead. ContextMenuTrigger preventDefaults the
           native contextmenu event, so right-click never navigates; asChild
           merges its handler onto the Link, preserving left-click / double-click.
-          Pinned, project-owned rows nest a HoverCardTrigger around the Link so
+          Pinned, project-owned rows nest a TooltipTrigger around the Link so
           hovering surfaces the project flyout — the trigger sits innermost so
           both the context menu and the hover card keep their handlers/refs on
           the Link. */}
       {selectionMode ? (
         projectFlyoutName ? (
-          <HoverCard openDelay={150} closeDelay={0}>
-            <HoverCardTrigger asChild>{rowLink}</HoverCardTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>{rowLink}</TooltipTrigger>
             <PinnedProjectFlyoutContent
               title={conversation.title ?? conversation.id}
               projectName={projectFlyoutName}
@@ -5291,7 +5290,7 @@ function ConversationRowImpl({
               gitBranch={gitBranch}
               hasError={sessionState?.kind === "error"}
             />
-          </HoverCard>
+          </Tooltip>
         ) : isMobile ? (
           rowLink
         ) : (
@@ -5305,10 +5304,10 @@ function ConversationRowImpl({
           </Tooltip>
         )
       ) : projectFlyoutName ? (
-        <HoverCard openDelay={150} closeDelay={0}>
+        <Tooltip>
           <ContextMenu>
             <ContextMenuTrigger asChild>
-              <HoverCardTrigger asChild>{rowLink}</HoverCardTrigger>
+              <TooltipTrigger asChild>{rowLink}</TooltipTrigger>
             </ContextMenuTrigger>
             <ContextMenuContent className="min-w-44">
               <ConversationMenuItems
@@ -5325,7 +5324,7 @@ function ConversationRowImpl({
             gitBranch={gitBranch}
             hasError={sessionState?.kind === "error"}
           />
-        </HoverCard>
+        </Tooltip>
       ) : isMobile ? (
         <ContextMenu>
           <ContextMenuTrigger asChild>{rowLink}</ContextMenuTrigger>
@@ -5834,13 +5833,7 @@ function PinnedProjectFlyoutContent({
   hasError: boolean;
 }) {
   return (
-    <HoverCardContent
-      side="right"
-      align="start"
-      sideOffset={8}
-      className="w-64"
-      data-testid="pinned-project-flyout"
-    >
+    <TooltipContent className="w-64 flex-col items-start" data-testid="pinned-project-flyout">
       {/* Titles have no length cap (server + rename input are unbounded), so
           clamp to 3 wrapped lines to keep the card tidy — full text stays in
           the DOM. */}
@@ -5859,7 +5852,7 @@ function PinnedProjectFlyoutContent({
         </p>
       )}
       {hasError && <SessionErrorHint />}
-    </HoverCardContent>
+    </TooltipContent>
   );
 }
 
@@ -6184,7 +6177,7 @@ function useProjectFolderMenu(
             <div className="flex items-stretch overflow-hidden rounded-lg border border-input">
               <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
                 <PopoverTrigger asChild>
-                  <button
+                  <TooltipButton
                     type="button"
                     aria-label="Change project icon"
                     data-testid="rename-project-icon"
@@ -6199,7 +6192,7 @@ function useProjectFolderMenu(
                     ) : (
                       <SmilePlusIcon className="size-4 text-brand-accent" />
                     )}
-                  </button>
+                  </TooltipButton>
                 </PopoverTrigger>
                 <PopoverContent
                   align="start"

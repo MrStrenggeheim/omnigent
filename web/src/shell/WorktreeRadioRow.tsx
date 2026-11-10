@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MenuItem } from "@/components/ui/menu-item";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   CircleCheckIcon,
   CircleDashedIcon,
@@ -154,14 +154,14 @@ export function WorktreeRadioRow({
       {spacious && onOpen && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
+            <TooltipButton
               type="button"
               className="ml-1 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={`Worktree actions for ${displayName}`}
               data-testid={`${testId}-actions`}
             >
               <EllipsisIcon className="size-4" />
-            </button>
+            </TooltipButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-40">
             <DropdownMenuItem onSelect={onOpen} disabled={!onOpen}>

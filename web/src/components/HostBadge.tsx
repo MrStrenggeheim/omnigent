@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useRef, useState } from "react";
 
 import { useHosts } from "@/hooks/useHosts";
@@ -281,7 +282,7 @@ export function HostBadge({
 
   if (reconnectable) {
     return (
-      <button
+      <TooltipButton
         type="button"
         data-testid="host-badge"
         onClick={onReconnect}
@@ -289,7 +290,7 @@ export function HostBadge({
         title={title}
       >
         {content}
-      </button>
+      </TooltipButton>
     );
   }
 
@@ -301,7 +302,7 @@ export function HostBadge({
         className="min-w-0"
       >
         {canSwitch ? (
-          <button
+          <TooltipButton
             type="button"
             data-testid="host-badge"
             onClick={() => setSwitchOpen(true)}
@@ -309,7 +310,7 @@ export function HostBadge({
             title={`${title} — click to switch`}
           >
             {content}
-          </button>
+          </TooltipButton>
         ) : (
           // Avoid a native title competing with the disabled-action tooltip.
           <div
@@ -319,9 +320,9 @@ export function HostBadge({
           >
             {content}
             {switchHostDisabledReason && (
-              <button type="button" disabled className="pointer-events-none opacity-50">
+              <TooltipButton type="button" disabled className="pointer-events-none opacity-50">
                 Switch host…
-              </button>
+              </TooltipButton>
             )}
           </div>
         )}

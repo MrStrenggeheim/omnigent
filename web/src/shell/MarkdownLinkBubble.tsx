@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Alt-click or keyboard navigation places the caret in a Markdown link.
 // Keep the Open action available while editing it; plain clicks follow directly.
 
@@ -227,7 +228,7 @@ export function MarkdownLinkBubble({
           Open
         </ExternalPreviewLink>
       ) : (
-        <button
+        <TooltipButton
           type="button"
           data-link-bubble-open
           title={OPEN_ACTION_TITLE}
@@ -237,7 +238,7 @@ export function MarkdownLinkBubble({
         >
           <ExternalLinkIcon className="size-3.5" />
           Open
-        </button>
+        </TooltipButton>
       )}
     </div>,
     getEmbedRoot() ?? document.body,

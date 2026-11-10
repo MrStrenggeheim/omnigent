@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useRef } from "react";
 import { FileTextIcon, FolderIcon, PlusIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -72,7 +73,7 @@ export function FileMentionMenu({
                     i === activeIndex && "bg-muted dark:bg-muted/50",
                   )}
                 >
-                  <button
+                  <TooltipButton
                     type="button"
                     // preventDefault keeps the textarea focused while clicking.
                     onMouseDown={(e) => e.preventDefault()}
@@ -89,9 +90,9 @@ export function FileMentionMenu({
                       {entry.name}
                       {isDir ? "/" : ""}
                     </span>
-                  </button>
+                  </TooltipButton>
                   {isDir && (
-                    <button
+                    <TooltipButton
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onAttach(entry.path, true)}
@@ -101,7 +102,7 @@ export function FileMentionMenu({
                     >
                       <PlusIcon className="size-3" />
                       folder
-                    </button>
+                    </TooltipButton>
                   )}
                 </div>
               );

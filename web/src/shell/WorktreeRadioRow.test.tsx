@@ -186,14 +186,6 @@ describe("WorktreeRadioRow", () => {
       "feature/auth-refresh",
     );
     expect(screen.getByTestId("worktree-row-tooltip-status")).toHaveTextContent("Checked out");
-    expect(tooltip).toHaveClass(
-      "w-64",
-      "rounded-lg",
-      "bg-popover",
-      "p-2.5",
-      "text-popover-foreground",
-      "shadow-menu",
-      "ring-1",
-    );
+    expect(tooltip).toHaveStyle({ backgroundColor: "#fff", color: "#30303a", borderRadius: 7 });
   });
 });

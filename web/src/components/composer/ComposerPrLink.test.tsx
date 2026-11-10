@@ -27,10 +27,10 @@ describe("ComposerPrLink", () => {
     },
   );
 
-  it("shows a single PR number and opens the tab on click", () => {
+  it("shows a single PR number and opens the tab on click", async () => {
     const onOpen = vi.fn();
     render(<ComposerPrLink state="ready" prCount={1} prNumber={42} onOpen={onOpen} />);
-    const link = screen.getByTestId("composer-pr-link");
+    const link = screen.getByRole("button", { name: "#42" });
     expect(link).toHaveTextContent("#42");
     expect(link).toHaveClass("text-sm", "gap-1", "min-w-0");
     expect(link).not.toHaveClass("shrink-0");
@@ -38,8 +38,12 @@ describe("ComposerPrLink", () => {
     expect(screen.getByText("#42")).toHaveClass("truncate");
     expect(screen.getByText("#42")).not.toHaveClass("underline");
     expect(screen.getByText("#42")).toHaveClass("group-hover:underline");
-    expect(screen.getByText("#42")).toHaveAttribute("title", "#42");
-    expect(link).toHaveAttribute("title", "View this PR in the Pull Requests tab");
+    expect(screen.getByText("#42")).not.toHaveAttribute("title");
+    fireEvent.focus(link);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "View this PR in the Pull Requests tab",
+    );
+    fireEvent.blur(link);
     expect(link).toHaveAccessibleName("#42");
     // A trigger for the bar's collapse, but never hidden by it.
     expect(screen.getByText("#42")).toHaveAttribute("data-workspace-collapse-label");
@@ -61,7 +65,7 @@ describe("ComposerPrLink", () => {
     const link = screen.getByTestId("composer-pr-link");
     expect(link).toHaveTextContent("!7");
     expect(link).toHaveAccessibleName("!7");
-    expect(screen.getByText("!7")).toHaveAttribute("title", "!7");
+    expect(screen.getByText("!7")).not.toHaveAttribute("title");
     expect(screen.queryByText("#7")).toBeNull();
   });
 
@@ -88,13 +92,17 @@ describe("ComposerPrLink", () => {
     expect(screen.getByTestId("composer-pr-link")).toHaveTextContent(/^1 PR$/);
   });
 
-  it("summarizes multiple PRs as a count", () => {
+  it("summarizes multiple PRs as a count", async () => {
     render(<ComposerPrLink state="ready" prCount={3} prNumber={42} onOpen={() => {}} />);
     const link = screen.getByTestId("composer-pr-link");
     expect(link).toHaveTextContent("3 PRs");
     expect(link).toHaveClass("text-sm", "gap-1");
-    expect(link).toHaveAttribute("title", "View these PRs in the Pull Requests tab");
-    expect(screen.getByText("3 PRs")).toHaveAttribute("title", "3 PRs");
+    fireEvent.focus(link);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "View these PRs in the Pull Requests tab",
+    );
+    expect(link).toHaveAccessibleName("3 PRs");
+    expect(link.querySelector("[title]")).toBeNull();
   });
 
   it("keeps loading and unavailable status for a known PR", () => {

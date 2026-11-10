@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useCallback, useState } from "react";
 import type { useMcpRegistryCatalog } from "@/hooks/useMcpRegistry";
 import { ChevronDownIcon, PlugIcon } from "lucide-react";
@@ -36,7 +37,7 @@ export function McpRegistryLaunchPicker({
   return (
     <Popover open={open} onOpenChange={(next) => !authorizing && setOpen(next)}>
       <PopoverTrigger asChild>
-        <button
+        <TooltipButton
           type="button"
           disabled={disabled}
           title={
@@ -64,7 +65,7 @@ export function McpRegistryLaunchPicker({
             </span>
           )}
           <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
-        </button>
+        </TooltipButton>
       </PopoverTrigger>
       <PopoverContent
         align="start"

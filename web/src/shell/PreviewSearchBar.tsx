@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Find-in-file bar for the rendered markdown / notebook preview.
 //
 // The preview is React-owned DOM, so matches are painted with the CSS Custom
@@ -133,7 +134,7 @@ export function PreviewSearchBar({
       <span className="shrink-0 text-sm text-muted-foreground">
         {query.trim() ? (matchCount > 0 ? `${safeIndex + 1} / ${matchCount}` : "No results") : ""}
       </span>
-      <button
+      <TooltipButton
         type="button"
         aria-label="Previous match"
         className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-40"
@@ -141,8 +142,8 @@ export function PreviewSearchBar({
         onClick={goPrev}
       >
         <ChevronUpIcon className="size-3.5" />
-      </button>
-      <button
+      </TooltipButton>
+      <TooltipButton
         type="button"
         aria-label="Next match"
         className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-40"
@@ -150,15 +151,15 @@ export function PreviewSearchBar({
         onClick={goNext}
       >
         <ChevronDownIcon className="size-3.5" />
-      </button>
-      <button
+      </TooltipButton>
+      <TooltipButton
         type="button"
         aria-label="Close search"
         className="rounded p-0.5 text-muted-foreground hover:bg-muted"
         onClick={close}
       >
         <XIcon className="size-3.5" />
-      </button>
+      </TooltipButton>
     </div>
   );
 }

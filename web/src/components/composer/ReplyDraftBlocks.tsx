@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useRef, type ComponentProps } from "react";
 import { XIcon } from "lucide-react";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
@@ -60,7 +61,7 @@ export function ReplyDraftBlocks({
                 {quote.text.length > 120 ? `${quote.text.slice(0, 120)}…` : quote.text}
               </span>
             </blockquote>
-            <button
+            <TooltipButton
               type="button"
               onClick={() => onRemove(quote.id)}
               disabled={disabled}
@@ -68,7 +69,7 @@ export function ReplyDraftBlocks({
               aria-label="Remove quote"
             >
               <XIcon className="size-3.5" />
-            </button>
+            </TooltipButton>
           </div>
         </div>
       ))}

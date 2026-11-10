@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useRef, type ReactNode } from "react";
 import { CheckIcon } from "lucide-react";
 import { useOmnigentAnalytics } from "@/lib/analytics";
@@ -41,7 +42,7 @@ export function CardRadioGroup<T extends string>({
       {items.map((item, index) => {
         const selected = item.value === value;
         return (
-          <button
+          <TooltipButton
             key={item.value}
             ref={(element) => {
               refs.current.set(item.value, element);
@@ -67,7 +68,7 @@ export function CardRadioGroup<T extends string>({
           >
             {selected && <SelectedBadge />}
             {item.body}
-          </button>
+          </TooltipButton>
         );
       })}
     </div>

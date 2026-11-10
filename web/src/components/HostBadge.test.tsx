@@ -230,7 +230,12 @@ describe("HostBadge", () => {
     useHostsMock.mockReturnValue({ data: [host()], isLoading: false });
     rerender(<HostBadge sessionId="conv_1" />);
     expect(screen.getByRole("button", { name: "mac-laptop, online" })).toHaveFocus();
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip")).toHaveTextContent(
+        "Host mac-laptop, online — click to switch",
+      ),
+    );
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent(SESSION_ACTIONS_LOADING);
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("switch-host-dialog")).toBeInTheDocument();
   });
@@ -298,14 +303,18 @@ describe("HostBadge", () => {
     expect(item).toHaveAccessibleDescription(SESSION_ACTIONS_UNAVAILABLE);
   });
 
-  it("renders the host name with an online status when reachable", () => {
+  it("renders the host name with an online status when reachable", async () => {
     render(<HostBadge sessionId="conv_1" />);
     const badge = screen.getByTestId("host-badge");
     // Status is conveyed by the visible name + an sr-only status word
-    // (read together as "mac-laptop, online"), with `title` for hover.
+    // (read together as "mac-laptop, online").
     expect(badge.textContent).toBe("mac-laptop, online");
     // Hover copy also advertises the switch affordance the badge now carries.
-    expect(badge.getAttribute("title")).toBe("Host mac-laptop, online — click to switch");
+    expect(badge).not.toHaveAttribute("title");
+    fireEvent.focus(badge);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Host mac-laptop, online — click to switch",
+    );
   });
 
   it("labels local hosts as My machines in the composer menu", () => {
@@ -503,7 +512,7 @@ describe("HostBadge", () => {
     expect(screen.getByTestId("host-badge").textContent).toBe("mac-laptop, status unknown");
   });
 
-  it("keeps the host name while making an offline host clickable to reconnect", () => {
+  it("keeps the host name while making an offline host clickable to reconnect", async () => {
     // The one disconnect shape: name + red dot, never swapped for generic
     // "Host is offline" copy — the user must still read WHICH host dropped —
     // and clicking it opens the reconnect help.
@@ -513,7 +522,11 @@ describe("HostBadge", () => {
     const badge = screen.getByTestId("host-badge");
     expect(badge.tagName).toBe("BUTTON");
     expect(badge.textContent).toBe("mac-laptop, offline — click to reconnect");
-    expect(badge.getAttribute("title")).toBe("Host mac-laptop, offline — click to reconnect");
+    expect(badge).not.toHaveAttribute("title");
+    fireEvent.focus(badge);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Host mac-laptop, offline — click to reconnect",
+    );
     fireEvent.click(badge);
     expect(onReconnect).toHaveBeenCalledTimes(1);
   });

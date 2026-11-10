@@ -85,7 +85,13 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { downloadWorkspaceFile, useFileContent } from "@/hooks/useFileContent";
 import { isVideoFile } from "@/lib/video";
 import { useAgentFileDiff, useGitFileDiff } from "@/hooks/useFileDiff";
@@ -1722,7 +1728,7 @@ function FileViewerBody({
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
+                <TooltipButton
                   type="button"
                   aria-label={`Copy file path: ${path}`}
                   className="min-w-0 cursor-pointer truncate rounded text-left font-mono text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1739,7 +1745,7 @@ function FileViewerBody({
                   }}
                 >
                   {path}
-                </button>
+                </TooltipButton>
               </TooltipTrigger>
               <TooltipContent>Copy file path</TooltipContent>
             </Tooltip>

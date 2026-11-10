@@ -31,7 +31,7 @@ import { Button } from "@/components/ui/button";
 import { DisabledActionTooltip } from "@/components/DisabledActionTooltip";
 import { useSessionActionRestrictions } from "@/hooks/useSessionActionRestrictions";
 import { SESSION_ACTIONS_LOADING } from "@/lib/sessionCapabilities";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { forkSession, launchRunner } from "@/lib/sessionsApi";
 import { useAvailableAgents, prefetchAvailableAgentDetails } from "@/hooks/useAvailableAgents";
 import type { AvailableAgent } from "@/hooks/useAvailableAgents";
@@ -1583,7 +1583,7 @@ function SupportedForkSessionForm({
                     host online: offer connecting one as a collapsed, optional
                     step rather than an alarming "no hosts connected" banner. */}
                 <>
-                  <button
+                  <TooltipButton
                     type="button"
                     onClick={() => setShowConnect((v) => !v)}
                     className="flex cursor-pointer items-center gap-1 self-start text-sm text-muted-foreground transition hover:text-foreground"
@@ -1597,7 +1597,7 @@ function SupportedForkSessionForm({
                     {onlineHosts.length === 0
                       ? "Connect a host from your terminal"
                       : "Connect another host from your terminal"}
-                  </button>
+                  </TooltipButton>
                   {showConnect && <ConnectHostInstructions serverUrl={serverUrl} />}
                 </>
               </>
@@ -1715,13 +1715,13 @@ function SupportedForkSessionForm({
             By default the clone reuses the original session's{" "}
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
+                <TooltipButton
                   type="button"
                   className="cursor-pointer underline decoration-dotted underline-offset-2"
                   data-testid="fork-session-reuse-dir-path"
                 >
                   working directory
-                </button>
+                </TooltipButton>
               </TooltipTrigger>
               <TooltipContent className="font-mono break-all">{effectiveWorkspace}</TooltipContent>
             </Tooltip>
@@ -1760,7 +1760,7 @@ function SupportedForkSessionForm({
               prefills sensibly, so the common path needs no input. Mirrors
               NewChatDialog's advanced toggle. */}
         <div className="flex flex-col gap-4">
-          <button
+          <TooltipButton
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
             className="flex cursor-pointer select-text items-center gap-1 self-start text-sm font-medium text-foreground transition hover:text-foreground"
@@ -1774,7 +1774,7 @@ function SupportedForkSessionForm({
               <ChevronDownIcon className="size-3.5" />
             )}
             Advanced settings
-          </button>
+          </TooltipButton>
 
           {showAdvanced && (
             <div
@@ -1994,7 +1994,7 @@ export function ForkSessionDialog({
                 : "Clone session"}
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
+                <TooltipButton
                   type="button"
                   aria-label="What does cloning do?"
                   data-testid="fork-session-info"
@@ -2006,7 +2006,7 @@ export function ForkSessionDialog({
                   className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
                 >
                   <InfoIcon className="size-4" />
-                </button>
+                </TooltipButton>
               </TooltipTrigger>
               <TooltipContent>{cloneDescription}</TooltipContent>
             </Tooltip>

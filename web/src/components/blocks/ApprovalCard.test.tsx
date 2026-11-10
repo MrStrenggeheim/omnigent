@@ -10,6 +10,12 @@ import { parseEventLines } from "@/lib/sse";
 import { useChatStore } from "@/store/chatStore";
 import { ApprovalCard, ElicitationCard } from "./ApprovalCard";
 
+async function expectTooltip(trigger: HTMLElement, text: string) {
+  fireEvent.focus(trigger);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(text);
+  fireEvent.blur(trigger);
+}
+
 afterEach(() => {
   cleanup();
 });
@@ -494,7 +500,7 @@ describe("ApprovalCard — approve & don't ask again (persistent allow rule)", (
     useChatStore.setState({ conversationId: "conv_abc", blocks: [] });
   });
 
-  it("labels the remember button by the WebFetch host and hides it without the hint", () => {
+  it("labels the remember button by the WebFetch host and hides it without the hint", async () => {
     // The server stamps ``remember_scope`` only for non-edit tools.
     // For WebFetch the button names the domain so the user knows the
     // rule is domain-scoped, not tool-wide.
@@ -516,7 +522,8 @@ describe("ApprovalCard — approve & don't ask again (persistent allow rule)", (
     });
     expect(rememberButton).toBeDefined();
     // The tooltip spells out the (session-scoped) domain grant.
-    expect(rememberButton.getAttribute("title")).toBe(
+    await expectTooltip(
+      rememberButton,
       "Won't ask again for github.com for the rest of this session",
     );
     expect(screen.getByRole("button", { name: /^approve$/i })).toBeDefined();
@@ -538,7 +545,7 @@ describe("ApprovalCard — approve & don't ask again (persistent allow rule)", (
     expect(screen.queryByTestId("approval-card-remember")).toBeNull();
   });
 
-  it("labels the remember button by the tool name for a tool-wide scope", () => {
+  it("labels the remember button by the tool name for a tool-wide scope", async () => {
     // Non-WebFetch tools get a tool-wide scope (no host), so the
     // button names the tool instead of a domain.
     render(
@@ -557,7 +564,8 @@ describe("ApprovalCard — approve & don't ask again (persistent allow rule)", (
     const rememberButton = screen.getByRole("button", { name: /don't ask again for Bash/i });
     expect(rememberButton).toBeDefined();
     // Tool-wide grant is broader than a domain — the tooltip says "any".
-    expect(rememberButton.getAttribute("title")).toBe(
+    await expectTooltip(
+      rememberButton,
       "Won't ask again for any Bash call for the rest of this session",
     );
   });
@@ -656,7 +664,7 @@ describe("ApprovalCard — Antigravity permission prompt details", () => {
     requestedSchema: {},
   } as const;
 
-  it("shows the action description and both persist choices when advertised", () => {
+  it("shows the action description and both persist choices when advertised", async () => {
     const submitSpy = vi.fn();
     render(
       <ApprovalCard
@@ -672,7 +680,8 @@ describe("ApprovalCard — Antigravity permission prompt details", () => {
     const sessionAllow = screen.getByRole("button", {
       name: "Allow commands starting with pwd for this session",
     });
-    expect(sessionAllow.getAttribute("title")).toBe(
+    await expectTooltip(
+      sessionAllow,
       "Ask Antigravity to allow commands starting with “pwd” for this conversation",
     );
     fireEvent.click(sessionAllow);
@@ -682,7 +691,8 @@ describe("ApprovalCard — Antigravity permission prompt details", () => {
     const alwaysAllow = screen.getByRole("button", {
       name: "Always allow commands starting with pwd",
     });
-    expect(alwaysAllow.getAttribute("title")).toBe(
+    await expectTooltip(
+      alwaysAllow,
       "Ask Antigravity to save a rule allowing commands starting with “pwd” for this Omnigent session",
     );
     fireEvent.click(alwaysAllow);

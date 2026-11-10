@@ -17,7 +17,7 @@ import {
 import { useCanvasWorkspace } from "@/canvas/CanvasWorkspace";
 import { ALT_KEY, ARIA_MOD_KEY, MOD_KEY } from "@/components/KeyboardShortcut";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -321,7 +321,7 @@ export function ChatHeader({
   const projectTag =
     pending && !isMobile && !projectName ? (
       <div className="hidden min-w-0 shrink-0 items-center gap-1.5 text-ui md:flex">
-        <button
+        <TooltipButton
           type="button"
           aria-label="Add to project"
           title={PENDING_ACTION_TITLE}
@@ -329,7 +329,7 @@ export function ChatHeader({
           className="breadcrumb-folder flex shrink-0 items-center text-muted-foreground opacity-30"
         >
           <FolderPlusIcon className="size-4" />
-        </button>
+        </TooltipButton>
         <span aria-hidden className="shrink-0 text-muted-foreground opacity-40">
           /
         </span>

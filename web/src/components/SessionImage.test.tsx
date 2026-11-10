@@ -11,11 +11,13 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as HostModule from "@/lib/host";
 
 const getOmnigentHostConfig = vi.fn();
 const authenticatedFetch = vi.fn();
 
-vi.mock("@/lib/host", () => ({
+vi.mock("@/lib/host", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostModule>()),
   getOmnigentHostConfig: () => getOmnigentHostConfig(),
 }));
 

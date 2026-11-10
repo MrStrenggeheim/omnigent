@@ -3,7 +3,13 @@ import { useWrapPreference } from "@/hooks/useWrapPreference";
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
 import { getEmbedRoot } from "@/lib/host";
 import { useResolvedThemeMode } from "@/components/theme/useResolvedThemeMode";
@@ -445,14 +451,14 @@ function ChatTable({ children, className, node: _node, ...props }: ChatTableProp
             <div className="flex items-center justify-end gap-1 p-4">
               {showCopy && <TableCopyDropdown />}
               {showDownload && <TableDownloadDropdown />}
-              <button
+              <TooltipButton
                 className="cursor-pointer rounded-md p-1 text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
                 onClick={closeFullscreen}
                 title="Exit fullscreen"
                 type="button"
               >
                 <XIcon size={20} />
-              </button>
+              </TooltipButton>
             </div>
             <div className="flex-1 overflow-auto p-4 pt-0 [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10">
               <table
@@ -475,7 +481,7 @@ function ChatTable({ children, className, node: _node, ...props }: ChatTableProp
           {showCopy && <TableCopyDropdown />}
           {showDownload && <TableDownloadDropdown />}
           {showFullscreen && (
-            <button
+            <TooltipButton
               className="cursor-pointer p-1 text-muted-foreground transition-all hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isAnimating}
               onClick={() => setFullscreen(true)}
@@ -483,7 +489,7 @@ function ChatTable({ children, className, node: _node, ...props }: ChatTableProp
               type="button"
             >
               <FullscreenIcon />
-            </button>
+            </TooltipButton>
           )}
         </div>
       )}

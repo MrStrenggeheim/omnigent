@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useMarkArcaBannerWhenVisible } from "@/hooks/useArcaShutdownBanner";
@@ -34,7 +35,7 @@ function CommandCopyButton({ command }: { command: string }) {
   return (
     <div className="flex max-w-full items-center gap-1 rounded border border-border bg-background/70 px-2 py-0.5">
       <code className="min-w-0 break-all">{command}</code>
-      <button
+      <TooltipButton
         type="button"
         aria-label={copied ? `Copied ${command}` : `Copy ${command}`}
         title={copied ? "Copied" : `Copy ${command}`}
@@ -46,7 +47,7 @@ function CommandCopyButton({ command }: { command: string }) {
         ) : (
           <CopyIcon className="size-3.5" aria-hidden="true" />
         )}
-      </button>
+      </TooltipButton>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * Single-input multi-select combobox for policy array params (e.g.
  * ``expensive_models``).
@@ -84,7 +85,7 @@ export function ModelValueCombobox({
           {filtered.map((v) => {
             const isSelected = selectedSet.has(v);
             return (
-              <button
+              <TooltipButton
                 key={v}
                 type="button"
                 className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-ui hover:bg-muted hover:text-foreground dark:hover:bg-muted/50"
@@ -97,7 +98,7 @@ export function ModelValueCombobox({
               >
                 <CheckIcon className={cn("size-3.5 shrink-0", !isSelected && "opacity-0")} />
                 <span className="flex-1 truncate">{v}</span>
-              </button>
+              </TooltipButton>
             );
           })}
         </div>

@@ -1400,9 +1400,7 @@ describe("Sidebar session list", () => {
     await waitFor(() => {
       const tooltip = screen.getByTestId("session-tooltip-content");
       expect(tooltip).toHaveTextContent(title);
-      // The tooltip mirrors the pinned-project flyout's compact HoverCard look
-      // (bg-popover surface), not the old wide card.
-      expect(tooltip.className).toContain("bg-popover");
+      expect(tooltip).toHaveStyle({ backgroundColor: "#fff", color: "#30303a" });
       expect(tooltip.className).not.toContain("bg-card-solid");
       // The title matches sidebar row names through the shared compact class,
       // which resolves to the same text-ui step as Appearance content.

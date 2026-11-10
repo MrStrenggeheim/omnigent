@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Inline terminal renderer for terminal-first sessions. Replaces the
 // chat conversation + composer when the user picks "Terminal" in the
 // connection pill, or opens a shell as a rail soft tab. Shares
@@ -368,14 +369,14 @@ export function MainTerminalView({
                   <TerminalStatusBadge status={getStatus(activeTerminal)} />
                 </span>
                 <span className="flex-1" />
-                <button
+                <TooltipButton
                   type="button"
                   aria-label="Close shell"
                   onClick={() => terminalFirstCtx?.setView("chat")}
                   className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <XIcon className="size-3.5" />
-                </button>
+                </TooltipButton>
               </div>
             )}
             <div ref={panesRef} className="relative min-h-0 flex-1">

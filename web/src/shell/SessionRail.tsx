@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Debug-mode execution-logs rail shown while viewing a conversation
 // (`/c/:id`) when ``?debug=1`` is in the URL.
 //
@@ -54,7 +55,7 @@ function ExecutionLogsCard({ childSessions, onExpand }: ExecutionLogsCardProps) 
       <CardHeader>
         <CardTitle className="text-ui truncate min-w-0">Execution logs</CardTitle>
         <CardAction>
-          <button
+          <TooltipButton
             type="button"
             aria-label={collapsed ? "Expand execution logs" : "Collapse execution logs"}
             aria-expanded={!collapsed}
@@ -67,7 +68,7 @@ function ExecutionLogsCard({ childSessions, onExpand }: ExecutionLogsCardProps) 
                 collapsed && "-rotate-90",
               )}
             />
-          </button>
+          </TooltipButton>
         </CardAction>
       </CardHeader>
       {!collapsed && (
@@ -119,7 +120,7 @@ function ExecutionLogRow({
 }) {
   return (
     <li>
-      <button
+      <TooltipButton
         type="button"
         data-testid={testId}
         className="flex w-full cursor-pointer items-center gap-2 truncate rounded-md px-2 py-1 text-left text-sm hover:bg-muted"
@@ -128,7 +129,7 @@ function ExecutionLogRow({
         <Icon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate">{label}</span>
         {sublabel && <span className="shrink-0 truncate text-muted-foreground">· {sublabel}</span>}
-      </button>
+      </TooltipButton>
     </li>
   );
 }

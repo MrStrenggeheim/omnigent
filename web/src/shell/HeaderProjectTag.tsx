@@ -5,7 +5,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMoveToProject } from "@/hooks/useConversations";
 import { ProjectPicker, ProjectRowIcon } from "./ProjectPicker";
 
@@ -48,7 +48,7 @@ export function HeaderProjectTag({
           <TooltipTrigger asChild>
             <span className="inline-flex">
               <DropdownMenuTrigger asChild>
-                <button
+                <TooltipButton
                   type="button"
                   data-testid="header-project-tag"
                   aria-label={projectName ? `Project: ${projectName}` : "Add to project"}
@@ -59,7 +59,7 @@ export function HeaderProjectTag({
                   ) : (
                     <FolderPlusIcon className="size-4" />
                   )}
-                </button>
+                </TooltipButton>
               </DropdownMenuTrigger>
             </span>
           </TooltipTrigger>

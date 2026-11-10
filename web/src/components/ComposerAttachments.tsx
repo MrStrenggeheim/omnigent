@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useState } from "react";
 import {
   Database,
@@ -177,13 +178,13 @@ function AttachmentTile({ file, onRemove }: { file: File; onRemove: () => void }
 /** The 24px circular remove control, overlapping the tile's top-right corner. */
 function RemoveButton({ name, onRemove }: { name: string; onRemove: () => void }) {
   return (
-    <button
+    <TooltipButton
       type="button"
       onClick={onRemove}
       aria-label={`Remove ${name}`}
       className="absolute -top-1 -right-1 grid size-6 cursor-pointer place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground"
     >
       <XIcon className="size-3.5" />
-    </button>
+    </TooltipButton>
   );
 }

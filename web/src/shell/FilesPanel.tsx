@@ -37,7 +37,7 @@ import {
   type WorkspaceComparisonView,
 } from "@/lib/workspaceComparison";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWorkbenchWorkspace, queryIdentity } from "@/lib/workbenchWorkspace";
 import { cn } from "@/lib/utils";
 import { BrowseLocationBar } from "./BrowseLocationBar";
@@ -639,14 +639,14 @@ export function FilesPanel({
               }
             />
             {onClose && (
-              <button
+              <TooltipButton
                 type="button"
                 aria-label="Close files"
                 className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={onClose}
               >
                 <XIcon className="size-4" />
-              </button>
+              </TooltipButton>
             )}
           </div>
         </div>

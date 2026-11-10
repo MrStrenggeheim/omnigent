@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ModelValueCombobox } from "@/components/ModelValueCombobox";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { capitalizeAgentName } from "@/lib/agentLabels";
 import { coercePolicyParams } from "@/lib/policyParams";
 import { CLAUDE_NATIVE_MODELS } from "@/lib/claudeNativeModels";
@@ -101,14 +101,14 @@ export function McpServerList({
         onDelete && (canDelete?.(srv) ?? true) ? (
           <Popover key={srv.name}>
             <PopoverTrigger asChild>
-              <button
+              <TooltipButton
                 type="button"
                 className="flex cursor-pointer items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground hover:bg-muted/80"
                 onClick={(e) => e.stopPropagation()}
               >
                 <ServerIcon className="size-2.5 shrink-0" />
                 {srv.name}
-              </button>
+              </TooltipButton>
             </PopoverTrigger>
             <PopoverContent
               side="top"
@@ -124,14 +124,14 @@ export function McpServerList({
                 {srv.description && (
                   <p className="text-sm text-muted-foreground">{srv.description}</p>
                 )}
-                <button
+                <TooltipButton
                   type="button"
                   onClick={() => onDelete(srv.name)}
                   className="flex items-center gap-1 self-end rounded px-2 py-1 text-sm text-destructive hover:bg-destructive/10"
                 >
                   <TrashIcon className="size-3" />
                   Remove
-                </button>
+                </TooltipButton>
               </div>
             </PopoverContent>
           </Popover>
@@ -394,7 +394,7 @@ function AddPolicyDialog({
                   />
                   <div className="flex max-h-52 flex-col divide-y divide-border overflow-y-auto rounded border border-border">
                     {filtered.map((r) => (
-                      <button
+                      <TooltipButton
                         key={r.handler}
                         type="button"
                         onClick={() => handleSelect(r.handler)}
@@ -406,7 +406,7 @@ function AddPolicyDialog({
                             {r.description}
                           </span>
                         )}
-                      </button>
+                      </TooltipButton>
                     ))}
                     {filtered.length === 0 && (
                       <p className="py-2 text-center text-sm text-muted-foreground">
@@ -421,7 +421,7 @@ function AddPolicyDialog({
             <div className="flex flex-col gap-1 rounded border border-border bg-muted/50 px-2.5 py-2">
               <div className="flex items-center justify-between">
                 <span className="text-ui font-medium">{entry.name}</span>
-                <button
+                <TooltipButton
                   type="button"
                   onClick={() => {
                     setSelected("");
@@ -432,7 +432,7 @@ function AddPolicyDialog({
                   className="text-sm text-muted-foreground hover:text-foreground"
                 >
                   Change
-                </button>
+                </TooltipButton>
               </div>
               {entry.description && (
                 <p className="text-sm text-muted-foreground">{entry.description}</p>
@@ -533,8 +533,9 @@ function AddPolicyDialog({
                                     className="inline-flex items-center gap-0.5 rounded-md bg-muted px-1.5 py-0.5 text-sm"
                                   >
                                     {v}
-                                    <button
+                                    <TooltipButton
                                       type="button"
+                                      aria-label={`Remove ${v}`}
                                       onClick={() => {
                                         const next = current.filter((x) => x !== v);
                                         setFactoryParams((prev) => ({
@@ -545,7 +546,7 @@ function AddPolicyDialog({
                                       className="ml-0.5 text-muted-foreground hover:text-foreground"
                                     >
                                       <XIcon className="size-3" />
-                                    </button>
+                                    </TooltipButton>
                                   </span>
                                 ))}
                               </div>
@@ -877,7 +878,7 @@ function McpServerManagerDialog({
                   {listedServers.map((server) => (
                     <div key={server.name} className="flex min-w-0 items-center gap-1.5 px-2 py-2">
                       <ServerIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <button
+                      <TooltipButton
                         type="button"
                         disabled={!customEditable || server.transport === "registry"}
                         onClick={() => {
@@ -892,7 +893,7 @@ function McpServerManagerDialog({
                             ? "No longer available"
                             : server.transport}
                         </span>
-                      </button>
+                      </TooltipButton>
                       <Button
                         type="button"
                         variant="ghost"
@@ -978,7 +979,7 @@ function McpServerManagerDialog({
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center justify-between text-sm text-muted-foreground">
                       <span>Headers</span>
-                      <button
+                      <TooltipButton
                         type="button"
                         onClick={() =>
                           setForm((prev) => ({
@@ -990,7 +991,7 @@ function McpServerManagerDialog({
                         aria-label="Add header"
                       >
                         <PlusIcon className="size-3" />
-                      </button>
+                      </TooltipButton>
                     </div>
                     {form.headers.map((header, i) => (
                       <div key={header.id} className="flex items-center gap-1">
@@ -1161,7 +1162,7 @@ function McpServersSection({
       <div className="flex items-center justify-between">
         <SectionLabel>Tools</SectionLabel>
         {canEdit && (
-          <button
+          <TooltipButton
             type="button"
             onClick={() => setManagerOpenWithCallback(true)}
             className="rounded p-0.5 hover:bg-muted"
@@ -1169,7 +1170,7 @@ function McpServersSection({
             aria-label="Manage MCP servers"
           >
             <PlusIcon className="size-3 text-muted-foreground" />
-          </button>
+          </TooltipButton>
         )}
       </div>
       {mcpDirty && (
@@ -1220,14 +1221,14 @@ function SessionPoliciesSection({ sessionId }: { sessionId: string }) {
     <div className="flex flex-col gap-1.5 py-3">
       <div className="flex items-center justify-between">
         <SectionLabel>Policies</SectionLabel>
-        <button
+        <TooltipButton
           type="button"
           onClick={() => setAddOpen(true)}
           className="rounded p-0.5 hover:bg-muted"
           title="Add policy"
         >
           <PlusIcon className="size-3 text-muted-foreground" />
-        </button>
+        </TooltipButton>
       </div>
       {userPolicies.length > 0 ? (
         <div className="flex flex-wrap gap-1">
@@ -1238,14 +1239,14 @@ function SessionPoliciesSection({ sessionId }: { sessionId: string }) {
             return (
               <Popover key={p.id ?? p.name}>
                 <PopoverTrigger asChild>
-                  <button
+                  <TooltipButton
                     type="button"
                     className="flex cursor-pointer items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground hover:bg-muted/80"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <ShieldCheckIcon className="size-2.5 shrink-0" />
                     {p.name}
-                  </button>
+                  </TooltipButton>
                 </PopoverTrigger>
                 <PopoverContent
                   side="top"
@@ -1261,14 +1262,14 @@ function SessionPoliciesSection({ sessionId }: { sessionId: string }) {
                     {description && (
                       <p className="break-words text-sm text-muted-foreground">{description}</p>
                     )}
-                    <button
+                    <TooltipButton
                       type="button"
                       onClick={() => p.id && deletePolicy.mutate(p.id)}
                       className="flex items-center gap-1 self-end rounded px-2 py-1 text-sm text-destructive hover:bg-destructive/10"
                     >
                       <TrashIcon className="size-3" />
                       Remove
-                    </button>
+                    </TooltipButton>
                   </div>
                 </PopoverContent>
               </Popover>

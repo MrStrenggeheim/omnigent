@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * Inline "Add a credential" form for the harness setup dialog (Claude/Codex/Pi).
  *
@@ -128,7 +129,7 @@ export function HarnessCredentialForm({
         <CredentialOption icon={<UserRound />} label="Sign in with your subscription">
           <p className="text-sm text-muted-foreground">
             Use your existing plan — run{" "}
-            <button
+            <TooltipButton
               type="button"
               className="rounded bg-muted px-1 py-0.5 font-mono hover:text-foreground"
               data-testid="harness-credential-login-copy"
@@ -141,7 +142,7 @@ export function HarnessCredentialForm({
               }}
             >
               {command}
-            </button>{" "}
+            </TooltipButton>{" "}
             on {host?.name}.
           </p>
         </CredentialOption>

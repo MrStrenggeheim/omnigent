@@ -2,7 +2,13 @@ import { CornerLeftUpIcon, FolderDotIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { WorkspaceReach } from "@/hooks/useWorkspaceChangedFiles";
 import { WorkspacePickerDialog } from "./WorkspacePickerDialog";
 
@@ -88,7 +94,7 @@ export function BrowseLocationBar({
       <span className="flex min-w-0 items-center gap-[2px]">
         <ParentFolderButton parent={navigableParent} onNavigate={onNavigate} />
         <WorkspaceRootButton current={current} workspace={workspace} onNavigate={onNavigate} />
-        <button
+        <TooltipButton
           type="button"
           title={open ? undefined : current}
           aria-label={`Working folder: ${current}. Click to browse.`}
@@ -98,7 +104,7 @@ export function BrowseLocationBar({
           data-testid="browse-location-path"
         >
           <PathText path={current} />
-        </button>
+        </TooltipButton>
       </span>
       <WorkspacePickerDialog
         open={open}

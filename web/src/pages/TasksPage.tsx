@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * Scheduled tasks page (`/tasks`) — the list of the user's recurring agent
  * tasks, a search + Active/Paused filter, a "New automation" manual-create action,
@@ -185,7 +186,7 @@ export function TasksPage() {
         {hasAnyTasks && (
           <div aria-label="Filter automations" className="flex items-center gap-1">
             {FILTER_TABS.map((tab) => (
-              <button
+              <TooltipButton
                 key={tab.value}
                 type="button"
                 aria-pressed={filter === tab.value}
@@ -202,7 +203,7 @@ export function TasksPage() {
                 )}
               >
                 {tab.label}
-              </button>
+              </TooltipButton>
             ))}
           </div>
         )}
@@ -332,7 +333,7 @@ function SuggestionsSection({
         {SCHEDULED_TASK_SUGGESTIONS.map((s) => {
           const Icon = s.icon;
           return (
-            <button
+            <TooltipButton
               key={s.id}
               type="button"
               onClick={() => onPick(s)}
@@ -341,7 +342,7 @@ function SuggestionsSection({
             >
               <Icon className={cn("size-4 shrink-0", s.iconClassName)} />
               <span className="truncate">{s.title}</span>
-            </button>
+            </TooltipButton>
           );
         })}
       </div>

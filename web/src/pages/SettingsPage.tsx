@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { toast } from "@/lib/notifications";
 import { DefaultModelSettings } from "./settings/DefaultModelSettings";
 /**
@@ -2355,7 +2356,7 @@ function StepperButton({
 }) {
   const { trackClick } = useOmnigentAnalytics();
   return (
-    <button
+    <TooltipButton
       type="button"
       aria-label={label}
       data-testid={testId}
@@ -2371,7 +2372,7 @@ function StepperButton({
       )}
     >
       {children}
-    </button>
+    </TooltipButton>
   );
 }
 

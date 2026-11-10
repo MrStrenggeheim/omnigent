@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "@/lib/notifications";
 import { useHosts } from "@/hooks/useHosts";
@@ -70,7 +71,7 @@ export function ArcaShutdownToast() {
           fallback={(mode) => {
             const command = `arca extend ${mode}`;
             return (
-              <button
+              <TooltipButton
                 type="button"
                 onClick={() =>
                   void copyText(command).then(
@@ -80,7 +81,7 @@ export function ArcaShutdownToast() {
                 }
               >
                 Copy {command}
-              </button>
+              </TooltipButton>
             );
           }}
         />

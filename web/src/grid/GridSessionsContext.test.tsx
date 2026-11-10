@@ -7,6 +7,7 @@ import { CapabilitiesProvider } from "@/lib/CapabilitiesContext";
 import { GridWorkspace } from "./GridWorkspace";
 import type { ReactNode } from "react";
 import type * as NativeBridge from "@/lib/nativeBridge";
+import type * as HostModule from "@/lib/host";
 import { gridSessionIds, splitGrid } from "./gridLayout";
 import { GridSessionsProvider, useGridSessions } from "./GridSessionsContext";
 
@@ -27,7 +28,10 @@ vi.mock("@/hooks/useViewerId", () => ({
   useViewerId: () => identity.viewer,
   useIdentityReady: () => identity.ready,
 }));
-vi.mock("@/lib/host", () => ({ getOmnigentServerIdentity: () => identity.server }));
+vi.mock("@/lib/host", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostModule>()),
+  getOmnigentServerIdentity: () => identity.server,
+}));
 
 function Probe() {
   const grids = useGridSessions();

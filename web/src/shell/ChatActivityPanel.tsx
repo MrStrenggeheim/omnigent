@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, TerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -275,13 +276,13 @@ function ShellRow({
     <li className="rounded-md px-2 py-2 hover:bg-muted">
       <div className="flex min-w-0 items-center gap-2">
         <TerminalIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-        <button
+        <TooltipButton
           type="button"
           className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline"
           onClick={openTerminal ?? onInspect}
         >
           {groupName(group)}
-        </button>
+        </TooltipButton>
         <Button
           variant="ghost"
           size="icon-xs"
@@ -317,13 +318,13 @@ function ShellRow({
             <ul className="space-y-1 border-l pl-3">
               {group.commands.map((command) => (
                 <li key={command.id}>
-                  <button
+                  <TooltipButton
                     type="button"
                     className="w-full truncate text-left font-mono text-xs hover:underline"
                     onClick={onInspect}
                   >
                     {command.name}
-                  </button>
+                  </TooltipButton>
                 </li>
               ))}
             </ul>

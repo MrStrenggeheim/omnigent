@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useCallback, useEffect, useState } from "react";
 import { CheckIcon, Loader2Icon, PauseCircleIcon, PlayCircleIcon, TargetIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -158,7 +159,7 @@ function GoalEditor({
           data-testid="goal-mode"
         >
           {showKeepCurrentMode && (
-            <button
+            <TooltipButton
               type="button"
               role="radio"
               aria-checked={modeDraft === "keep"}
@@ -169,9 +170,9 @@ function GoalEditor({
             >
               <CheckIcon className="size-3.5" />
               <span>Keep current</span>
-            </button>
+            </TooltipButton>
           )}
-          <button
+          <TooltipButton
             type="button"
             role="radio"
             aria-checked={modeDraft === "active"}
@@ -182,8 +183,8 @@ function GoalEditor({
           >
             <PlayCircleIcon className="size-3.5" />
             <span>Active</span>
-          </button>
-          <button
+          </TooltipButton>
+          <TooltipButton
             type="button"
             role="radio"
             aria-checked={modeDraft === "paused"}
@@ -194,7 +195,7 @@ function GoalEditor({
           >
             <PauseCircleIcon className="size-3.5" />
             <span>Paused</span>
-          </button>
+          </TooltipButton>
         </div>
       </div>
 

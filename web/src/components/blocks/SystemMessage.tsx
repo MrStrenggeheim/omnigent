@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import {
   AlertCircleIcon,
   BanIcon,
@@ -49,7 +50,7 @@ export function SystemMessageView({ message }: SystemMessageViewProps) {
       data-system-kind={message.kind}
     >
       {hasBody ? (
-        <button
+        <TooltipButton
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-1.5 rounded px-1.5 py-0.5 hover:text-foreground"
@@ -62,7 +63,7 @@ export function SystemMessageView({ message }: SystemMessageViewProps) {
           <ChevronRightIcon
             className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")}
           />
-        </button>
+        </TooltipButton>
       ) : (
         <div className="flex items-center gap-1.5 px-1.5 py-0.5">
           <Icon className="size-3.5 shrink-0" />

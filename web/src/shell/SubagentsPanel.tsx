@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Subagents tab content for the right-side rail. Renders the session
 // tree under the root conversation — a "main" link back to the root,
 // then its sub-agent sessions recursively (children, grandchildren,
@@ -147,7 +148,7 @@ export function SubagentsPanel({
   return (
     <div className={panelClass}>
       {header}
-      <button
+      <TooltipButton
         type="button"
         data-testid="add-agent-button"
         onClick={() => setAddOpen(true)}
@@ -155,7 +156,7 @@ export function SubagentsPanel({
       >
         <PlusIcon className="size-3.5 shrink-0" />
         Add agent
-      </button>
+      </TooltipButton>
       <ul
         className={cn(
           "relative flex min-h-0 flex-col gap-px px-2 pb-2 pt-2",
@@ -581,7 +582,7 @@ function SubagentRow({
           />
         ) : null}
         {hasGrandchildren && (
-          <button
+          <TooltipButton
             type="button"
             data-testid="subagent-collapse-toggle"
             aria-expanded={!collapsed}
@@ -594,7 +595,7 @@ function SubagentRow({
             }}
           >
             <ToggleIcon aria-hidden="true" className="size-3.5" />
-          </button>
+          </TooltipButton>
         )}
         <Link
           // See MainRow: drop session-scoped params on rail navigation

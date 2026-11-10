@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { GoalIcon, TargetIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Goal } from "@/lib/goalApi";
 import { cn } from "@/lib/utils";
 import { CommandGoalDialog } from "./CommandGoalDialog";
@@ -99,7 +99,7 @@ export function GoalStatusPill({ goal, onOpen }: { goal: Goal; onOpen?: () => vo
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <TooltipButton
           type="button"
           data-testid="composer-goal-mode"
           data-state={done ? "done" : "working"}
@@ -108,7 +108,7 @@ export function GoalStatusPill({ goal, onOpen }: { goal: Goal; onOpen?: () => vo
           className="flex shrink-0 items-center rounded-full bg-transparent px-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 md:px-2"
         >
           <Icon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       </TooltipTrigger>
       <TooltipContent side="top" align="end" className="flex-col items-start gap-0.5">
         <div className="font-medium">{label}</div>

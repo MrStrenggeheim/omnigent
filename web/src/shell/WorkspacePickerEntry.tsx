@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { ChevronRightIcon, FolderIcon } from "lucide-react";
 
 import type { HostFilesystemEntry } from "@/hooks/useHostFilesystem";
@@ -22,7 +23,7 @@ export function WorkspacePickerEntry({
 
   return (
     <MenuItem asChild density={compact ? "compact" : "none"} interactive={isDirectory}>
-      <button
+      <TooltipButton
         type="button"
         disabled={!isDirectory}
         onMouseDown={(event) => event.preventDefault()}
@@ -47,7 +48,7 @@ export function WorkspacePickerEntry({
         )}
         <span className="flex-1 truncate">{entry.name}</span>
         {isDirectory && <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />}
-      </button>
+      </TooltipButton>
     </MenuItem>
   );
 }

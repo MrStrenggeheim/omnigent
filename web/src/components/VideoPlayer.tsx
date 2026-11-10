@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -134,14 +134,14 @@ function VideoPlayerContent(props: VideoPlayerProps) {
         <span className="flex min-h-12 min-w-0 items-center gap-2 px-3 py-2">
           <VideoIcon className="size-4 shrink-0 text-muted-foreground" />
           {onOpenFile ? (
-            <button
+            <TooltipButton
               type="button"
               className="min-w-0 flex-1 truncate text-left underline decoration-dotted underline-offset-2 hover:text-primary"
               title={title}
               onClick={onOpenFile}
             >
               {title}
-            </button>
+            </TooltipButton>
           ) : (
             <span className="min-w-0 flex-1 truncate" title={title}>
               {title}
@@ -164,14 +164,14 @@ function VideoPlayerContent(props: VideoPlayerProps) {
           ) : chapters.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
+                <TooltipButton
                   type="button"
                   aria-label={`Download recording: ${title}`}
                   title="Download recording"
                   className="rounded p-1 hover:bg-accent"
                 >
                   <DownloadIcon className="size-4" />
-                </button>
+                </TooltipButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
@@ -199,7 +199,7 @@ function VideoPlayerContent(props: VideoPlayerProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <button
+            <TooltipButton
               type="button"
               aria-label={`Download video: ${title}`}
               className="rounded p-1 hover:bg-accent"
@@ -212,7 +212,7 @@ function VideoPlayerContent(props: VideoPlayerProps) {
               }}
             >
               <DownloadIcon className="size-4" />
-            </button>
+            </TooltipButton>
           )}
           {!compact && chapters.length > 0 && (
             <Tooltip>
@@ -297,7 +297,7 @@ function VideoPlayerContent(props: VideoPlayerProps) {
                       ? "Unable to play this video here. Try opening it in a new tab."
                       : "Unable to play this video. Download it to watch locally."}
                   </span>
-                  <button
+                  <TooltipButton
                     type="button"
                     className="rounded-md border px-3 py-1.5 hover:bg-accent"
                     onClick={() => {
@@ -310,14 +310,14 @@ function VideoPlayerContent(props: VideoPlayerProps) {
                     }}
                   >
                     Retry
-                  </button>
+                  </TooltipButton>
                 </>
               ) : loading ? (
                 <span role="status" className="flex items-center gap-2">
                   <Spinner aria-hidden="true" role="presentation" /> Loading video…
                 </span>
               ) : (
-                <button
+                <TooltipButton
                   type="button"
                   aria-label={`Play video: ${title}`}
                   className="flex flex-col items-center gap-3 rounded-lg p-4 hover:bg-accent hover:text-foreground"
@@ -325,7 +325,7 @@ function VideoPlayerContent(props: VideoPlayerProps) {
                 >
                   <PlayIcon className="size-10" />
                   <span>Play recording</span>
-                </button>
+                </TooltipButton>
               )}
             </span>
           )}
@@ -350,7 +350,7 @@ function VideoPlayerContent(props: VideoPlayerProps) {
                 )}
               >
                 {chapters.map((chapter, index) => (
-                  <button
+                  <TooltipButton
                     type="button"
                     key={`${chapter.time}:${chapter.end}:${chapter.title}`}
                     aria-current={index === activeChapter ? "step" : undefined}
@@ -369,7 +369,7 @@ function VideoPlayerContent(props: VideoPlayerProps) {
                     <span className="shrink-0 font-mono text-xs text-muted-foreground">
                       {formatVideoTime(chapter.time)}
                     </span>
-                  </button>
+                  </TooltipButton>
                 ))}
               </span>
               {chapterQuery.isFetching && (

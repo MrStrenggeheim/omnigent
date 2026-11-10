@@ -244,8 +244,8 @@ describe("Composer @-file-mention browser (native sessions)", () => {
   it("lists the root directory's folders and files when '@' is typed", () => {
     renderWithTooltips(<Composer {...composerProps()} />);
     type("@");
-    expect(screen.getByTitle("Open src")).toBeInTheDocument();
-    expect(screen.getByTitle("Attach readme.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "src/" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "readme.md" })).toBeInTheDocument();
   });
 
   it("gives Shift+Tab to the open menu before the permission-mode shortcut", async () => {
@@ -260,7 +260,7 @@ describe("Composer @-file-mention browser (native sessions)", () => {
       .mockResolvedValue(undefined);
     renderWithTooltips(<Composer {...composerProps({ showClaudePermissionMode: true })} />);
     type("@");
-    expect(screen.getByTitle("Attach readme.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "readme.md" })).toBeInTheDocument();
 
     fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
     expect(screen.getByText("@src/")).toBeInTheDocument();
@@ -277,11 +277,11 @@ describe("Composer @-file-mention browser (native sessions)", () => {
 
     type("@src");
     // Nested files are NOT visible until the folder is opened (drill-down).
-    expect(screen.queryByTitle("Attach server.ts")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("Open src"));
+    expect(screen.queryByRole("button", { name: "server.ts" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "src/" }));
 
     // Now inside src: nested files appear.
-    fireEvent.click(screen.getByTitle("Attach server.ts"));
+    fireEvent.click(screen.getByRole("button", { name: "server.ts" }));
     expect(screen.getByText("@src/server.ts")).toBeInTheDocument();
 
     type("explain this");
@@ -317,8 +317,8 @@ describe("Composer @-file-mention browser (native sessions)", () => {
     const onSend = vi.fn();
     renderWithTooltips(<Composer {...composerProps({ onSend })} />);
     type("@src");
-    fireEvent.click(screen.getByTitle("Open src"));
-    fireEvent.click(screen.getByTitle("Attach server.ts"));
+    fireEvent.click(screen.getByRole("button", { name: "src/" }));
+    fireEvent.click(screen.getByRole("button", { name: "server.ts" }));
     type("go");
     fireEvent.submit(textarea().closest("form")!);
     expect(onSend).toHaveBeenCalledWith(expected, undefined);
@@ -356,7 +356,7 @@ describe("Composer @-file-mention browser (native sessions)", () => {
     useChatStore.setState({ sessionHarness: "claude-sdk" });
     renderWithTooltips(<Composer {...composerProps()} />);
     type("@src");
-    expect(screen.queryByTitle("Open src")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "src/" })).not.toBeInTheDocument();
   });
 
   it("opens the menu on an aliased native harness (native-pi → pi-native)", () => {
@@ -367,7 +367,7 @@ describe("Composer @-file-mention browser (native sessions)", () => {
     useChatStore.setState({ sessionHarness: "native-pi" });
     renderWithTooltips(<Composer {...composerProps()} />);
     type("@");
-    expect(screen.getByTitle("Open src")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "src/" })).toBeInTheDocument();
   });
 
   // ── Keyboard navigation (H4) ────────────────────────────────────────────
@@ -401,7 +401,7 @@ describe("Composer @-file-mention browser (native sessions)", () => {
     // token becomes "@src/" in the textarea; a chip would instead surface a
     // "Remove src" button, which must be absent.)
     fireEvent.keyDown(textarea(), { key: "Enter" });
-    expect(screen.getByTitle("Attach server.ts")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "server.ts" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Remove src")).not.toBeInTheDocument();
   });
 
@@ -417,9 +417,9 @@ describe("Composer @-file-mention browser (native sessions)", () => {
   it("Escape closes the mention menu", () => {
     renderWithTooltips(<Composer {...composerProps()} />);
     type("@");
-    expect(screen.getByTitle("Open src")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "src/" })).toBeInTheDocument();
     fireEvent.keyDown(textarea(), { key: "Escape" });
-    expect(screen.queryByTitle("Open src")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "src/" })).not.toBeInTheDocument();
   });
 
   // ── Chip lifecycle + dedup (M8, M2) ──────────────────────────────────────
@@ -427,7 +427,7 @@ describe("Composer @-file-mention browser (native sessions)", () => {
   it("removes a tagged chip when its ✕ is clicked", () => {
     renderWithTooltips(<Composer {...composerProps()} />);
     type("@");
-    fireEvent.click(screen.getByTitle("Attach readme.md"));
+    fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
     expect(screen.getByText("@readme.md")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Remove readme.md"));
     expect(screen.queryByText("@readme.md")).not.toBeInTheDocument();
@@ -436,9 +436,9 @@ describe("Composer @-file-mention browser (native sessions)", () => {
   it("dedups re-attaching the same file via '@' to a single chip", () => {
     renderWithTooltips(<Composer {...composerProps()} />);
     type("@");
-    fireEvent.click(screen.getByTitle("Attach readme.md"));
+    fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
     type("@");
-    fireEvent.click(screen.getByTitle("Attach readme.md"));
+    fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
     // Same path + dir-ness + (no) range → same identity key → one chip.
     expect(screen.getAllByText("@readme.md")).toHaveLength(1);
   });
@@ -479,9 +479,9 @@ describe("Composer @-file-mention browser (native sessions)", () => {
     // a blur dismiss it lingers when the user clicks a chip ✕ or another field.
     renderWithTooltips(<Composer {...composerProps()} />);
     type("@");
-    expect(screen.getByTitle("Open src")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "src/" })).toBeInTheDocument();
     fireEvent.blur(textarea());
-    expect(screen.queryByTitle("Open src")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "src/" })).not.toBeInTheDocument();
   });
 
   it("shows a loading row and swallows Enter while the listing is still fetching", () => {

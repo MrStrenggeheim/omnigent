@@ -254,6 +254,35 @@ afterEach(() => {
 });
 
 describe("useWorkspaceChangedFiles gating", () => {
+  it.each([undefined, "directory"] as const)(
+    "preserves supplied directory evidence without inventing it for untyped records: %s",
+    async (type) => {
+      onlineMock.mockReturnValue(true);
+      fetchMock.mockResolvedValueOnce(environmentResponse()).mockResolvedValueOnce(
+        jsonResponse({
+          object: "list",
+          data: [
+            {
+              path: "src",
+              name: "src",
+              status: "created",
+              bytes: null,
+              modified_at: null,
+              ...(type ? { type } : {}),
+            },
+          ],
+        }),
+      );
+      const { result } = renderHook(() => useWorkspaceChangedFiles("directory-evidence"), {
+        wrapper: Wrap,
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      const entry = result.current.data?.data[0];
+      if (type) expect(entry?.type).toBe("directory");
+      else expect(entry).not.toHaveProperty("type");
+    },
+  );
+
   it.each([true, false])(
     "keeps agent records distinct from older Git-backed responses: %s",
     async (supported) => {

@@ -5011,7 +5011,15 @@ describe("AppShell share action", () => {
           "Share session disabled: Sharing is unavailable from a local server.",
         ),
       ).toBeInTheDocument();
-      expect(shareButton).toHaveAttribute("title", "Sharing is unavailable from a local server.");
+      expect(shareButton).not.toHaveAttribute("title");
+      fireEvent.focus(
+        screen.getByLabelText(
+          "Share session disabled: Sharing is unavailable from a local server.",
+        ),
+      );
+      expect(screen.getByRole("tooltip")).toHaveTextContent(
+        "Sharing is unavailable from a local server.",
+      );
     });
   });
 
@@ -5025,8 +5033,13 @@ describe("AppShell share action", () => {
 
       const shareButton = screen.getByRole("button", { name: /share session/i });
       expect(shareButton).toBeDisabled();
-      expect(shareButton).toHaveAttribute(
-        "title",
+      expect(shareButton).not.toHaveAttribute("title");
+      fireEvent.focus(
+        screen.getByLabelText(
+          "Share session disabled: Sharing has been disabled for this Omnigent server.",
+        ),
+      );
+      expect(screen.getByRole("tooltip")).toHaveTextContent(
         "Sharing has been disabled for this Omnigent server.",
       );
     });

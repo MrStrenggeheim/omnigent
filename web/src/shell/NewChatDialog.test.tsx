@@ -2836,7 +2836,7 @@ describe("NewChatLandingScreen cached picker preview", () => {
 
     const workspace = screen.getByTestId("new-chat-landing-workspace-chip");
     const permission = screen.getByTestId("new-chat-landing-permission-chip");
-    expect(workspace).toHaveAttribute("title", "/Users/corey/repo");
+    expect(workspace).toHaveAccessibleName("Working directory: /Users/corey/repo");
     expect(permission).toHaveTextContent("Plan");
     for (const control of [workspace, permission]) {
       expect(control).toHaveAttribute("aria-busy", "true");
@@ -2894,7 +2894,7 @@ describe("NewChatLandingScreen cached picker preview", () => {
     renderLanding({}, "/", () => {
       const directory = screen.queryByTestId("new-chat-landing-workspace-chip");
       const permission = screen.queryByTestId("new-chat-landing-permission-chip");
-      if (directory) directories.push(directory.getAttribute("title")!);
+      if (directory) directories.push(directory.getAttribute("aria-label")!);
       if (permission) permissions.push(permission.textContent!);
     });
     expect(screen.getByRole("status", { name: "Loading working directory" })).toBeVisible();
@@ -2911,13 +2911,14 @@ describe("NewChatLandingScreen cached picker preview", () => {
       data: { entries: [fsEntry("/home/tester/projects")], truncated: false },
     } as ReturnType<typeof useHostFilesystem>);
     fireEvent.change(input, { target: { value: "Home directory resolved" } });
-    expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAttribute(
-      "title",
-      "/home/tester",
+    expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAccessibleName(
+      "Working directory: /home/tester",
     );
     expect(screen.queryByRole("status", { name: "Loading working directory" })).toBeNull();
     expect(directories.length).toBeGreaterThan(0);
-    expect(directories.every((directory) => directory === "/home/tester")).toBe(true);
+    expect(directories.every((directory) => directory === "Working directory: /home/tester")).toBe(
+      true,
+    );
     expect(permissions.length).toBeGreaterThan(0);
     expect(permissions.every((permission) => permission === "Plan")).toBe(true);
   });
@@ -2957,16 +2958,14 @@ describe("NewChatLandingScreen cached picker preview", () => {
     fireEvent.pointerDown(screen.getByTestId("new-chat-landing-workspace-chip"), { button: 0 });
     fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
     fireEvent.click(screen.getByTestId("recent-workspace-select-1"));
-    expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAttribute(
-      "title",
-      "/work/second",
+    expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAccessibleName(
+      "Working directory: /work/second",
     );
     unmount();
     resetLandingDraft();
     renderLanding();
-    expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAttribute(
-      "title",
-      "/work/second",
+    expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAccessibleName(
+      "Working directory: /work/second",
     );
   });
 
@@ -4048,7 +4047,7 @@ describe("NewChatLandingScreen", () => {
       });
       const tooltip = screen.getByTestId("new-chat-landing-host-tooltip");
       // Same surface and bold keys as the agent pill's tooltip, sized to its text.
-      expect(tooltip).toHaveClass("bg-popover", "text-popover-foreground", "w-max", "max-w-64");
+      expect(tooltip).toHaveClass("bg-white", "text-[#30303a]", "w-max", "max-w-64");
       expect(tooltip).not.toHaveClass("w-64");
       for (const key of within(tooltip).getAllByText(/^(Host|Status):$/)) {
         expect(key).toHaveClass("font-semibold");
@@ -4213,10 +4212,7 @@ describe("NewChatLandingScreen", () => {
     expect(worktree).toHaveAccessibleName(
       "Create or select a worktree from main repository branch: main",
     );
-    expect(worktree).toHaveAttribute(
-      "title",
-      "Create or select a worktree from main repository branch: main",
-    );
+    expect(worktree).not.toHaveAttribute("title");
     expect(worktree).toHaveTextContent("None");
     expect(worktree.querySelectorAll("svg")[0]).toHaveClass("size-3.5");
     expect(worktree.querySelectorAll("svg")[1]).toHaveClass("size-3");
@@ -4313,7 +4309,12 @@ describe("NewChatLandingScreen", () => {
     const submit = screen.getByTestId("new-chat-landing-submit");
     fireEvent.pointerMove(submit.parentElement!, { pointerType: "mouse" });
     const tooltip = await screen.findByTestId("new-chat-landing-submit-error-tooltip");
-    expect(tooltip).toHaveClass("bg-popover", "text-popover-foreground", "shadow-menu", "ring-1");
+    expect(tooltip).toHaveClass(
+      "bg-white",
+      "text-[#30303a]",
+      "border-[#e2e2e8]",
+      "shadow-[0_3px_12px_#2020300d]",
+    );
   });
 
   it("uses the Git folder icon for a verified repository", () => {
@@ -4421,7 +4422,9 @@ describe("NewChatLandingScreen", () => {
     function selectWorkspace(path: string) {
       fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
       fireEvent.click(screen.getByRole("button", { name: path }));
-      expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAttribute("title", path);
+      expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAccessibleName(
+        `Working directory: ${path}`,
+      );
     }
 
     async function selectNewWorktree(autoSeeded = false) {
@@ -5293,7 +5296,8 @@ describe("NewChatLandingScreen", () => {
     expect(picker).not.toHaveClass("max-w-[7.25rem]", "md:max-w-40");
     expect(picker).not.toHaveClass("sm:max-w-[14rem]", "md:max-w-[17rem]", "pr-0");
     expect(model).toHaveClass("min-w-0", "truncate");
-    expect(model).toHaveAttribute("title", "Extraordinarily Long Claude Model Name");
+    expect(picker).toHaveAccessibleName(/Extraordinarily Long Claude Model Name/);
+    expect(model).not.toHaveAttribute("title");
     expect(model).toHaveTextContent("Extraordinarily Long Claude Model Name");
     expect(voice).toHaveClass("shrink-0", "size-8", "md:size-7");
     expect(submit.parentElement).toHaveClass("shrink-0");
@@ -5367,11 +5371,11 @@ describe("NewChatLandingScreen", () => {
 
     expect(screen.getByTestId("workspace-picker")).toBeVisible();
     expect(screen.getByTestId("workspace-picker-path-input")).toHaveValue("/Users/corey/other");
-    expect(workspace).toHaveAttribute("title", "/Users/corey/repo");
+    expect(workspace).toHaveAccessibleName("Working directory: /Users/corey/repo");
 
     fireEvent.click(screen.getByTestId("workspace-picker-cancel"));
     expect(screen.queryByTestId("workspace-picker")).toBeNull();
-    expect(workspace).toHaveAttribute("title", "/Users/corey/repo");
+    expect(workspace).toHaveAccessibleName("Working directory: /Users/corey/repo");
   });
 
   it("separates the zero-session import action from an empty notice slot", () => {
@@ -5490,13 +5494,12 @@ describe("NewChatLandingScreen", () => {
     const workspaceTrigger = screen.getByTestId("new-chat-landing-workspace-chip");
     const worktreeTrigger = screen.getByTestId("new-chat-landing-branch-chip");
     await waitFor(() =>
-      expect(worktreeTrigger).toHaveAttribute(
-        "title",
+      expect(worktreeTrigger).toHaveAccessibleName(
         "Create or select a worktree from main repository branch: main",
       ),
     );
     expect(workspaceTrigger).toHaveTextContent("repo");
-    expect(workspaceTrigger).toHaveAttribute("title", "/Users/corey/repo");
+    expect(workspaceTrigger).toHaveAccessibleName("Working directory: /Users/corey/repo");
   });
 
   it("dismisses sibling popovers and restores each trigger's focus on Escape", async () => {
@@ -5518,7 +5521,8 @@ describe("NewChatLandingScreen", () => {
     closeMenu();
     await waitFor(() => expect(screen.queryByTestId("new-chat-landing-branch-input")).toBeNull());
     expect(worktreeTrigger).toHaveFocus();
-    expect(worktreeTrigger).toHaveAttribute("title");
+    expect(worktreeTrigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 
     fireEvent.click(worktreeTrigger);
     expect(await screen.findByTestId("new-chat-landing-branch-input")).toBeVisible();
@@ -7595,8 +7599,7 @@ describe("NewChatLandingScreen", () => {
 
     const worktreeTrigger = screen.getByTestId("new-chat-landing-branch-chip");
     await waitFor(() =>
-      expect(worktreeTrigger).toHaveAttribute(
-        "title",
+      expect(worktreeTrigger).toHaveAccessibleName(
         "Existing detached worktree: /Users/corey/repo-worktrees/review",
       ),
     );
@@ -8427,11 +8430,9 @@ describe("NewChatLandingScreen", () => {
     fireEvent.click(screen.getByTestId("new-chat-landing-repo-chip"));
     const helpButton = screen.getByLabelText("How to set up Databricks git credentials");
     expect(helpButton).toBeTruthy();
-    fireEvent.focus(helpButton);
-    await waitFor(() =>
-      expect(
-        screen.getAllByText("Use Databricks Git credentials before cloning.").length,
-      ).toBeGreaterThan(0),
+    await userEvent.hover(helpButton);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Use Databricks Git credentials before cloning.",
     );
   });
 
@@ -9391,8 +9392,8 @@ describe("NewChatLandingScreen @-file-mention", () => {
     );
     fireEvent.change(input(), { target: { value: "@", selectionStart: 1 } });
     // Host absolute paths are shown as workspace-relative rows (folders first).
-    expect(screen.getByTitle("Open omnigent")).toBeInTheDocument();
-    expect(screen.getByTitle("Attach README.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "omnigent/" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "README.md" })).toBeInTheDocument();
   });
 
   it("does not accept the highlighted mention when Enter is pressed on mobile", async () => {
@@ -9423,7 +9424,7 @@ describe("NewChatLandingScreen @-file-mention", () => {
     ]);
     renderLanding();
     fireEvent.change(input(), { target: { value: "@", selectionStart: 1 } });
-    expect(screen.queryByTitle("Open omnigent")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "omnigent/" })).not.toBeInTheDocument();
   });
 
   it("drills into a folder and delivers the chosen file as a workspace-relative marker", async () => {
@@ -9438,9 +9439,9 @@ describe("NewChatLandingScreen @-file-mention", () => {
 
     fireEvent.change(input(), { target: { value: "@", selectionStart: 1 } });
     // Nested files are hidden until the folder is opened (drill-down).
-    expect(screen.queryByTitle("Attach cli.py")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("Open omnigent"));
-    fireEvent.click(screen.getByTitle("Attach cli.py"));
+    expect(screen.queryByRole("button", { name: "cli.py" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "omnigent/" }));
+    fireEvent.click(screen.getByRole("button", { name: "cli.py" }));
     // The chip shows the workspace-relative path, not the host-absolute one.
     expect(screen.getByText("@omnigent/cli.py")).toBeInTheDocument();
 
@@ -9483,14 +9484,14 @@ describe("NewChatLandingScreen @-file-mention", () => {
 
     fireEvent.change(input(), { target: { value: "@", selectionStart: 1 } });
     // Root listing renders its rows.
-    expect(screen.getByTitle("Open omnigent")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("Open omnigent"));
+    expect(screen.getByRole("button", { name: "omnigent/" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "omnigent/" }));
 
     // Drilled-but-loading: the loading row shows and the parent's stale rows are
     // gone (without the isPlaceholderData guard they'd appear as the child's).
     expect(screen.getByText("Loading…")).toBeInTheDocument();
-    expect(screen.queryByTitle("Attach README.md")).not.toBeInTheDocument();
-    expect(screen.queryByTitle("Open omnigent")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "README.md" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "omnigent/" })).not.toBeInTheDocument();
   });
 
   it("attaches a whole folder with a trailing-slash marker", async () => {
@@ -9519,7 +9520,7 @@ describe("NewChatLandingScreen @-file-mention", () => {
   it("removes a tagged chip when its ✕ is clicked", () => {
     renderLanding();
     fireEvent.change(input(), { target: { value: "@", selectionStart: 1 } });
-    fireEvent.click(screen.getByTitle("Attach README.md"));
+    fireEvent.click(screen.getByRole("button", { name: "README.md" }));
     expect(screen.getByText("@README.md")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Remove README.md"));
     expect(screen.queryByText("@README.md")).not.toBeInTheDocument();
@@ -11213,7 +11214,12 @@ describe("NewChatLandingScreen bundle-agent Smart Routing", () => {
     const tooltip = await screen.findByTestId("new-chat-landing-agent-tooltip");
     expect(tooltip).toHaveTextContent("Agent: Polly");
     expect(tooltip).toHaveTextContent("SDK: Codex");
-    expect(tooltip).toHaveClass("bg-popover", "text-popover-foreground", "shadow-menu", "ring-1");
+    expect(tooltip).toHaveClass(
+      "bg-white",
+      "text-[#30303a]",
+      "border-[#e2e2e8]",
+      "shadow-[0_3px_12px_#2020300d]",
+    );
   });
 
   it.each(BOTH_BUNDLES)(

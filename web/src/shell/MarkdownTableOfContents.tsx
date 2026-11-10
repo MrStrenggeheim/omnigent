@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Table of contents for markdown files, extracted from rendered heading elements.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -190,14 +191,14 @@ export function MarkdownTableOfContents({
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-foreground">On this page</h2>
           {onClose && (
-            <button
+            <TooltipButton
               type="button"
               onClick={onClose}
               className="rounded p-1 hover:bg-muted transition-colors"
               aria-label="Close table of contents"
             >
               <XIcon className="size-4" />
-            </button>
+            </TooltipButton>
           )}
         </div>
 
@@ -227,7 +228,7 @@ export function MarkdownTableOfContents({
                 style={{ paddingLeft: `${(heading.level - 1) * 0.75}rem` }}
                 className="leading-snug"
               >
-                <button
+                <TooltipButton
                   type="button"
                   onClick={() => handleClick(heading.id)}
                   className={cn(
@@ -238,7 +239,7 @@ export function MarkdownTableOfContents({
                   )}
                 >
                   {heading.text}
-                </button>
+                </TooltipButton>
               </li>
             ))}
           </ul>

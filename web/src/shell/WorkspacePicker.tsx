@@ -14,7 +14,13 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useCreateHostDirectory, useHostFilesystem } from "@/hooks/useHostFilesystem";
 import { useHostWorktrees, useVerifiedGitWorktrees } from "@/hooks/useHostWorktrees";
 import { cn } from "@/lib/utils";
@@ -766,7 +772,7 @@ export function WorkspacePicker({
                         /
                       </span>
                     )}
-                    <button
+                    <TooltipButton
                       type="button"
                       className={`truncate rounded px-1 py-0.5 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${
                         isLast ? "font-medium text-foreground" : "text-muted-foreground"
@@ -782,7 +788,7 @@ export function WorkspacePicker({
                       data-testid={index === 0 ? "workspace-picker-home" : undefined}
                     >
                       {item.label}
-                    </button>
+                    </TooltipButton>
                   </div>
                 );
               })}
@@ -937,7 +943,7 @@ export function WorkspacePicker({
                   className="min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   data-testid="workspace-picker-new-folder-input"
                 />
-                <button
+                <TooltipButton
                   type="button"
                   disabled={newFolderName.trim() === "" || createDir.isPending}
                   onClick={() => void commitNewFolder()}
@@ -951,8 +957,8 @@ export function WorkspacePicker({
                   ) : (
                     <CheckIcon className="size-4" />
                   )}
-                </button>
-                <button
+                </TooltipButton>
+                <TooltipButton
                   type="button"
                   onClick={cancelNewFolder}
                   aria-label="Cancel new folder"
@@ -961,7 +967,7 @@ export function WorkspacePicker({
                   data-testid="workspace-picker-new-folder-cancel"
                 >
                   <XIcon className="size-4" />
-                </button>
+                </TooltipButton>
               </div>
               {createError !== null && (
                 <span

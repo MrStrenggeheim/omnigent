@@ -1,6 +1,12 @@
 import { type ComponentType, useRef } from "react";
 
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useOmnigentAnalytics } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +53,7 @@ export function IconSegmentedControl<T extends string>({
           return (
             <Tooltip key={item.value}>
               <TooltipTrigger asChild>
-                <button
+                <TooltipButton
                   ref={(element) => {
                     refs.current.set(item.value, element);
                   }}
@@ -76,7 +82,7 @@ export function IconSegmentedControl<T extends string>({
                   )}
                 >
                   <Icon aria-hidden="true" className="size-4" />
-                </button>
+                </TooltipButton>
               </TooltipTrigger>
               <TooltipContent>{item.label}</TooltipContent>
             </Tooltip>

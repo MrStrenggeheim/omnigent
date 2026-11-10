@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Toolbar for the TipTap markdown rich-text editor.
 //
 // Receives the TipTap Editor instance as a prop and uses editor.chain() for
@@ -57,7 +58,7 @@ export function ToolbarBtn({
   className?: string;
 }) {
   return (
-    <button
+    <TooltipButton
       type="button"
       title={title}
       aria-label={title}
@@ -73,7 +74,7 @@ export function ToolbarBtn({
       )}
     >
       {children}
-    </button>
+    </TooltipButton>
   );
 }
 
@@ -88,14 +89,17 @@ function TableBtn({ editor }: { editor: Editor | null }) {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        title="Insert table"
-        aria-label="Insert table"
-        disabled={!editor}
-        onMouseDown={(e) => e.preventDefault()}
-        className="min-w-[1.75rem] rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-      >
-        <Table2 className="size-3.5" />
+      <PopoverTrigger asChild>
+        <TooltipButton
+          type="button"
+          title="Insert table"
+          aria-label="Insert table"
+          disabled={!editor}
+          onMouseDown={(e) => e.preventDefault()}
+          className="min-w-[1.75rem] rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Table2 className="size-3.5" />
+        </TooltipButton>
       </PopoverTrigger>
       <PopoverContent
         className="w-auto p-2"
@@ -109,7 +113,7 @@ function TableBtn({ editor }: { editor: Editor | null }) {
           {Array.from({ length: MAX }, (_, rowIndex) => (
             <div key={rowIndex} className="flex gap-0.5">
               {Array.from({ length: MAX }, (__, columnIndex) => (
-                <button
+                <TooltipButton
                   key={columnIndex}
                   type="button"
                   aria-label={`Insert ${rowIndex + 1}×${columnIndex + 1} table`}
@@ -435,7 +439,7 @@ export function ToolbarPlugin({
       <TableBtn editor={editor} />
       {editor && <TableAlignControls editor={editor} />}
       <div className="ml-auto flex items-center gap-2">
-        <button
+        <TooltipButton
           type="button"
           title={saveStatus.title}
           aria-label={saveStatus.title}
@@ -457,7 +461,7 @@ export function ToolbarPlugin({
         >
           {saveStatus.tone === "saved" && <Check className="size-3.5" />}
           {saveStatus.label}
-        </button>
+        </TooltipButton>
       </div>
     </div>
   );

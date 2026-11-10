@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useWorkbenchSelection } from "@/hooks/useWorkbenchSelection";
 import { WorkbenchWorkspaceProvider, useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
@@ -367,7 +368,7 @@ function GridSessionPaneContent({
               selected && "bg-brand-accent/10",
             )}
           >
-            <button
+            <TooltipButton
               type="button"
               ref={setActivatorNodeRef}
               {...attributes}
@@ -380,7 +381,7 @@ function GridSessionPaneContent({
               )}
             >
               {title}
-            </button>
+            </TooltipButton>
             <ViewModeToggle hotkeyEnabled={selected && !workspacePanel.maximized} alwaysVisible />
             <Button asChild variant="ghost" size="icon-xs">
               <Link

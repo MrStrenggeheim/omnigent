@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -94,14 +95,14 @@ export function InlineCliCode({ command }: { command: string }) {
       <code className="select-text break-all [font-variant-ligatures:none] [font-feature-settings:'liga'_0,'calt'_0]">
         {command}
       </code>
-      <button
+      <TooltipButton
         type="button"
         aria-label={copied ? "Copied" : "Copy command"}
         onClick={() => void copy()}
         className={cn("shrink-0 self-center opacity-70 hover:opacity-100", copied && "opacity-100")}
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-      </button>
+      </TooltipButton>
     </span>
   );
 }

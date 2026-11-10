@@ -156,7 +156,7 @@ describe("ErrorBanner", () => {
     expect(screen.getByTestId("error-disclosure-icon")).toBeInTheDocument();
   });
 
-  it("matches the prototype pill structure and diagnostics treatment", () => {
+  it("matches the prototype pill structure and diagnostics treatment", async () => {
     render(
       <ErrorBanner message={TERMINAL_ERROR} source="execution" code="required_terminal_exited" />,
     );
@@ -184,10 +184,11 @@ describe("ErrorBanner", () => {
       "leading-6",
       "text-destructive",
     );
-    expect(screen.getByTestId("error-headline")).toHaveAttribute(
-      "title",
+    fireEvent.focus(toggle);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "The agent's terminal exited unexpectedly, so the session can't continue.",
     );
+    fireEvent.blur(toggle);
     expect(screen.getByRole("button", { name: "Dismiss error message" })).toHaveClass(
       "hover:text-foreground",
     );

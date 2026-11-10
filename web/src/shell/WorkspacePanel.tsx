@@ -65,7 +65,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { BrowserPane } from "@/components/BrowserPane/BrowserPane";
 import { useBrowserTabs } from "@/hooks/useBrowserTabs";
 import { useNewBrowserHotkey } from "@/hooks/useNewBrowserHotkey";
@@ -509,7 +509,7 @@ function FileTabsStrip({
                 fade like var(--muted) would stack over the hover background and
                 darken the right edge into a visible gradient patch.) */}
             <span className="absolute inset-y-0 right-0 flex items-center pl-[12px] pr-[4px] opacity-0 transition-opacity group-hover/tab:opacity-100 [background:linear-gradient(to_right,transparent,color-mix(in_srgb,var(--muted-foreground)_15%,var(--card))_40%)]">
-              <button
+              <TooltipButton
                 type="button"
                 aria-label={`Close ${name}`}
                 className="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -519,7 +519,7 @@ function FileTabsStrip({
                 }}
               >
                 <XIcon className="size-4" />
-              </button>
+              </TooltipButton>
             </span>
           </div>
         );
@@ -613,7 +613,7 @@ function TerminalTabsStrip({
             <span className="min-w-0 truncate text-sm">{name}</span>
             {canClose && (
               <span className="absolute inset-y-0 right-0 flex items-center pl-[12px] pr-[4px] opacity-0 transition-opacity group-hover/tab:opacity-100 [background:linear-gradient(to_right,transparent,color-mix(in_srgb,var(--muted-foreground)_15%,var(--card))_40%)]">
-                <button
+                <TooltipButton
                   type="button"
                   aria-label={`Close ${name}`}
                   className="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -623,7 +623,7 @@ function TerminalTabsStrip({
                   }}
                 >
                   <XIcon className="size-4" />
-                </button>
+                </TooltipButton>
               </span>
             )}
           </div>
@@ -1582,7 +1582,7 @@ function WorkspacePanelImpl({
                           : "text-muted-foreground hover:bg-[color-mix(in_srgb,var(--muted-foreground)_15%,var(--card))] hover:text-foreground",
                       )}
                     >
-                      <button
+                      <TooltipButton
                         ref={active ? activePanelRef : null}
                         type="button"
                         role="tab"
@@ -1599,15 +1599,15 @@ function WorkspacePanelImpl({
                       >
                         <Icon className="size-4" />
                         {label}
-                      </button>
-                      <button
+                      </TooltipButton>
+                      <TooltipButton
                         type="button"
                         aria-label={`Close ${label}`}
                         className="flex size-4 items-center justify-center rounded hover:bg-muted"
                         onClick={() => onClosePanel(tab)}
                       >
                         <XIcon className="size-3" />
-                      </button>
+                      </TooltipButton>
                     </div>
                   );
                 })}
@@ -1638,7 +1638,7 @@ function WorkspacePanelImpl({
                           : "text-muted-foreground hover:bg-[color-mix(in_srgb,var(--muted-foreground)_15%,var(--card))] hover:text-foreground",
                       )}
                     >
-                      <button
+                      <TooltipButton
                         type="button"
                         role="tab"
                         aria-selected={browserSelected && browsers.selected === tabId}
@@ -1656,15 +1656,15 @@ function WorkspacePanelImpl({
                       >
                         <GlobeIcon className="size-4" />
                         Browser {index + 1}
-                      </button>
-                      <button
+                      </TooltipButton>
+                      <TooltipButton
                         type="button"
                         aria-label={`Close Browser ${index + 1}`}
                         className="flex size-4 items-center justify-center rounded hover:bg-muted"
                         onClick={() => void closeBrowserTab(tabId)}
                       >
                         <XIcon className="size-3" />
-                      </button>
+                      </TooltipButton>
                     </div>
                   ))}
                 {sideChats.tabs.map((childId, index) => {
@@ -1681,7 +1681,7 @@ function WorkspacePanelImpl({
                           : "text-muted-foreground hover:bg-[color-mix(in_srgb,var(--muted-foreground)_15%,var(--card))] hover:text-foreground",
                       )}
                     >
-                      <button
+                      <TooltipButton
                         type="button"
                         role="tab"
                         aria-selected={active}
@@ -1699,15 +1699,15 @@ function WorkspacePanelImpl({
                       >
                         <MessagesSquareIcon className="size-4" />
                         {label}
-                      </button>
-                      <button
+                      </TooltipButton>
+                      <TooltipButton
                         type="button"
                         aria-label={`Close ${label}`}
                         className="flex size-4 items-center justify-center rounded hover:bg-muted"
                         onClick={() => closeSideChat(childId)}
                       >
                         <XIcon className="size-3" />
-                      </button>
+                      </TooltipButton>
                     </div>
                   );
                 })}
@@ -1974,22 +1974,22 @@ function WorkspacePanelImpl({
                     active ? "bg-muted text-foreground" : "text-muted-foreground",
                   )}
                 >
-                  <button
+                  <TooltipButton
                     type="button"
                     role="tab"
                     aria-selected={active}
                     onClick={() => sideChats.select(childId)}
                   >
                     {label}
-                  </button>
-                  <button
+                  </TooltipButton>
+                  <TooltipButton
                     type="button"
                     aria-label={`Close ${label}`}
                     className="flex size-6 items-center justify-center rounded"
                     onClick={() => closeSideChat(childId)}
                   >
                     <XIcon className="size-3.5" />
-                  </button>
+                  </TooltipButton>
                 </div>
               );
             })}

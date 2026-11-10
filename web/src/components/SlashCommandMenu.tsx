@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useRef } from "react";
 import {
   CircleAlertIcon,
@@ -282,7 +283,7 @@ function McpSignInAction({
     );
   if (!onSignIn) return null;
   return (
-    <button
+    <TooltipButton
       type="button"
       data-testid={`mcp-sign-in-${server.name}`}
       disabled={disabled}
@@ -291,7 +292,7 @@ function McpSignInAction({
     >
       {signingIn && <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />}
       {signingIn ? "Signing in…" : "Sign in"}
-    </button>
+    </TooltipButton>
   );
 }
 
@@ -430,7 +431,7 @@ function MenuRowButton({
   // thinking/reasoning blocks), the ⌘ glyph in slate for built-ins.
   const Icon = isBuiltin ? CommandIcon : WandSparklesIcon;
   return (
-    <button
+    <TooltipButton
       type="button"
       data-testid={`slash-menu-item-${row.name.slice(1)}`}
       data-active={active ? "true" : undefined}
@@ -456,7 +457,7 @@ function MenuRowButton({
       {row.description && (
         <span className="truncate text-xs leading-4 text-muted-foreground">{row.description}</span>
       )}
-    </button>
+    </TooltipButton>
   );
 }
 
@@ -562,14 +563,14 @@ export function SlashCommandMenu({
           <div role="status" className="px-1.5 py-1 text-ui text-muted-foreground">
             Couldn’t load skills.{" "}
             {onRetrySkills && (
-              <button
+              <TooltipButton
                 type="button"
                 className="underline hover:text-foreground"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={onRetrySkills}
               >
                 Retry
-              </button>
+              </TooltipButton>
             )}
           </div>
         )}

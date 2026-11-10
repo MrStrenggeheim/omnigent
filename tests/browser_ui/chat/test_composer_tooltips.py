@@ -114,3 +114,50 @@ def test_host_chip_tooltip_names_the_host_and_matches_the_pill(
     pill_tooltip = page.get_by_test_id("composer-config-gear-tooltip")
     expect(pill_tooltip).to_be_visible()
     assert pill_tooltip.evaluate(_SURFACE_STYLE) == host_style
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_button_tooltips_share_white_surface_and_centered_gap(
+    page: Page, chat_session_contract, theme: str
+) -> None:
+    page.emulate_media(color_scheme=theme)
+    page.add_init_script(f"localStorage.setItem('web-theme', '{theme}')")
+    chat_session_contract.set_catalog(
+        harness="claude-native",
+        models=[model_option("sonnet", is_default=True)],
+        selected_model="sonnet",
+    )
+    page.goto(chat_session_contract.url)
+    composer = page.get_by_label("Message the agent")
+    expect(composer).to_be_visible()
+    composer.fill("Keep this draft unsent.")
+    triggers = [
+        page.get_by_test_id("composer-config-gear"),
+        page.get_by_test_id("composer-host-select"),
+        page.get_by_role("button", name="Send", exact=True),
+    ]
+    styles = []
+    for trigger in triggers:
+        page.mouse.move(0, 0)
+        trigger.hover()
+        tooltip = page.locator('[data-slot="tooltip-content"]').filter(visible=True)
+        expect(tooltip).to_have_count(1)
+        expect(tooltip).to_have_css("background-color", "rgb(255, 255, 255)")
+        assert trigger.get_attribute("title") is None
+        expect(tooltip).to_have_attribute("data-align", "center")
+        assert tooltip.get_attribute("data-side") in {"top", "bottom"}
+        # Wait for the tooltip's opening scale animation before measuring its box.
+        expect(tooltip).to_have_css("transform", "none")
+        anchor = trigger.bounding_box()
+        box = tooltip.bounding_box()
+        assert anchor is not None and box is not None
+        assert abs((anchor["x"] + anchor["width"] / 2) - (box["x"] + box["width"] / 2)) <= 1
+        gap = (
+            anchor["y"] - box["y"] - box["height"]
+            if tooltip.get_attribute("data-side") == "top"
+            else box["y"] - anchor["y"] - anchor["height"]
+        )
+        assert abs(gap - 8) <= 1, {"anchor": anchor, "tooltip": box}
+        styles.append(tooltip.evaluate(_SURFACE_STYLE))
+    assert styles[0] == styles[1] == styles[2]
+    assert not chat_session_contract.event_posts

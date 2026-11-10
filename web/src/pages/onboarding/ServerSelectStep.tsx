@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Onboarding step 3: join an existing server or add a new one. Lists
 // recent/managed servers from the omnigentSetup bridge as selectable cards
 // (each with a three-dot menu: view info / delete), plus a URL input to add
@@ -303,7 +304,7 @@ export function ServerSelectStep({
         )}
       >
         <div className="flex items-center gap-3">
-          <button
+          <TooltipButton
             type="button"
             onClick={() => select(url)}
             className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -357,9 +358,9 @@ export function ServerSelectStep({
                 )}
               </span>
             </span>
-          </button>
+          </TooltipButton>
 
-          <button
+          <TooltipButton
             type="button"
             onClick={() => setExpandedUrl((prev) => (prev === url ? null : url))}
             className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -370,18 +371,18 @@ export function ServerSelectStep({
               className={cn("size-4 transition-transform", isExpanded && "rotate-180")}
               aria-hidden
             />
-          </button>
+          </TooltipButton>
 
           {removable && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
+                <TooltipButton
                   type="button"
                   className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                   aria-label={`More options for ${displayName(url)}`}
                 >
                   <MoreHorizontal className="size-4" aria-hidden />
-                </button>
+                </TooltipButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem variant="destructive" onSelect={() => removeServer(url)}>
@@ -461,7 +462,7 @@ export function ServerSelectStep({
             <SectionHeader
               label="Recents"
               action={
-                <button
+                <TooltipButton
                   type="button"
                   onClick={() => {
                     setSelected(null);
@@ -472,7 +473,7 @@ export function ServerSelectStep({
                 >
                   <Plus className="size-4" aria-hidden />
                   Add server
-                </button>
+                </TooltipButton>
               }
             />
             {recentSection.map(renderRow)}
@@ -559,14 +560,14 @@ export function ServerDetails({ url, onCopy }: { url: string; onCopy: (text: str
       <DetailRow icon={Server} label="Server URL">
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate text-right text-foreground">{name}</span>
-          <button
+          <TooltipButton
             type="button"
             onClick={() => onCopy(url)}
             className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
             aria-label={`Copy ${name}`}
           >
             <Copy className="size-3.5" aria-hidden />
-          </button>
+          </TooltipButton>
         </span>
       </DetailRow>
     </div>

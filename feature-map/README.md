@@ -113,6 +113,7 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 ## Features
 
+- [Button tooltips](./tooltips.md) covers canonical hover/focus guidance, shortcuts, disabled reasons and duplicate suppression.
 - [Chat attachments](./chat-attachments.md) covers persistent files, safe previews, native agent uploads and captured workspace references.
 
 - [Independent workspaces](./workbench-workspaces.md) covers selected resource targets, persistent file/search state and independently owned manual terminals.

@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import type { ExtensionCatalogItem, ExtensionPage } from "./types";
@@ -280,7 +281,7 @@ export function ExtensionViewHost({
         <div className="max-w-md rounded-lg border border-destructive/40 bg-card p-6 text-center">
           <h1 className="font-semibold">{page.title} could not start</h1>
           <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-          <button
+          <TooltipButton
             type="button"
             className="mt-4 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
             onClick={() => {
@@ -289,7 +290,7 @@ export function ExtensionViewHost({
             }}
           >
             Retry
-          </button>
+          </TooltipButton>
         </div>
       </div>
     );

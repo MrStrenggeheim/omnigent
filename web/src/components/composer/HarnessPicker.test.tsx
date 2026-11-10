@@ -442,19 +442,24 @@ describe("HarnessPicker", () => {
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
   });
 
-  it("can use the light session-info tooltip surface without changing tooltip defaults", async () => {
-    render(<PickerFixture tooltipVariant="session-info" />);
-    fireEvent.focus(screen.getByRole("button", { name: "Harness" }));
-    expect(await screen.findByTestId("tooltip")).toHaveClass(
-      "w-64",
-      "rounded-lg",
-      "bg-popover",
-      "p-2.5",
-      "text-popover-foreground",
-      "shadow-menu",
-      "ring-1",
-    );
-  });
+  it.each(["default", "session-info"] as const)(
+    "uses one canonical tooltip for %s and preserves model menu clicks",
+    async (tooltipVariant) => {
+      render(<PickerFixture tooltipVariant={tooltipVariant} />);
+      const trigger = screen.getByRole("button", { name: "Harness" });
+      expect(trigger).not.toHaveAttribute("title");
+      expect(trigger.querySelector("[title]")).toBeNull();
+      fireEvent.focus(trigger);
+      const panel = await screen.findByTestId("tooltip");
+      expect(document.querySelectorAll('[data-slot="tooltip-content"]')).toHaveLength(1);
+      expect(panel).toHaveStyle({ backgroundColor: "#fff", color: "#30303a" });
+      fireEvent.pointerDown(trigger, { button: 0 });
+      expect(screen.getByTestId("menu")).toBeInTheDocument();
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("edit"));
+      expect(screen.getByText("Model configuration")).toBeInTheDocument();
+    },
+  );
 });
 
 describe("HarnessPickerEntry Edit flyout dismissal (#7069)", () => {

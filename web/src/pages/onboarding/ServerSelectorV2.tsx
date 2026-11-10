@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * The Electron server-selector-v2 flow: landing → deployment mode → server
  * select, inside one card that resizes between steps. Mounted only by
@@ -369,13 +370,13 @@ export function ServerSelectorV2({ setup }: { setup: ServerSelectorV2Setup }) {
       >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
+            <TooltipButton
               type="button"
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label="Server selector settings"
             >
               <Settings className="size-4" aria-hidden />
-            </button>
+            </TooltipButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem

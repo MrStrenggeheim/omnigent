@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { MessageSquarePlusIcon } from "lucide-react";
 import { useCanEdit } from "@/hooks/usePermissions";
 
@@ -24,13 +25,13 @@ export function PreviewCommentBanner({
       <MessageSquarePlusIcon className="size-3.5 shrink-0" />
       <span>
         To comment on this file,{" "}
-        <button
+        <TooltipButton
           type="button"
           onClick={onSwitchToEdit}
           className="cursor-pointer font-medium text-foreground underline underline-offset-2 hover:text-primary"
         >
           switch to edit mode
-        </button>
+        </TooltipButton>
         .
       </span>
     </div>

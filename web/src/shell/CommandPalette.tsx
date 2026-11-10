@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // ⌘K palette: Sessions (recent, or title matches), In messages (content matches), Actions.
 // Sessions are searched server-side (one loaded page can't find older ones), so
 // cmdk filtering is off and the static actions are filtered here.
@@ -488,14 +489,14 @@ export function CommandPalette({
                     : "Couldn't load sessions."
                   : "Loading sessions…"}
                 {loadError && (
-                  <button
+                  <TooltipButton
                     type="button"
                     className="ml-2 underline"
                     disabled={retrying}
                     onClick={retryLoad}
                   >
                     Retry
-                  </button>
+                  </TooltipButton>
                 )}
               </p>
             )}

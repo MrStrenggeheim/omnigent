@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, CircleIcon, CopyIcon, KeyRoundIcon, Loader2Icon } from "lucide-react";
@@ -438,13 +439,13 @@ function ChooseCredential({
         )}
       </div>
       {canUseCredentialForm && (
-        <button
+        <TooltipButton
           type="button"
           className="self-start text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           onClick={onUseCredentialForm}
         >
           Use an API key or gateway URL instead
-        </button>
+        </TooltipButton>
       )}
     </>
   );
@@ -462,7 +463,7 @@ function CredentialCard({
   onClick: () => void;
 }) {
   return (
-    <button
+    <TooltipButton
       type="button"
       role="radio"
       aria-checked={selected}
@@ -487,7 +488,7 @@ function CredentialCard({
       >
         {selected && <CheckIcon className="size-3" />}
       </span>
-    </button>
+    </TooltipButton>
   );
 }
 

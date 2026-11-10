@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useFileContentReader } from "./FileContentReader";
 // TipTap-based rich text editor for markdown files.
 //
@@ -550,20 +551,20 @@ function MarkdownRichTextViewerInner({
         <div className="absolute bottom-0 left-0 right-0 z-10 flex items-center gap-2 border-t border-border bg-warning/10 px-4 py-1.5 text-sm text-foreground backdrop-blur-sm">
           <AlertTriangleIcon className="size-3.5 shrink-0 text-warning" />
           <span className="flex-1">This file was modified externally while you were editing.</span>
-          <button
+          <TooltipButton
             type="button"
             className="rounded px-2 py-0.5 font-medium hover:bg-muted transition-colors"
             onClick={dismissExternalUpdate}
           >
             Keep mine
-          </button>
-          <button
+          </TooltipButton>
+          <TooltipButton
             type="button"
             className="rounded bg-primary px-2 py-0.5 font-medium text-primary-foreground hover:opacity-90 transition-opacity"
             onClick={discardAndApplyExternal}
           >
             Load latest
-          </button>
+          </TooltipButton>
         </div>
       )}
       {canEdit && isDirty && !hasExternalUpdate && saveDisabled && (

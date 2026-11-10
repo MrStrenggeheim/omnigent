@@ -352,7 +352,13 @@ import {
   composerSendShortcutKeys,
   KeyboardShortcutTooltipContent,
 } from "@/components/KeyboardShortcut";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CreateAgentDialog } from "./CreateAgentDialog";
 import { buildAgentBundle, type AgentBundleInput } from "@/lib/agentBundle";
 import { installAgentBundle } from "@/lib/agentsApi";
@@ -901,7 +907,7 @@ function HarnessSetupNotice({
           </span>
           {/* Compact bordered chip — small enough to sit on the sentence's line
               (h-5, text-sm), so it reads as part of the notice. */}
-          <button
+          <TooltipButton
             type="button"
             data-testid="new-chat-landing-harness-setup"
             className="inline-flex h-5 shrink-0 items-center rounded-md border border-amber-300 px-2 text-sm font-medium text-amber-700 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 dark:border-amber-500/40 dark:text-amber-400 dark:hover:bg-amber-500/20"
@@ -911,7 +917,7 @@ function HarnessSetupNotice({
             }}
           >
             Set up {agentName}
-          </button>
+          </TooltipButton>
         </>
       ) : (
         <span>{harnessWarningMessage(agentName, hostName, reason, harness)}</span>
@@ -1086,7 +1092,7 @@ function SandboxRepoCombobox({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
+        <TooltipButton
           type="button"
           role="combobox"
           aria-expanded={open}
@@ -1096,7 +1102,7 @@ function SandboxRepoCombobox({
         >
           <span className="truncate">{selected ? selected.full_name : "Choose a repository…"}</span>
           <ChevronsUpDownIcon className="ml-auto size-3.5 shrink-0 opacity-50" />
-        </button>
+        </TooltipButton>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-72 p-0">
         <Command>
@@ -1177,7 +1183,7 @@ function SandboxRepoBranchSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
+        <TooltipButton
           type="button"
           role="combobox"
           aria-expanded={open}
@@ -1188,7 +1194,7 @@ function SandboxRepoBranchSelect({
           <GitBranchIcon className="size-3.5 shrink-0 opacity-60" />
           <span className="truncate">{value === "" ? defaultLabel : value}</span>
           <ChevronsUpDownIcon className="ml-auto size-3.5 shrink-0 opacity-50" />
-        </button>
+        </TooltipButton>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-72 p-0">
         <Command>
@@ -6661,7 +6667,7 @@ export function NewChatLandingScreen() {
                               </span>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <button
+                                  <TooltipButton
                                     type="button"
                                     className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground/80 hover:text-foreground"
                                     aria-label="Why New Sandbox is unavailable"
@@ -6671,7 +6677,7 @@ export function NewChatLandingScreen() {
                                     }}
                                   >
                                     <CircleHelpIcon className="size-3.5" />
-                                  </button>
+                                  </TooltipButton>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-64">
                                   {newSandboxTooltipContent}
@@ -6807,7 +6813,7 @@ export function NewChatLandingScreen() {
               at create time. Blank = empty server-created workspace. */}
                         <Popover>
                           <PopoverTrigger asChild>
-                            <button
+                            <TooltipButton
                               type="button"
                               aria-label={`Sandbox repositories: ${
                                 sandboxRepoSelections.length > 0
@@ -6828,7 +6834,7 @@ export function NewChatLandingScreen() {
                                 {sandboxRepoLabel}
                               </span>
                               <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
-                            </button>
+                            </TooltipButton>
                           </PopoverTrigger>
                           <PopoverContent align="start" className="w-96 p-3">
                             <div className="flex flex-col gap-2">
@@ -6839,13 +6845,13 @@ export function NewChatLandingScreen() {
                                 {databricksGitCredentialsTooltipContent && (
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      <button
+                                      <TooltipButton
                                         type="button"
                                         className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground"
                                         aria-label="How to set up Databricks git credentials"
                                       >
                                         <CircleHelpIcon className="size-3.5" />
-                                      </button>
+                                      </TooltipButton>
                                     </TooltipTrigger>
                                     <TooltipContent className="max-w-64">
                                       {databricksGitCredentialsTooltipContent}
@@ -6907,7 +6913,7 @@ export function NewChatLandingScreen() {
                                         className="w-28 shrink-0 rounded-md border border-input bg-background px-2 py-1 text-xs outline-none transition-colors focus-visible:border-ring"
                                       />
                                     )}
-                                    <button
+                                    <TooltipButton
                                       type="button"
                                       onClick={() => removeSandboxRepo(sel.url)}
                                       aria-label={`Remove ${name}`}
@@ -6915,7 +6921,7 @@ export function NewChatLandingScreen() {
                                       data-testid="new-chat-landing-repo-remove"
                                     >
                                       <XIcon className="size-3.5" />
-                                    </button>
+                                    </TooltipButton>
                                   </div>
                                 );
                               })}
@@ -6995,7 +7001,7 @@ export function NewChatLandingScreen() {
                                       className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring"
                                       data-testid="new-chat-landing-repo-input"
                                     />
-                                    <button
+                                    <TooltipButton
                                       type="button"
                                       disabled={!isValidSandboxRepoUrl(pendingRepoUrl)}
                                       onClick={() => {
@@ -7007,7 +7013,7 @@ export function NewChatLandingScreen() {
                                     >
                                       <PlusIcon className="size-3.5" />
                                       Add
-                                    </button>
+                                    </TooltipButton>
                                   </div>
                                 </>
                               )}
@@ -7071,7 +7077,7 @@ export function NewChatLandingScreen() {
                               </>
                             )}
                             <MenuItem asChild density="compact">
-                              <button
+                              <TooltipButton
                                 type="button"
                                 className="w-full text-left"
                                 onClick={() => {
@@ -7090,7 +7096,7 @@ export function NewChatLandingScreen() {
                                   data-testid="new-chat-landing-workspace-open-folder-icon"
                                 />
                                 Open folder
-                              </button>
+                              </TooltipButton>
                             </MenuItem>
                           </PopoverContent>
                         </Popover>
@@ -7258,7 +7264,7 @@ export function NewChatLandingScreen() {
                         onMouseDown so it fires before the input's blur closes
                         the combobox and preventDefault keeps focus on the
                         input. */}
-                                    <button
+                                    <TooltipButton
                                       type="button"
                                       onMouseDown={(e) => {
                                         e.preventDefault();
@@ -7270,7 +7276,7 @@ export function NewChatLandingScreen() {
                                       data-testid="new-chat-landing-branch-generate"
                                     >
                                       <ShuffleIcon className="size-4" />
-                                    </button>
+                                    </TooltipButton>
                                   </div>
                                   {branchName.trim() !== "" && (
                                     <input
@@ -7592,14 +7598,14 @@ export function NewChatLandingScreen() {
             >
               <span>{sandboxCatalogError}</span>
               {sandboxCatalogError.includes("Connect Databricks") && (
-                <button
+                <TooltipButton
                   type="button"
                   className="underline underline-offset-2 hover:no-underline"
                   onClick={() => navigate("/settings/integrations")}
                   data-testid="sandbox-catalog-error-integrations-link"
                 >
                   Go to Integrations
-                </button>
+                </TooltipButton>
               )}
             </p>
           )}
@@ -7645,7 +7651,7 @@ export function NewChatLandingScreen() {
               data-testid="new-chat-landing-connect-error"
             >
               <span>{renderTextWithInlineCode(connectError)}</span>
-              <button
+              <TooltipButton
                 type="button"
                 className="underline underline-offset-2 hover:no-underline disabled:opacity-60"
                 onClick={() => void connectThisMachine()}
@@ -7653,7 +7659,7 @@ export function NewChatLandingScreen() {
                 data-testid="new-chat-landing-connect-error-retry"
               >
                 Try again
-              </button>
+              </TooltipButton>
             </p>
           )}
 
@@ -7663,7 +7669,7 @@ export function NewChatLandingScreen() {
               data-testid="new-chat-landing-arca-error"
             >
               <span>{arcaError}</span>
-              <button
+              <TooltipButton
                 type="button"
                 className="underline underline-offset-2 hover:no-underline disabled:opacity-60"
                 onClick={() => void connectArca()}
@@ -7671,7 +7677,7 @@ export function NewChatLandingScreen() {
                 data-testid="new-chat-landing-arca-error-retry"
               >
                 Try again
-              </button>
+              </TooltipButton>
             </p>
           )}
         </div>

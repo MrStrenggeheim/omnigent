@@ -68,7 +68,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
   Select,
@@ -469,7 +475,7 @@ function PullRequestFileSection({
 
   return (
     <div ref={ref} data-github-file={file.path}>
-      <button
+      <TooltipButton
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
@@ -496,7 +502,7 @@ function PullRequestFileSection({
           )}
         </span>
         <DiffStat file={file} />
-      </button>
+      </TooltipButton>
       {collapsed ? null : pureRename ? (
         <div className="p-4 text-ui text-muted-foreground">File renamed without changes.</div>
       ) : !seen ? (
@@ -507,13 +513,13 @@ function PullRequestFileSection({
       ) : fileDiff && fileDiff.unifiedLineCount > LARGE_DIFF_THRESHOLD && !showLargeDiff ? (
         <div className="flex items-center gap-3 p-4 text-ui text-muted-foreground">
           Large diff — {fileDiff.unifiedLineCount.toLocaleString()} lines
-          <button
+          <TooltipButton
             type="button"
             className="text-foreground underline-offset-2 hover:underline"
             onClick={() => setShowLargeDiff(true)}
           >
             Show diff
-          </button>
+          </TooltipButton>
         </div>
       ) : fileDiff ? (
         <FileDiff fileDiff={fileDiff} options={options} disableWorkerPool />
@@ -567,7 +573,7 @@ function CheckPill({
   return (
     <HoverCard openDelay={100} closeDelay={100}>
       <HoverCardTrigger asChild>
-        <button
+        <TooltipButton
           type="button"
           className={cn(
             "inline-flex cursor-pointer items-center gap-0.5 rounded-full border px-1.5 py-px text-xs tabular-nums",
@@ -576,7 +582,7 @@ function CheckPill({
         >
           {icon}
           {count} {label}
-        </button>
+        </TooltipButton>
       </HoverCardTrigger>
       <HoverCardContent
         side="bottom"
@@ -947,7 +953,7 @@ function SidebarNode({
     const meta = STATUS_META[node.file.status];
     const StatusIcon = meta.Icon;
     return (
-      <button
+      <TooltipButton
         type="button"
         onClick={() => onSelectFile(node.file.path)}
         title={node.file.path}
@@ -967,14 +973,14 @@ function SidebarNode({
         <span className="ml-auto flex shrink-0 items-center">
           <DiffStat file={node.file} />
         </span>
-      </button>
+      </TooltipButton>
     );
   }
 
   const open = !collapsedDirs.has(node.path);
   return (
     <>
-      <button
+      <TooltipButton
         type="button"
         onClick={() => onToggleDir(node.path)}
         aria-expanded={open}
@@ -993,7 +999,7 @@ function SidebarNode({
         <span className="min-w-0 truncate font-medium [direction:rtl]">
           <bdi>{node.name}</bdi>
         </span>
-      </button>
+      </TooltipButton>
       {open &&
         node.children.map((child) => (
           <SidebarNode

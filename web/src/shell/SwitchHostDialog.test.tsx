@@ -223,6 +223,7 @@ describe("SwitchHostDialog", () => {
     const user = userEvent.setup();
     const target = screen.getByRole("group", { name: "Switch host" });
     expect(target).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(document, { key: "Tab" });
     act(() => target.focus());
     expect(target).toHaveFocus();
     await waitFor(() =>

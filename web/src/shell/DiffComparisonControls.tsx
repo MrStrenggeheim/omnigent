@@ -135,7 +135,8 @@ export function DiffComparisonControls({
             variant="ghost"
             size="sm"
             aria-label="Diff comparison"
-            title={`${label}: ${selectionDescription}`}
+            tooltip="Compare changes"
+            tooltipDescription={`${label}: ${selectionDescription}`}
             className="h-7 min-w-0 max-w-44 gap-1 px-1.5 text-xs"
           >
             <Icon className="size-3.5 shrink-0" />

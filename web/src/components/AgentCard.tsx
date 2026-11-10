@@ -14,7 +14,7 @@ import { PiIcon } from "@/components/icons/PiIcon";
 import type { ComponentType, SVGProps } from "react";
 import type { AvailableAgent } from "@/hooks/useAvailableAgents";
 import { nativeCodingAgentForAvailableAgent } from "@/lib/nativeCodingAgents";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentHoverCard } from "@/components/AgentHoverCard";
 
 /**
@@ -103,7 +103,7 @@ export function AgentCard({
 }) {
   const Icon = iconForAgent(agent);
   const card = (
-    <button
+    <TooltipButton
       type="button"
       data-testid={`agent-card-${agent.id}`}
       onClick={onSelect}
@@ -118,7 +118,7 @@ export function AgentCard({
           <p className="mt-0.5 text-sm text-muted-foreground">{agent.description}</p>
         )}
       </div>
-    </button>
+    </TooltipButton>
   );
 
   // Compact cards drop the inline description to keep heights even in a

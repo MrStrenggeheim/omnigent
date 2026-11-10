@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // Project settings dialog: edits the stored defaults (`config`) the new-session
 // composer prefills (host, workspace, agent, worktree and base branch, and a model
 // and effort for native harnesses). An unset field stores no key.
@@ -418,7 +419,7 @@ export function ProjectSettingsDialog({
                 className="relative flex flex-col gap-1.5"
                 data-testid="project-settings-workspace"
               >
-                <button
+                <TooltipButton
                   type="button"
                   onClick={() => setWorkspaceOpen(true)}
                   aria-expanded={workspaceOpen}
@@ -433,7 +434,7 @@ export function ProjectSettingsDialog({
                       workspaceOpen ? "rotate-180" : ""
                     }`}
                   />
-                </button>
+                </TooltipButton>
                 <WorkspacePickerDialog
                   open={workspaceOpen}
                   onOpenChange={setWorkspaceOpen}

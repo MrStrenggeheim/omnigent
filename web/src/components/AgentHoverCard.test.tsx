@@ -35,7 +35,7 @@ describe("AgentHoverCard", () => {
         </button>
       </AgentHoverCard>,
     );
-    expect(screen.getByTestId("trigger")).toHaveAttribute("data-slot", "hover-card-trigger");
+    expect(screen.getByTestId("trigger")).toHaveAttribute("data-slot", "tooltip-trigger");
   });
 
   it("renders the trigger bare when the agent has no description", () => {
@@ -47,7 +47,7 @@ describe("AgentHoverCard", () => {
         </button>
       </AgentHoverCard>,
     );
-    expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-slot", "hover-card-trigger");
+    expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-slot", "tooltip-trigger");
   });
 
   it("treats an empty-string description as nothing to show", () => {
@@ -60,7 +60,7 @@ describe("AgentHoverCard", () => {
         </button>
       </AgentHoverCard>,
     );
-    expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-slot", "hover-card-trigger");
+    expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-slot", "tooltip-trigger");
   });
 });
 

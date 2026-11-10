@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * "Set up <agent> on <host>" dialog for the New Chat landing screen.
  *
@@ -324,7 +325,7 @@ function SetupStepRow({
 function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <button
+    <TooltipButton
       type="button"
       data-testid="harness-setup-command"
       title="Copy command"
@@ -344,6 +345,6 @@ function CopyCommand({ command }: { command: string }) {
       ) : (
         <CopyIcon className="size-3 shrink-0 opacity-60 group-hover:opacity-100" />
       )}
-    </button>
+    </TooltipButton>
   );
 }

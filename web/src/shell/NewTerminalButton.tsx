@@ -29,7 +29,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useSessionAgent } from "@/hooks/useAgents";
 import { terminalTabKey, useCreateTerminal } from "@/hooks/useTerminals";
 import { useTerminalFirst } from "./TerminalFirstContext";
@@ -98,7 +104,7 @@ export function NewTerminalButton({
         : undefined;
   const trigger =
     variant === "row" ? (
-      <button
+      <TooltipButton
         type="button"
         aria-label="New shell"
         disabled={create.isPending}
@@ -109,9 +115,9 @@ export function NewTerminalButton({
         <span className="text-sm">
           {create.isError ? `Failed: ${create.error.message}` : "New shell"}
         </span>
-      </button>
+      </TooltipButton>
     ) : (
-      <button
+      <TooltipButton
         type="button"
         aria-label="New shell"
         disabled={create.isPending}
@@ -119,7 +125,7 @@ export function NewTerminalButton({
         onClick={onTriggerClick}
       >
         <PlusIcon className="size-3.5" />
-      </button>
+      </TooltipButton>
     );
 
   // The row variant carries its own label (and inline error text), so
@@ -167,7 +173,7 @@ export function NewTerminalButton({
   // default shell; the adjacent caret opens the installed-shell picker.
   const caret = (
     <DropdownMenuTrigger asChild>
-      <button
+      <TooltipButton
         type="button"
         aria-label="Choose shell"
         disabled={create.isPending}
@@ -178,7 +184,7 @@ export function NewTerminalButton({
         }
       >
         <ChevronDownIcon className="size-3.5" />
-      </button>
+      </TooltipButton>
     </DropdownMenuTrigger>
   );
 

@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useMemo, useState } from "react";
 import { CalendarIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useOmnigentAnalytics } from "@/lib/analytics";
@@ -106,7 +107,7 @@ export function UsagePage() {
           <h1 className="text-lg font-semibold">Usage</h1>
           <div className="flex items-center gap-1.5">
             {RANGE_PRESETS.map(({ key, label }) => (
-              <button
+              <TooltipButton
                 type="button"
                 key={key}
                 className={cn(
@@ -121,7 +122,7 @@ export function UsagePage() {
                 }}
               >
                 {label}
-              </button>
+              </TooltipButton>
             ))}
           </div>
         </div>
@@ -166,7 +167,7 @@ export function UsagePage() {
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
             <TriangleAlertIcon className="h-5 w-5" />
             <p>Failed to load usage data</p>
-            <button
+            <TooltipButton
               type="button"
               className="text-primary underline"
               onClick={() => {
@@ -175,7 +176,7 @@ export function UsagePage() {
               }}
             >
               Retry
-            </button>
+            </TooltipButton>
           </div>
         )}
 

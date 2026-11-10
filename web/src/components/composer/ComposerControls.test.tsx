@@ -73,10 +73,7 @@ describe("shared composer controls", () => {
     expect(trigger).not.toHaveClass("max-w-[7.25rem]", "md:max-w-40");
     expect(trigger).toHaveTextContent("High");
     expect(screen.getByTestId("composer-agent-model-value")).toHaveClass("truncate");
-    expect(screen.getByTestId("composer-agent-model-value")).toHaveAttribute(
-      "title",
-      "GPT-5.6-Sol",
-    );
+    expect(screen.getByTestId("composer-agent-model-value")).not.toHaveAttribute("title");
     expect(screen.getByTestId("composer-agent-effort-value")).not.toHaveClass("hidden");
     expect(screen.getByTestId("product-icon")).toBeInTheDocument();
     expect(screen.getByTestId("composer-agent-config-value")).toHaveClass(

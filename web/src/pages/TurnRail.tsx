@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // A vertical minimap of the conversation: one tick per turn (a user message
 // and a preview of the reply that followed). Hovering a tick reveals a preview
 // box; clicking scrolls the transcript to that user message. The rail scrolls
@@ -287,7 +288,7 @@ export function TurnRail({
           // it owns the viewport midpoint. Hovering isolates black to one tick.
           const black = hoveredId ? isHovered : activeId === turn.itemId;
           return (
-            <button
+            <TooltipButton
               key={turn.itemId}
               type="button"
               data-turn-tick={turn.itemId}
@@ -318,7 +319,7 @@ export function TurnRail({
                     : "bg-muted-foreground/40 group-hover:bg-muted-foreground/70",
                 )}
               />
-            </button>
+            </TooltipButton>
           );
         })}
       </div>

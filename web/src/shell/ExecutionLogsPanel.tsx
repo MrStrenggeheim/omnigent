@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { usePanelEscapeClose } from "@/hooks/usePanelEscapeClose";
 import { MobileWorkspaceTabs } from "./MobileWorkspace";
 // Right-side panel that shows the raw JSON items for a conversation,
@@ -192,7 +193,7 @@ export function ExecutionLogsPanel({
               </Select>
               {/* View toggle: conv items vs raw SSE events */}
               <div className="ml-auto flex rounded-md border border-border text-sm">
-                <button
+                <TooltipButton
                   type="button"
                   className={cn(
                     "px-2 py-1 rounded-l-md",
@@ -203,8 +204,8 @@ export function ExecutionLogsPanel({
                   onClick={() => setView("items")}
                 >
                   Items
-                </button>
-                <button
+                </TooltipButton>
+                <TooltipButton
                   type="button"
                   className={cn(
                     "px-2 py-1 rounded-r-md border-l border-border",
@@ -215,7 +216,7 @@ export function ExecutionLogsPanel({
                   onClick={() => setView("sse")}
                 >
                   SSE
-                </button>
+                </TooltipButton>
               </div>
             </div>
             {view === "items" ? (
@@ -318,7 +319,7 @@ function SessionItemEntry({ item, index }: { item: RawSessionItem; index: number
   const expanded = JSON.stringify(item, null, 2);
   return (
     <div className="rounded-md border border-border bg-muted/40">
-      <button
+      <TooltipButton
         type="button"
         aria-expanded={isExpanded}
         data-testid="execution-log-entry"
@@ -332,7 +333,7 @@ function SessionItemEntry({ item, index }: { item: RawSessionItem; index: number
         )}
         <span className="shrink-0 text-muted-foreground">#{index}</span>
         {!isExpanded && <span className="truncate text-foreground">{collapsed}</span>}
-      </button>
+      </TooltipButton>
       {isExpanded && (
         <pre className="whitespace-pre-wrap break-words border-t border-border px-2 py-1.5 text-foreground">
           {expanded}
@@ -388,7 +389,7 @@ function SseEventEntry({ entry }: { entry: SseLogEntry }) {
   const ts = new Date(entry.ts).toISOString().slice(11, 23); // HH:MM:SS.mmm
   return (
     <div className="rounded-md border border-border bg-muted/40">
-      <button
+      <TooltipButton
         type="button"
         aria-expanded={isExpanded}
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-muted/60"
@@ -402,7 +403,7 @@ function SseEventEntry({ entry }: { entry: SseLogEntry }) {
         <span className="shrink-0 text-muted-foreground">#{entry.index + 1}</span>
         <span className="shrink-0 text-muted-foreground">{ts}</span>
         {!isExpanded && <span className="truncate text-foreground">{collapsed}</span>}
-      </button>
+      </TooltipButton>
       {isExpanded && (
         <pre className="whitespace-pre-wrap break-words border-t border-border px-2 py-1.5 text-foreground">
           {expanded}

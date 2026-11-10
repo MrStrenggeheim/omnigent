@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { isEditorLevel } from "@/lib/permissionsApi";
 import { useWorkbenchWorkspace, queryIdentity, resourceBase } from "@/lib/workbenchWorkspace";
 import { type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -643,7 +644,7 @@ function ContentSearchPanelContent({
             {[...files].map(([path, matches]) => (
               <div key={path} className="mb-2">
                 <div className="flex items-center gap-1 px-1.5">
-                  <button
+                  <TooltipButton
                     type="button"
                     aria-label={`${collapsed.has(path) ? "Expand" : "Collapse"} ${path}`}
                     aria-expanded={!collapsed.has(path)}
@@ -663,11 +664,9 @@ function ContentSearchPanelContent({
                       <ChevronDownIcon className="size-3 shrink-0" />
                     )}
                     <FileIcon className="size-4 shrink-0" />
-                    <span className="truncate" title={path}>
-                      {path}
-                    </span>
+                    <span className="truncate">{path}</span>
                     <span className="text-muted-foreground">({matches.length})</span>
-                  </button>
+                  </TooltipButton>
                   {showReplace && (
                     <Button
                       type="button"
@@ -706,7 +705,7 @@ function ContentSearchPanelContent({
                           }}
                         />
                       )}
-                      <button
+                      <TooltipButton
                         type="button"
                         aria-label={`Open ${path} at line ${match.line}`}
                         onClick={() =>
@@ -720,7 +719,7 @@ function ContentSearchPanelContent({
                           <mark>{match.text.slice(match.match_start, match.match_end)}</mark>
                           {match.text.slice(match.match_end)}
                         </span>
-                      </button>
+                      </TooltipButton>
                       {showReplace && (
                         <Button
                           type="button"

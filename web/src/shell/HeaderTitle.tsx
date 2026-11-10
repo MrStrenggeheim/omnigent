@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ALT_KEY, ARIA_MOD_KEY, MOD_KEY } from "@/components/KeyboardShortcut";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useRenameConversation } from "@/hooks/useConversations";
 import { useRenameSessionHotkey } from "@/hooks/useRenameSessionHotkey";
 import { isImeCompositionKeyEvent } from "@/lib/ime";
@@ -24,7 +24,7 @@ export function HeaderTitle({ conversationId, title }: { conversationId: string;
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
+          <TooltipButton
             type="button"
             data-testid="header-title"
             aria-keyshortcuts={`${ARIA_MOD_KEY}+Alt+R`}
@@ -32,7 +32,7 @@ export function HeaderTitle({ conversationId, title }: { conversationId: string;
             className="min-w-0 cursor-pointer truncate rounded text-left text-foreground hover:underline focus-visible:underline focus-visible:outline-none"
           >
             {title}
-          </button>
+          </TooltipButton>
         </TooltipTrigger>
         {/* Bottom placement: the header sits at top-0, so a top-side tooltip
             would clip above the viewport edge. */}

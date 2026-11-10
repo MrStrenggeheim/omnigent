@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import * as AccordionPrimitive from "radix-ui/accordion";
 import { useMcpServerTools, type McpServerTools } from "@/hooks/useMcpServerTools";
 import { useEffect, useState, type ReactNode } from "react";
@@ -288,14 +289,14 @@ function CatalogRow({
       )}
     >
       {onOpen ? (
-        <button
+        <TooltipButton
           type="button"
           onClick={onOpen}
           className={cn(mainClass, "cursor-pointer")}
           data-testid={`catalog-row-${name}`}
         >
           {main}
-        </button>
+        </TooltipButton>
       ) : (
         <div className={mainClass} data-testid={`catalog-row-${name}`}>
           {main}

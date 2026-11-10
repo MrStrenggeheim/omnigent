@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * Inbox page (``/inbox``) — every approval prompt waiting on the user,
  * across loaded sessions, rendered as actionable cards.
@@ -700,7 +701,7 @@ function InboxCard({
           : "rounded-xl bg-transparent",
       )}
     >
-      <button
+      <TooltipButton
         type="button"
         aria-expanded={expanded}
         aria-label={`${kindLabel}: ${title}`}
@@ -739,7 +740,7 @@ function InboxCard({
         ) : (
           <span aria-hidden className="w-1.5 shrink-0" />
         )}
-      </button>
+      </TooltipButton>
       {expanded && <div className="flex flex-col gap-3 pr-4 pb-4 pl-[58px]">{children}</div>}
     </div>
   );

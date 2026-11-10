@@ -236,6 +236,7 @@ describe("<ReconnectSessionDialog />", () => {
     const user = userEvent.setup();
     const target = screen.getByRole("group", { name });
     expect(target).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(document, { key: "Tab" });
     act(() => target.focus());
     expect(target).toHaveFocus();
     await waitFor(() => expect(screen.getByRole("tooltip")).toHaveTextContent(reason));

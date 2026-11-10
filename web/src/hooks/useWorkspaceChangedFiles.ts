@@ -122,6 +122,8 @@ interface WorkspaceQueryOptions {
 export interface WorkspaceChangedFile {
   path: string;
   name: string;
+  /** Only explicit comparison evidence may identify a directory change. */
+  type?: "file" | "directory";
   /** Change status: "created", "modified", or "deleted". */
   status: "created" | "modified" | "deleted";
   bytes: number | null;
@@ -264,6 +266,7 @@ interface ChangedFilesResponse {
   data: {
     path: string;
     name: string;
+    type?: "file" | "directory";
     status: "created" | "modified" | "deleted";
     bytes: number | null;
     modified_at: number | null;
@@ -313,6 +316,7 @@ async function fetchWorkspaceChangedFiles(
   const data: WorkspaceChangedFile[] = json.data.map((e) => ({
     path: e.path,
     name: e.name,
+    ...(e.type ? { type: e.type } : {}),
     status: e.status,
     bytes: e.bytes,
     modified_at: e.modified_at,

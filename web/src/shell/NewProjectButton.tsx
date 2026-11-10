@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmojiPicker } from "@/components/ProjectIconPicker";
 import { useCreateProject } from "@/hooks/useConversations";
 import { cn } from "@/lib/utils";
@@ -96,7 +96,7 @@ export function NewProjectButton({ onCreated }: { onCreated: (name: string) => v
           <div className="flex items-stretch overflow-hidden rounded-lg border border-input">
             <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
               <PopoverTrigger asChild>
-                <button
+                <TooltipButton
                   type="button"
                   aria-label="Choose project icon"
                   data-testid="new-project-icon"
@@ -110,7 +110,7 @@ export function NewProjectButton({ onCreated }: { onCreated: (name: string) => v
                   ) : (
                     <SmilePlusIcon className="size-4 text-brand-accent" />
                   )}
-                </button>
+                </TooltipButton>
               </PopoverTrigger>
               <PopoverContent
                 align="start"

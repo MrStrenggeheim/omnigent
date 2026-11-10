@@ -1,4 +1,4 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatTokenCount } from "@/lib/formatCost";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +37,7 @@ export function ComposerContextRing({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <TooltipButton
           type="button"
           data-testid="composer-context-ring"
           className={cn(
@@ -64,7 +64,7 @@ export function ComposerContextRing({
               />
             )}
           </svg>
-        </button>
+        </TooltipButton>
       </TooltipTrigger>
       <TooltipContent side="top" className="flex-col items-start gap-0 px-3 py-2 text-left text-sm">
         <p className="tabular-nums text-ui leading-tight">{usedPct}% context used</p>

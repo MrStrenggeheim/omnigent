@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { GitPullRequestIcon, Loader2Icon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -58,7 +59,7 @@ export function ComposerPrLink({
     prCount > 1 ? `${prCount} PRs` : prNumber == null ? "1 PR" : `${prNumberPrefix}${prNumber}`;
 
   return (
-    <button
+    <TooltipButton
       type="button"
       data-testid="composer-pr-link"
       onClick={() => onOpen()}
@@ -80,10 +81,9 @@ export function ComposerPrLink({
       <span
         data-workspace-collapse-label=""
         className="truncate tabular-nums underline-offset-2 group-hover:underline group-focus-visible:underline"
-        title={label}
       >
         {label}
       </span>
-    </button>
+    </TooltipButton>
   );
 }

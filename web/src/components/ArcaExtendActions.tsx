@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { offersWorkweek, persistDismissalToday } from "@/lib/arcaShutdownWarning";
 import {
@@ -74,23 +75,23 @@ export function ArcaExtendActions({
   return (
     <div>
       <div className="flex flex-wrap gap-2">
-        <button
+        <TooltipButton
           type="button"
           disabled={pending !== null}
           onClick={() => void run("overnight")}
           className="rounded border border-warning/40 px-2 py-0.5 hover:bg-warning/10 disabled:opacity-50"
         >
           {pending === "overnight" ? "Extending Arca…" : "Keep running tonight"}
-        </button>
+        </TooltipButton>
         {offersWorkweek(new Date(`${day}T12:00:00`)) && (
-          <button
+          <TooltipButton
             type="button"
             disabled={pending !== null}
             onClick={() => void run("workweek")}
             className="rounded border border-warning/40 px-2 py-0.5 hover:bg-warning/10 disabled:opacity-50"
           >
             {pending === "workweek" ? "Extending Arca…" : "Keep running this week"}
-          </button>
+          </TooltipButton>
         )}
       </div>
       {error && (

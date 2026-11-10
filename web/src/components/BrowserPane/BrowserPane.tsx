@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /** Embedded browser pane. The page is a native Electron WebContentsView the
  *  main process paints over a placeholder `<div>` this component measures
  *  (getBoundingClientRect → IPC). Native overlay, not an iframe/webview: the
@@ -568,7 +569,7 @@ export function BrowserPane({
       data-browser-pane-conversation={conversationId}
     >
       <div className="workspace-control-header flex items-center gap-1 border-border border-b bg-card px-2">
-        <button
+        <TooltipButton
           type="button"
           onClick={handleBack}
           disabled={!canGoBack}
@@ -577,8 +578,8 @@ export function BrowserPane({
           className="flex size-6 items-center justify-center rounded text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
         >
           <ChevronLeftIcon className="size-4" />
-        </button>
-        <button
+        </TooltipButton>
+        <TooltipButton
           type="button"
           onClick={handleForward}
           disabled={!canGoForward}
@@ -587,8 +588,8 @@ export function BrowserPane({
           className="flex size-6 items-center justify-center rounded text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
         >
           <ChevronRightIcon className="size-4" />
-        </button>
-        <button
+        </TooltipButton>
+        <TooltipButton
           type="button"
           onClick={handleReload}
           disabled={!hasView}
@@ -597,7 +598,7 @@ export function BrowserPane({
           className="flex size-6 items-center justify-center rounded text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
         >
           <RotateCwIcon className="size-4" />
-        </button>
+        </TooltipButton>
         <input
           type="text"
           value={currentUrl}
@@ -622,7 +623,7 @@ export function BrowserPane({
           }}
           className="h-6 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-foreground text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring dark:bg-input/30"
         />
-        <button
+        <TooltipButton
           type="button"
           onClick={handleDevTools}
           disabled={!hasView}
@@ -631,9 +632,9 @@ export function BrowserPane({
           className="flex size-6 items-center justify-center rounded text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
         >
           <WrenchIcon className="size-4" />
-        </button>
+        </TooltipButton>
         {cookieImportSupported && (
-          <button
+          <TooltipButton
             type="button"
             onClick={handlePreviewChromeCookies}
             disabled={!hasView || cookieBusy}
@@ -642,9 +643,9 @@ export function BrowserPane({
             className="flex size-6 items-center justify-center rounded text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
           >
             <CookieIcon className="size-4" />
-          </button>
+          </TooltipButton>
         )}
-        <button
+        <TooltipButton
           type="button"
           onClick={handleToggleDesignMode}
           disabled={!hasView}
@@ -661,7 +662,7 @@ export function BrowserPane({
           )}
         >
           <SquareDashedMousePointerIcon className="size-4" />
-        </button>
+        </TooltipButton>
       </div>
       {navigationError && (
         <div role="alert" className="px-2 py-1 text-destructive text-xs">

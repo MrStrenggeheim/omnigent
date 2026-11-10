@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useEffect, useRef, useState } from "react";
 import { FolderIcon, FolderOpenIcon } from "lucide-react";
 
@@ -54,7 +55,7 @@ interface RowProps {
 
 function PathRow({ path, active, onSelect, testId }: RowProps) {
   return (
-    <button
+    <TooltipButton
       type="button"
       // id doubles as the aria-activedescendant target on the input.
       id={testId}
@@ -76,7 +77,7 @@ function PathRow({ path, active, onSelect, testId }: RowProps) {
     >
       <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />
       <span className="flex-1 truncate">{path}</span>
-    </button>
+    </TooltipButton>
   );
 }
 
@@ -285,7 +286,7 @@ export function WorkspacePathField({
           className="flex-1 rounded-md border border-input aria-invalid:border-destructive bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring"
           data-testid="workspace-path-input"
         />
-        <button
+        <TooltipButton
           type="button"
           onClick={onBrowse}
           aria-label="Browse directories"
@@ -293,7 +294,7 @@ export function WorkspacePathField({
           data-testid="workspace-browse-toggle"
         >
           <FolderIcon className="size-4" />
-        </button>
+        </TooltipButton>
       </div>
 
       {dropdownOpen && hasContent && (

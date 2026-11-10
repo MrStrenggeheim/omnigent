@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 // The schedule-builder sub-form used by the manual create dialog.
 //
 // Top-level frequency options are Hourly, Daily, Weekdays, and Weekly. Each is a simple
@@ -252,7 +253,7 @@ export function ScheduleFields({
                     onChange={(e) => handleTimeTextChange(e.target.value)}
                     onBlur={canonicalizeTimeText}
                   />
-                  <button
+                  <TooltipButton
                     type="button"
                     aria-label="Open time picker"
                     data-testid="schedule-time-picker-trigger"
@@ -260,7 +261,7 @@ export function ScheduleFields({
                     onClick={() => handleTimePickerOpenChange(!timePickerOpen)}
                   >
                     <ClockIcon className="size-3.5" />
-                  </button>
+                  </TooltipButton>
                 </div>
               </PopoverAnchor>
               <PopoverContent
@@ -331,7 +332,7 @@ export function ScheduleFields({
             {WEEKDAY_CODES.map((code) => {
               const selected = model.weekdays.includes(code);
               return (
-                <button
+                <TooltipButton
                   key={code}
                   type="button"
                   aria-pressed={selected}
@@ -345,7 +346,7 @@ export function ScheduleFields({
                   )}
                 >
                   {WEEKDAY_LABELS[code]}
-                </button>
+                </TooltipButton>
               );
             })}
           </div>
@@ -419,7 +420,7 @@ function PickerCell({
   testId: string;
 }) {
   return (
-    <button
+    <TooltipButton
       type="button"
       aria-pressed={selected}
       data-selected={selected ? "true" : undefined}
@@ -431,6 +432,6 @@ function PickerCell({
       onClick={onClick}
     >
       {children}
-    </button>
+    </TooltipButton>
   );
 }

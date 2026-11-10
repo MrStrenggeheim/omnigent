@@ -202,7 +202,9 @@ describe("ChatHeader — deployed Share presentation", () => {
 
     const share = screen.getByRole("button", { name: "Share session" });
     expect(share).toBeDisabled();
-    expect(share).toHaveAttribute("title", "Sharing is unavailable");
+    expect(share).not.toHaveAttribute("title");
+    fireEvent.focus(screen.getByLabelText("Share session disabled: Sharing is unavailable"));
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Sharing is unavailable");
     expect(share).toHaveClass(
       "h-6",
       "gap-1",

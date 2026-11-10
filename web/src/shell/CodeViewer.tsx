@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { previewSourceMarkers, renderedMarkdownSelection } from "./markdownPreviewSelection";
 import { FileSelectionMenu, FileSelectionScope } from "./FileSelectionMenu";
 // Syntax-highlighted file body with find-in-file, text-selection comments,
@@ -1131,7 +1132,7 @@ function CodeViewerContent({
                 : "No results"
               : ""}
           </span>
-          <button
+          <TooltipButton
             type="button"
             aria-label="Previous match"
             className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-40"
@@ -1139,8 +1140,8 @@ function CodeViewerContent({
             onClick={() => setCurrentMatchIdx((i) => (i - 1 + matches.length) % matches.length)}
           >
             <ChevronUpIcon className="size-3.5" />
-          </button>
-          <button
+          </TooltipButton>
+          <TooltipButton
             type="button"
             aria-label="Next match"
             className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-40"
@@ -1148,8 +1149,8 @@ function CodeViewerContent({
             onClick={() => setCurrentMatchIdx((i) => (i + 1) % matches.length)}
           >
             <ChevronDownIcon className="size-3.5" />
-          </button>
-          <button
+          </TooltipButton>
+          <TooltipButton
             type="button"
             aria-label="Close search"
             className="rounded p-0.5 text-muted-foreground hover:bg-muted"
@@ -1159,7 +1160,7 @@ function CodeViewerContent({
             }}
           >
             <XIcon className="size-3.5" />
-          </button>
+          </TooltipButton>
         </div>
       )}
 

@@ -12,6 +12,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "./components/ui/tooltip";
 import type * as UseTerminalsModule from "./hooks/useTerminals";
+import type * as FilesPanelModule from "./shell/FilesPanel";
 import {
   UI_FONT_SIZE_DEFAULT,
   UI_FONT_SIZE_MAX,
@@ -24,7 +25,10 @@ import { WorkspacePanel } from "./shell/WorkspacePanel";
 // children and data hooks (each exercised by its own suite) so the rail
 // mounts without Monaco / xterm / query stacks.
 vi.mock("./shell/FileViewer", () => ({ FileViewer: () => null }));
-vi.mock("./shell/FilesPanel", () => ({ FilesPanel: () => null }));
+vi.mock("./shell/FilesPanel", async (importOriginal) => ({
+  ...(await importOriginal<typeof FilesPanelModule>()),
+  FilesPanel: () => null,
+}));
 vi.mock("./shell/SubagentsPanel", () => ({ SubagentsPanel: () => null }));
 vi.mock("./components/BrowserPane/BrowserPane", () => ({ BrowserPane: () => null }));
 vi.mock("./components/blocks/TerminalView", () => ({ TerminalView: () => null }));
@@ -681,29 +685,25 @@ describe("index.css table cell wrapping rule", () => {
   });
 });
 
+const sidebarCanvasRule = cssBlocks
+  .map(([block]) => block)
+  .find((block) => selectorOf(block).includes(".dark[data-theme] .conversations-sidebar"));
+
 describe("index.css sidebar canvas", () => {
-  const omniLightRule = cssSource.match(
-    /:root:not\(\.dark\):not\(\[data-theme\]\) \.conversations-sidebar \{[^}]*\}/,
-  )?.[0];
-  const omniDarkRule = cssSource.match(
-    /\.dark:not\(\[data-theme\]\) \.conversations-sidebar \{[^}]*\}/,
-  )?.[0];
   const lightEdgeRule = cssSource.match(
     /html:not\(\.dark\) \.conversations-sidebar(?::not\(\.is-peek\))? \{[^}]*\}/,
   )?.[0];
   const darkEdgeRule = cssSource.match(/\.dark \.conversations-sidebar \{[^}]*\}/)?.[0];
-  const peekBackgroundRule = cssSource.match(
-    /:root:not\(\.dark\):not\(\[data-theme\]\) \.conversations-sidebar\.is-peek,[\s\S]*?\.dark\[data-theme\] \.conversations-sidebar\.is-peek \{[^}]*\}/,
-  )?.[0];
-
-  it("uses the specified left-to-right gradient for Omnigent light", () => {
-    expect(omniLightRule).toContain("background: linear-gradient(90deg, #fffefe, #fcf6fa)");
+  it("uses the flat accent-tinted sidebar canvas", () => {
+    expect(sidebarCanvasRule).toContain("background: var(--sidebar)");
+    expect(indexCssSource).toContain(
+      "--sidebar: color-mix(in srgb, var(--primary) 4%, var(--background))",
+    );
   });
 
   it("removes the dot-grid layer from both modes", () => {
     expect(cssSource).not.toContain("--sidebar-dot-color");
-    expect(omniLightRule).not.toContain("radial-gradient");
-    expect(omniDarkRule).not.toContain("radial-gradient");
+    expect(sidebarCanvasRule).not.toContain("gradient");
   });
 
   it("uses the shared inset shadow with a dark-only right border", () => {
@@ -714,12 +714,15 @@ describe("index.css sidebar canvas", () => {
     expect(darkEdgeRule).toContain("border-right: 1px solid rgb(255 255 255 / 2%)");
   });
 
-  it("backs floating peek cards with the opaque card color in every theme", () => {
-    expect(peekBackgroundRule).toContain(".dark:not([data-theme]) .conversations-sidebar.is-peek");
-    expect(peekBackgroundRule).toContain(
-      ":root:not(.dark)[data-theme] .conversations-sidebar.is-peek",
-    );
-    expect(peekBackgroundRule).toContain("background-color: var(--card-solid)");
+  it("keeps the shared sidebar canvas on floating peeks in every theme", () => {
+    const selectors = selectorOf(sidebarCanvasRule!).split(",");
+    expect(selectors.map((selector) => selector.trim())).toEqual([
+      ":root:not(.dark):not([data-theme]) .conversations-sidebar",
+      ":root:not(.dark)[data-theme] .conversations-sidebar",
+      ".dark:not([data-theme]) .conversations-sidebar",
+      ".dark[data-theme] .conversations-sidebar",
+    ]);
+    expect(sidebarCanvasRule).toContain("background: var(--sidebar)");
   });
 });
 
@@ -886,38 +889,29 @@ describe("index.css shadow tokens", () => {
   });
 });
 
-/* Regression test for the "mobile sidebar is see-through" bug.
- *
- * Below md the sidebar is a full-screen overlay on top of the chat. The
- * per-theme `.conversations-sidebar` rules paint its canvas with the
- * `background` SHORTHAND, which resets background-color to transparent — and
- * the dark stack is entirely translucent, so the conversation showed straight
- * through. A later media-query rule restores an opaque fill under the
- * gradients. It only works if it keeps matching the theme rules' specificity
- * (they'd win the tie otherwise) and stays declared after them.
- */
-describe("index.css mobile sidebar opacity", () => {
-  const mobileRule = cssSource.match(
-    /@media \(width < 48rem\) \{[^@]*?\.conversations-sidebar[^{]*\{[^}]*background-color[^}]*\}/,
-  )?.[0];
-
-  it("keeps an opaque fill for the mobile sidebar overlay", () => {
-    expect(mobileRule, "the mobile sidebar background-color rule is gone").toBeDefined();
-    expect(mobileRule).toMatch(/background-color:\s*var\(--card-solid\)/);
+// Mobile overlays share the flat canvas; generated palette gradients must not win.
+describe("index.css mobile sidebar canvas", () => {
+  it("applies the shared sidebar fill without a viewport restriction", () => {
+    expect(sidebarCanvasRule, "the shared sidebar canvas rule is gone").toBeDefined();
+    expect(sidebarCanvasRule).toContain("background: var(--sidebar)");
+    const before = cssSource.slice(0, cssSource.indexOf(sidebarCanvasRule!));
+    const opens = (before.match(/\{/g) ?? []).length;
+    const closes = (before.match(/\}/g) ?? []).length;
+    expect(opens - closes, "the sidebar canvas must apply at every viewport width").toBe(0);
   });
 
   it("declares it after the per-theme canvas rules so it wins the cascade", () => {
-    // Matching specificity — the shorthand in the theme rules would otherwise
-    // keep background-color transparent.
     const palette = generatedPaletteCssSource.lastIndexOf(".conversations-sidebar {");
-    const mobile = cssSource.indexOf(mobileRule!);
+    const mobile = cssSource.indexOf(sidebarCanvasRule!);
     expect(palette).toBeGreaterThan(-1);
     expect(mobile).toBeGreaterThan(palette);
-    // Every palette/mode selector must be covered, or one can go transparent.
-    expect(mobileRule).toContain(":root:not(.dark):not([data-theme]) .conversations-sidebar");
-    expect(mobileRule).toContain(":root:not(.dark)[data-theme] .conversations-sidebar");
-    expect(mobileRule).toContain(".dark:not([data-theme]) .conversations-sidebar");
-    expect(mobileRule).toContain(".dark[data-theme] .conversations-sidebar");
+    // Match each palette's specificity so the later declaration replaces its canvas.
+    expect(sidebarCanvasRule).toContain(
+      ":root:not(.dark):not([data-theme]) .conversations-sidebar",
+    );
+    expect(sidebarCanvasRule).toContain(":root:not(.dark)[data-theme] .conversations-sidebar");
+    expect(sidebarCanvasRule).toContain(".dark:not([data-theme]) .conversations-sidebar");
+    expect(sidebarCanvasRule).toContain(".dark[data-theme] .conversations-sidebar");
   });
 });
 

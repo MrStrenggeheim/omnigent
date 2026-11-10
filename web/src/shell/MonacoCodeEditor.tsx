@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useFileContentReader } from "./FileContentReader";
 // Monaco-based source viewer/editor, including large Markdown files.
 //
@@ -528,20 +529,20 @@ function MonacoCodeEditorInner({
             <span className="flex-1">
               This file was modified externally while you were editing.
             </span>
-            <button
+            <TooltipButton
               type="button"
               className="rounded px-2 py-0.5 font-medium hover:bg-muted transition-colors"
               onClick={dismissExternalUpdate}
             >
               Keep mine
-            </button>
-            <button
+            </TooltipButton>
+            <TooltipButton
               type="button"
               className="rounded bg-primary px-2 py-0.5 font-medium text-primary-foreground hover:opacity-90 transition-opacity"
               onClick={discardAndApplyExternal}
             >
               Load latest
-            </button>
+            </TooltipButton>
           </div>
         ) : (
           <div className="flex items-center gap-1.5 border-b border-border bg-muted/50 px-4 py-1.5 text-sm text-muted-foreground shrink-0">

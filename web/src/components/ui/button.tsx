@@ -5,6 +5,7 @@ import * as Slot from "radix-ui/slot";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { useOmnigentAnalytics } from "@/lib/analytics";
+import { buttonLabel, ButtonTooltip, type TooltipShortcut } from "@/components/ui/tooltip";
 
 // The pressed-state nudge uses the `transform` property (not translate-y-px)
 // so it composes with `translate`-based positioning: a caller centering the
@@ -71,6 +72,10 @@ const Button = React.forwardRef<
       // (see `lib/analytics.ts`); when absent the button emits nothing, so
       // un-instrumented call sites are unchanged.
       componentId?: string;
+      /** Overrides the label inferred from title, aria-label, or visible text. */
+      tooltip?: React.ReactNode;
+      tooltipDescription?: React.ReactNode;
+      tooltipShortcut?: TooltipShortcut;
     }
 >(function Button(
   {
@@ -83,6 +88,10 @@ const Button = React.forwardRef<
     componentId,
     onClick,
     children,
+    title,
+    tooltip,
+    tooltipDescription,
+    tooltipShortcut,
     ...props
   },
   ref,
@@ -101,7 +110,7 @@ const Button = React.forwardRef<
   // contract, so the loading affordance only applies to real <button>s.
   const showLoading = loading && !asChild;
 
-  return (
+  const button = (
     <Comp
       ref={ref}
       data-slot="button"
@@ -113,6 +122,8 @@ const Button = React.forwardRef<
       aria-busy={showLoading || undefined}
       onClick={handleClick}
       {...props}
+      type={props.type ?? (asChild ? undefined : "submit")}
+      aria-label={props["aria-label"] ?? (buttonLabel(children) ? undefined : title)}
     >
       {showLoading ? (
         <>
@@ -125,6 +136,19 @@ const Button = React.forwardRef<
         children
       )}
     </Comp>
+  );
+  return (
+    <ButtonTooltip
+      label={tooltip ?? props["aria-label"] ?? title ?? buttonLabel(children)}
+      description={
+        tooltipDescription ??
+        (title && props["aria-label"] && title !== props["aria-label"] ? title : undefined)
+      }
+      shortcut={tooltipShortcut}
+      expanded={props["aria-expanded"] === true || props["aria-expanded"] === "true"}
+    >
+      {button}
+    </ButtonTooltip>
   );
 });
 

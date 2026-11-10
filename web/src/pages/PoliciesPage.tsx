@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * Admin default-policies management page (``/settings/policies``; the legacy
  * ``/policies`` path redirects here). Rendered as a Settings sub-category.
@@ -177,7 +178,7 @@ function AddDefaultPolicyDialog({
                   />
                   <div className="flex max-h-52 flex-col divide-y divide-border overflow-y-auto rounded border border-border">
                     {filtered.map((r) => (
-                      <button
+                      <TooltipButton
                         key={r.handler}
                         type="button"
                         onClick={() => handleSelect(r.handler)}
@@ -189,7 +190,7 @@ function AddDefaultPolicyDialog({
                             {r.description}
                           </span>
                         )}
-                      </button>
+                      </TooltipButton>
                     ))}
                     {filtered.length === 0 && (
                       <p className="py-2 text-center text-sm text-muted-foreground">
@@ -204,7 +205,7 @@ function AddDefaultPolicyDialog({
             <div className="flex flex-col gap-1 rounded border border-border bg-muted/50 px-2.5 py-2">
               <div className="flex items-center justify-between">
                 <span className="text-ui font-medium">{entry.name}</span>
-                <button
+                <TooltipButton
                   type="button"
                   onClick={() => {
                     setSelected("");
@@ -215,7 +216,7 @@ function AddDefaultPolicyDialog({
                   className="text-sm text-muted-foreground hover:text-foreground"
                 >
                   Change
-                </button>
+                </TooltipButton>
               </div>
               {entry.description && (
                 <p className="text-sm text-muted-foreground">{entry.description}</p>
@@ -316,8 +317,9 @@ function AddDefaultPolicyDialog({
                                     className="inline-flex items-center gap-0.5 rounded-md bg-muted px-1.5 py-0.5 text-sm"
                                   >
                                     {v}
-                                    <button
+                                    <TooltipButton
                                       type="button"
+                                      aria-label={`Remove ${v}`}
                                       onClick={() => {
                                         const next = current.filter((x) => x !== v);
                                         setFactoryParams((prev) => ({
@@ -328,7 +330,7 @@ function AddDefaultPolicyDialog({
                                       className="ml-0.5 text-muted-foreground hover:text-foreground"
                                     >
                                       <XIcon className="size-3" />
-                                    </button>
+                                    </TooltipButton>
                                   </span>
                                 ))}
                               </div>

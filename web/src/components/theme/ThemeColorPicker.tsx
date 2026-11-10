@@ -1,3 +1,4 @@
+import { TooltipButton } from "@/components/ui/tooltip";
 import { useCallback, useEffect, useMemo, useState, type PointerEvent } from "react";
 import { DicesIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -113,7 +114,7 @@ export function ThemeColorPicker({
       <span className="text-ui font-normal md:font-medium">{label}</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button
+          <TooltipButton
             type="button"
             aria-label={`${label}: ${value.toUpperCase()}`}
             data-testid={`${testId}-trigger`}
@@ -131,7 +132,7 @@ export function ThemeColorPicker({
             <span className="min-w-0 flex-1 font-mono text-sm font-medium tracking-wide">
               {value.toUpperCase()}
             </span>
-          </button>
+          </TooltipButton>
         </PopoverTrigger>
         <PopoverContent
           align="end"
@@ -221,7 +222,7 @@ export function ThemeColorPicker({
                 onBlur={() => setDraft(value.toUpperCase())}
                 className="h-9 min-w-0 flex-1 rounded-xl border bg-background px-3 font-mono text-sm font-medium uppercase tracking-wide outline-none transition-shadow focus:ring-2 focus:ring-ring/40"
               />
-              <button
+              <TooltipButton
                 type="button"
                 aria-label={`Randomize ${label.toLowerCase()}`}
                 title={`Randomize ${label.toLowerCase()}`}
@@ -230,7 +231,7 @@ export function ThemeColorPicker({
                 className="group/randomize flex size-9 shrink-0 items-center justify-center rounded-xl border bg-background text-muted-foreground outline-none transition-[background-color,border-color,color,transform] hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-95"
               >
                 <DicesIcon className="size-4 transition-transform duration-300 group-hover/randomize:-rotate-12 group-active/randomize:rotate-90" />
-              </button>
+              </TooltipButton>
             </div>
           </div>
         </PopoverContent>
