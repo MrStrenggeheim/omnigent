@@ -393,7 +393,14 @@ export function ExplorerActionsProvider({
     if (!conversationId && !workspace) throw new Error("Select a workspace before managing files.");
     const result = workspace
       ? await filesystemOperation(conversationId ?? "", body, undefined, workspace)
-      : await filesystemOperation(conversationId!, body);
+      : await filesystemOperation(conversationId!, {
+          ...body,
+          ...(workspaceRoot &&
+          queryClient?.getQueryData<{ workspaceRevision?: string }>(["session", conversationId])
+            ?.workspaceRevision
+            ? { workspace_root: workspaceRoot }
+            : {}),
+        });
     if (body.operation !== "archive" && body.operation !== "trash_list") {
       window.dispatchEvent(
         new CustomEvent("omnigent:workspace-files-changed", {

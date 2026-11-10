@@ -1744,6 +1744,11 @@ def register_resource_routes(
             content=await request.body(),
         )
 
+    def _check_write_root(body: Any, environment: Any) -> None:
+        expected = body.get("workspace_root") if isinstance(body, dict) else None
+        if expected is not None and expected != str(environment.cwd):
+            raise HTTPException(409, "Workspace changed. Reopen the file before saving.")
+
     @app.post(
         "/v1/sessions/{session_id}/resources/environments/{environment_id}/filesystem-operations"
     )
@@ -1755,6 +1760,7 @@ def register_resource_routes(
         agent_spec = await _require_os_env(session_id)
         environment = resource_registry.resolve_environment(session_id, environment_id, agent_spec)
         body = await request.json()
+        _check_write_root(body, environment)
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail="Expected a filesystem operation")
         try:
@@ -1829,6 +1835,7 @@ def register_resource_routes(
         )
         fs = CallerProcessFilesystem(env)
         body = await request.json()
+        _check_write_root(body, env)
         content_str = body.get("content", "")
         encoding = body.get("encoding", "utf-8")
         create_parents = body.get("create_parents", True)
@@ -1895,6 +1902,8 @@ def register_resource_routes(
         except Exception:  # noqa: BLE001
             pass
         body = await request.json()
+        _check_write_root(body, env)
+        body = {key: value for key, value in body.items() if key != "workspace_root"}
         edit_req = TextEditRequest(
             old_text=body.get("old_text"),
             new_text=body.get("new_text"),

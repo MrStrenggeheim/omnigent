@@ -283,6 +283,9 @@ def _to_conversation(
             else None
         ),
         workspace=meta.workspace if meta else None,
+        workspace_transition=(
+            json.loads(meta.workspace_transition) if meta and meta.workspace_transition else None
+        ),
         git_branch=meta.git_branch if meta else None,
         archived=row.archived,
         live_status=(

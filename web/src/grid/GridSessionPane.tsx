@@ -1,3 +1,5 @@
+import { useWorkbenchSelection } from "@/hooks/useWorkbenchSelection";
+import { WorkbenchWorkspaceProvider, useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
@@ -56,7 +58,7 @@ export type GridWorkspacePanelProps = Pick<
   "open" | "width" | "handleProps" | "maximized" | "onToggleMaximized"
 >;
 
-export function GridSessionPane({
+function GridSessionPaneContent({
   sessionId,
   area,
   selected,
@@ -64,6 +66,7 @@ export function GridSessionPane({
   workspaceTarget,
   workspacePanel,
   onOpenWorkspace,
+  workspaceGuard,
 }: {
   sessionId: string;
   area?: string;
@@ -72,6 +75,7 @@ export function GridSessionPane({
   workspaceTarget: HTMLDivElement | null;
   workspacePanel: GridWorkspacePanelProps;
   onOpenWorkspace: () => void;
+  workspaceGuard: { current: FileNavigationGuard | null };
 }) {
   const { session, isLoading: sessionLoading } = useSession(sessionId);
   const state = useConversationEntryState(sessionId);
@@ -197,15 +201,25 @@ export function GridSessionPane({
   const [showHidden, setShowHidden] = useState(false);
   const [position, setPosition] = useState<FilePosition>();
   const navigationGuard = useRef<FileNavigationGuard | null>(null);
-  const registerNavigationGuard = useCallback((guard: FileNavigationGuard) => {
-    navigationGuard.current = guard;
-    return () => {
-      if (navigationGuard.current === guard) navigationGuard.current = null;
-    };
-  }, []);
+  const registerNavigationGuard = useCallback(
+    (guard: FileNavigationGuard) => {
+      navigationGuard.current = guard;
+      workspaceGuard.current = guard;
+      return () => {
+        if (navigationGuard.current === guard) navigationGuard.current = null;
+        if (workspaceGuard.current === guard) workspaceGuard.current = null;
+      };
+    },
+    [workspaceGuard],
+  );
   const navigateWorkspace = useCallback(
-    (path: string, options: OpenFileOptions | undefined, apply: () => void) => {
-      if (navigationGuard.current) navigationGuard.current(path, options, apply);
+    (
+      path: string,
+      options: OpenFileOptions | undefined,
+      apply: () => void,
+      cancel?: () => void,
+    ) => {
+      if (navigationGuard.current) navigationGuard.current(path, options, apply, cancel);
       else apply();
     },
     [],
@@ -266,9 +280,30 @@ export function GridSessionPane({
     },
     [navigateWorkspace, updateWorkspace, onOpenWorkspace],
   );
+  const resource = useWorkbenchWorkspace();
+  const lastRoot = useRef(resource?.root ?? session?.workspace);
+  useEffect(() => {
+    const next = resource?.root ?? session?.workspace;
+    if (lastRoot.current && next && lastRoot.current !== next) {
+      updateWorkspace({ openFiles: [], selectedFilePath: null, selectedTerminalKey: null });
+      setPosition(undefined);
+    }
+    lastRoot.current = next;
+  }, [resource?.root, session?.workspace, updateWorkspace]);
   const fileContext = useMemo(
     () => ({
       openFile,
+      beforeWorkspaceChange: (apply: () => void, cancel?: () => void) =>
+        navigateWorkspace(
+          "",
+          { workspaceId: "workspace-transition" },
+          () => {
+            updateWorkspace({ selectedFilePath: null });
+            setPosition(undefined);
+            apply();
+          },
+          cancel,
+        ),
       registerNavigationGuard,
       openGithubTab: () => {
         selectTab("github");
@@ -282,6 +317,8 @@ export function GridSessionPane({
     }),
     [
       openFile,
+      navigateWorkspace,
+      updateWorkspace,
       registerNavigationGuard,
       selectTab,
       onOpenWorkspace,
@@ -486,5 +523,25 @@ export function GridSessionPane({
           )}
       </FileViewerContext.Provider>
     </TerminalFirstContextProvider>
+  );
+}
+
+export function GridSessionPane(
+  props: Omit<ComponentProps<typeof GridSessionPaneContent>, "workspaceGuard">,
+) {
+  const workspaceGuard = useRef<FileNavigationGuard | null>(null);
+  const binding = useWorkbenchSelection(props.sessionId, true, (target, apply) => {
+    if (workspaceGuard.current)
+      workspaceGuard.current("", { workspaceId: target?.id ?? "" }, apply);
+    else apply();
+  });
+  const value = useMemo(
+    () => (binding.workspace ? { ...binding.workspace, chatSessionId: props.sessionId } : null),
+    [binding.workspace, props.sessionId],
+  );
+  return (
+    <WorkbenchWorkspaceProvider value={value}>
+      <GridSessionPaneContent {...props} workspaceGuard={workspaceGuard} />
+    </WorkbenchWorkspaceProvider>
   );
 }

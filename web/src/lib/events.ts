@@ -520,6 +520,12 @@ export interface ClientTaskCancel {
  * on background tools / sub-agents. The session snapshot's `status` never
  * reports `waiting`; it is live-only.
  */
+export interface SessionWorkspaceEvent {
+  type: "session_workspace";
+  conversationId: string;
+  switching: boolean;
+}
+
 export interface SessionStatusEvent {
   type: "session_status";
   conversationId: string;
@@ -1024,6 +1030,7 @@ export type StreamEvent =
   | ElicitationResolved
   | PolicyDenied
   | SessionStatusEvent
+  | SessionWorkspaceEvent
   | SessionUsageEvent
   | SessionModelEvent
   | SessionTitleEvent

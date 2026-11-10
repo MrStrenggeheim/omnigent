@@ -155,6 +155,8 @@ interface SessionResponseWire {
   project_id?: string | null;
   /** Canonical working directory; ``null`` when unbound. */
   workspace?: string | null;
+  workspace_switching?: boolean;
+  workspace_revision?: string | null;
   /**
    * Native-terminal CLI args the session launched with, e.g.
    * ``["--permission-mode", "plan"]``. Records only the LAUNCH flags —
@@ -337,6 +339,8 @@ function sessionFromWire(wire: SessionResponseWire): Session {
     labels: wire.labels,
     projectId: wire.project_id ?? null,
     workspace: wire.workspace ?? null,
+    workspaceSwitching: wire.workspace_switching ?? false,
+    workspaceRevision: wire.workspace_revision ?? null,
     terminalLaunchArgs: wire.terminal_launch_args ?? null,
     gitBranch: wire.git_branch ?? null,
     items: wire.items ?? [],

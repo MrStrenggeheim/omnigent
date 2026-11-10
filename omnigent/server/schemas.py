@@ -2433,6 +2433,8 @@ class SessionResponse(BaseModel):
     # Each {"pending_id", "content"} restores a pending bubble on reconnect.
     pending_inputs: list[dict[str, Any]] = Field(default_factory=list)
     workspace: str | None = None
+    workspace_switching: bool = False
+    workspace_revision: str | None = None
     git_branch: str | None = None
     archived: bool = False
     todos: list[dict[str, Any]] = Field(default_factory=list)
@@ -3034,6 +3036,8 @@ class SessionListItem(BaseModel):
     external_session_id: str | None = None
     pending_elicitations_count: int = 0
     workspace: str | None = None
+    workspace_switching: bool = False
+    workspace_revision: str | None = None
     git_branch: str | None = None
     archived: bool = False
     comments_count: int = 0
@@ -3274,6 +3278,14 @@ class _SSEEventBase(BaseModel):
 
 
 # ── Session-scoped events (session.*) ──────────────────────────────
+
+
+class SessionWorkspaceEvent(_SSEEventBase):
+    type: Literal["session.workspace"] = "session.workspace"
+    conversation_id: str
+    switching: bool
+    operation_id: str
+    phase: str
 
 
 class SessionStatusEvent(_SSEEventBase):
@@ -4964,6 +4976,7 @@ class TurnCancelledEvent(_SSEEventBase):
 ServerStreamEvent = Annotated[
     # ── Transient (SSE-only) — session.* lifecycle ─────────────
     SessionStatusEvent
+    | SessionWorkspaceEvent
     | SessionUsageEvent
     | SessionModelEvent
     | SessionTitleEvent

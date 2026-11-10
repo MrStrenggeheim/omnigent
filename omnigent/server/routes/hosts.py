@@ -904,6 +904,9 @@ def create_hosts_router(
             conversation_store=conversation_store,
             permission_store=permission_store,
         )
+        from omnigent.server.workspace_transition import require_workspace_ready
+
+        require_workspace_ready(body.session_id, target.conv)
         conn = target.conn
         if agent_store is not None and agent_cache is not None:
             from omnigent.server.mcp_compatibility import require_session_registry_mcp_support

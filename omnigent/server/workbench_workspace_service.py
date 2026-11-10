@@ -137,7 +137,9 @@ class WorkbenchWorkspaceService:
             source_session_id=source_session_id,
         )
 
-    async def resolve_session(self, request: Request, session_id: str) -> WorkbenchWorkspace:
+    async def resolve_session(
+        self, request: Request, session_id: str, *, allow_missing_root: bool = False
+    ) -> WorkbenchWorkspace:
         user_id = require_user(request, self.auth_provider)
         await require_access(
             user_id, session_id, LEVEL_OWNER, self.permission_store, self.conversation_store
@@ -145,6 +147,10 @@ class WorkbenchWorkspaceService:
         conv = await asyncio.to_thread(self.conversation_store.get_conversation, session_id)
         if conv is None:
             raise HTTPException(404, "Session not found")
+        if conv.workspace_transition and conv.workspace_transition.get("blocked"):
+            raise HTTPException(
+                409, "Workspace change in progress; finish or recover it before opening files"
+            )
         spec = None
         if conv.agent_id:
             agent = await asyncio.to_thread(self.agent_store.get, conv.agent_id)
@@ -205,6 +211,25 @@ class WorkbenchWorkspaceService:
                 root=root,
                 source_session_id=session_id,
                 source_environment_id=source,
+            )
+        if allow_missing_root:
+            if self.host_store is None:
+                raise HTTPException(503, "Host workspace support is unavailable")
+            host = await asyncio.to_thread(
+                resolve_host_owner,
+                user_id=user_id,
+                host_id=conv.host_id,
+                host_store=self.host_store,
+            )
+            return await asyncio.to_thread(
+                self.store.resolve,
+                owner_user_id=user_id,
+                host_id=conv.host_id,
+                target_kind="sandbox" if host.sandbox_provider else "host",
+                target_id=conv.host_id,
+                generation=host_generation(host),
+                root=conv.workspace,
+                source_session_id=session_id,
             )
         return await self.create_host(request, conv.host_id, conv.workspace, session_id)
 

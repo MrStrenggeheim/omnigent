@@ -1,3 +1,6 @@
+import { apiErrorFromResponse } from "@/lib/sessionsApi";
+import { useContext, useRef } from "react";
+import { FileViewerContext } from "@/shell/FileViewerContext";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   useWorkbenchWorkspace,
@@ -17,6 +20,7 @@ async function writeFileContent(
   path: string,
   content: string,
   workspace?: WorkspaceResourceTarget,
+  workspaceRoot?: string | null,
 ): Promise<void> {
   // Same slash-merge-safe wire form as the read path, via the shared helpers:
   // a bare per-segment-encoded path, and `?base=host` for an absolute location
@@ -30,9 +34,13 @@ async function writeFileContent(
   const res = await authenticatedFetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, encoding: "utf-8" }),
+    body: JSON.stringify({
+      content,
+      encoding: "utf-8",
+      ...(!workspace && workspaceRoot ? { workspace_root: workspaceRoot } : {}),
+    }),
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw await apiErrorFromResponse(res);
 }
 
 /**
@@ -44,6 +52,7 @@ export function useWriteFileContent(
   explicitWorkspace?: WorkbenchWorkspace | null,
 ) {
   const workspace = useWorkbenchWorkspace(explicitWorkspace);
+  const root = useRef(useContext(FileViewerContext)?.workspaceRoot ?? workspace?.root);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -60,6 +69,7 @@ export function useWriteFileContent(
         path,
         content,
         capturedWorkspace === undefined ? workspace : capturedWorkspace,
+        root.current,
       ),
     onMutate: ({ workspace: capturedWorkspace }) => ({
       identity: queryIdentity(

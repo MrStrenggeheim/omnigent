@@ -1,3 +1,4 @@
+import { WorkspaceSwitchControl } from "@/components/composer/WorkspaceSwitchControl";
 import { SelectionPopup } from "@/components/chat/SelectionPopup";
 import { useLoadedConversations } from "@/hooks/useSidebarData";
 import { useConversationRedirect } from "@/hooks/useConversationRedirect";
@@ -2331,7 +2332,7 @@ function ComposerImpl(
   {
     status,
     isWorking,
-    disabled,
+    disabled: baseDisabled,
     onSend,
     onSendSlashCommand,
     onNewSession,
@@ -2368,6 +2369,8 @@ function ComposerImpl(
   }: ComposerProps,
   ref: ForwardedRef<ComposerHandle>,
 ) {
+  const workspaceSwitching = useChatStore((s) => s.workspaceSwitching);
+  const disabled = baseDisabled || workspaceSwitching;
   const {
     draft,
     value,
@@ -2580,7 +2583,8 @@ function ComposerImpl(
   const composerBranch = useChatStore((s) => s.gitBranch);
   const claudePermissionMode = useChatStore((s) => s.claudePermissionMode);
   const codexApprovalMode = useChatStore((s) => s.codexApprovalMode);
-  const [configBusy, setConfigBusy] = useState(false);
+  const [modelConfigBusy, setConfigBusy] = useState(false);
+  const configBusy = modelConfigBusy || workspaceSwitching;
   const configBusyRef = useRef(false);
 
   // Ctrl+Shift+M opens the model picker, the keyboard equivalent of bare
@@ -3905,6 +3909,27 @@ function ComposerImpl(
           )}
         >
           <ComposerWorkspaceStatus
+            workspaceControl={
+              composerSessionId &&
+              composerSession?.hostId &&
+              composerWorkspace &&
+              isOwnerLevel(permissionLevel) ? (
+                <WorkspaceSwitchControl
+                  sessionId={composerSessionId}
+                  hostId={composerSession.hostId}
+                  workspace={composerWorkspace}
+                  disabledReason={
+                    composerSession.parentSessionId
+                      ? "Change the parent chat's workspace"
+                      : isWorking || hasPendingElicitation
+                        ? "Wait for the current turn and approvals to finish"
+                        : hasQueuedComposerMessages
+                          ? "Send or remove queued messages before changing workspace"
+                          : undefined
+                  }
+                />
+              ) : undefined
+            }
             workspacePath={composerWorkspace ?? null}
             worktreePath={composerGit.worktreePath}
             isWorktree={composerGit.isWorktree}
@@ -3966,21 +3991,23 @@ function ComposerImpl(
           },
           "aria-label": "Message the agent",
           "aria-keyshortcuts": nextFromSelected === null ? undefined : "Shift+Tab",
-          placeholder: composerLockedByBtw
-            ? "Side chat open — press Esc to close"
-            : readOnlyReason !== null
-              ? readOnlyReason
-              : isReadOnly
-                ? "You have read-only access to this session"
-                : unreachable && sendDisabledReason === null
-                  ? "Session offline — reconnect below to continue"
-                  : hasPendingElicitation
-                    ? "Respond to the pending request above to continue"
-                    : disabled && sendDisabledReason === null
-                      ? "Waiting for agents…"
-                      : isStreaming
-                        ? "Send a follow-up (queued) — Esc to stop"
-                        : "Send a message…",
+          placeholder: workspaceSwitching
+            ? "Finish the workspace change before sending"
+            : composerLockedByBtw
+              ? "Side chat open — press Esc to close"
+              : readOnlyReason !== null
+                ? readOnlyReason
+                : isReadOnly
+                  ? "You have read-only access to this session"
+                  : unreachable && sendDisabledReason === null
+                    ? "Session offline — reconnect below to continue"
+                    : hasPendingElicitation
+                      ? "Respond to the pending request above to continue"
+                      : disabled && sendDisabledReason === null
+                        ? "Waiting for agents…"
+                        : isStreaming
+                          ? "Send a follow-up (queued) — Esc to stop"
+                          : "Send a message…",
           rows: 1,
           disabled:
             ((disabled || unreachable) && sendDisabledReason === null) ||

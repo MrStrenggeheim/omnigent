@@ -30,6 +30,7 @@ export type FileNavigationGuard = (
 
 interface FileViewerContextType {
   openFile: (path: string, options?: OpenFileOptions) => void;
+  beforeWorkspaceChange?: (apply: () => void, cancel?: () => void) => void;
   /** The mounted viewer confirms dirty navigation before selection or URL changes. */
   registerNavigationGuard?: (guard: FileNavigationGuard) => () => void;
   /** Open Pull Requests in the workspace rail or mobile drawer. */

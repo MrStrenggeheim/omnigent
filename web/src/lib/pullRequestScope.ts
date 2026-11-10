@@ -5,10 +5,10 @@ import {
   type WorkspaceResourceTarget,
 } from "./workbenchWorkspace";
 /** Folder scope is shared with Files/Changes without changing workspace ownership. */
-export function usePullRequestWorkspace(conversationId?: string) {
+export function usePullRequestWorkspace(conversationId?: string, folderScope = true) {
   const workspace = useWorkbenchWorkspace();
   const scopePath = usePanelFolder(workspace?.id ?? conversationId, workspace?.root ?? null);
-  return workspace ? { ...workspace, scopePath } : workspace;
+  return workspace ? { ...workspace, scopePath: folderScope ? scopePath : "" } : workspace;
 }
 export function pullRequestIdentity(workspace: WorkspaceResourceTarget, conversationId?: string) {
   const identity = queryIdentity(workspace, conversationId);

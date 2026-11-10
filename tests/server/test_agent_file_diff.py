@@ -136,3 +136,27 @@ def test_persisted_history_pagination_is_bounded_and_follows_descending_cursor()
     assert truncated and len(store.calls) == 8 and len(items) == 16
     assert store.calls[0] == ("session", 512, None, "desc")
     assert store.calls[-1] == ("session", 512, "7", "desc")
+
+
+def test_recorded_turns_stop_at_the_workspace_boundary_without_relabeling_old_patches():
+    from types import SimpleNamespace
+
+    from omnigent.server.agent_file_diff import read_recorded_turn_items, recorded_agent_changes
+
+    patch = (
+        "diff --git a/same.txt b/same.txt\n--- a/same.txt\n+++ b/same.txt\n"
+        "@@ -1 +1 @@\n-old\n+new\n"
+    )
+    current = _turn("current-root", patch)
+    boundary = _turn("old-root", patch)
+    store = SimpleNamespace(
+        list_items=lambda *_args, **_kwargs: SimpleNamespace(
+            data=[*current, *boundary], has_more=False, last_id=boundary[-1].id
+        )
+    )
+    items, truncated = read_recorded_turn_items(store, "chat", after_item_id=boundary[0].id)
+    assert items == current
+    assert truncated is False
+    changes = recorded_agent_changes(items, "", "/new-root", "session")
+    assert [turn["id"] for turn in changes["turns"]] == ["current-root"]
+    assert recorded_turn_file_diff(items, "same.txt", "/new-root", "old-root") is None

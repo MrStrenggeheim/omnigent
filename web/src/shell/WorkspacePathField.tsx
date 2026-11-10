@@ -191,17 +191,17 @@ export function WorkspacePathField({
         ? `workspace-recent-${highlight}`
         : `workspace-match-${highlight - filteredRecent.length}`;
 
-  // Close on click outside while open.
+  // Close after the destination click; closing on mousedown moves inline form buttons.
   useEffect(() => {
     if (!open) return;
-    function onDown(e: MouseEvent) {
+    function onClick(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
         setHighlight(-1);
       }
     }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
   }, [open]);
 
   // Keep the keyboard-highlighted row visible when it scrolls past

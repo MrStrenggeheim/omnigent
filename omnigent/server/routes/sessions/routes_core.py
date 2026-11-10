@@ -2958,6 +2958,17 @@ def register_core_routes(
         conv = await asyncio.to_thread(conversation_store.get_conversation, session_id)
         if conv is None:
             raise _session_not_found()
+        if body.model_fields_set & {
+            "runner_id",
+            "agent_id",
+            "harness_override",
+            "model_override",
+            "reasoning_effort",
+            "terminal_launch_args",
+        }:
+            from omnigent.server.workspace_transition import require_workspace_ready
+
+            require_workspace_ready(session_id, conv)
         previous_runner_id = conv.runner_id
         if body.runner_id is not None:
             # Empty string is the clear sentinel (None = leave unchanged);

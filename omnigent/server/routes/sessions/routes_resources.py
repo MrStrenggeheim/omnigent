@@ -2535,7 +2535,11 @@ def register_resources_routes(
             are common and cannot be distinguished cheaply here.
         :returns: Parsed JSON response.
         """
+        from omnigent.server.workspace_transition import require_workspace_write_context
+
         conv = await _validate_session(session_id, request, required_level)
+        if method != "GET":
+            require_workspace_write_context(conv, body or {})
         if method == "GET":
             return await _proxy_get_to_runner(session_id, path, conv)
         if method == "PUT":
@@ -2551,6 +2555,7 @@ def register_resources_routes(
                     runner_router=runner_router or get_server_runner_router(),
                     raise_host_refusal=True,
                 )
+            require_workspace_write_context(conv, body or {})
             status, payload = await _proxy_put_to_runner(
                 session_id,
                 path,
@@ -3074,6 +3079,9 @@ def register_resources_routes(
         )
 
         conv = await _authorize_browse_read(session_id, request, path)
+        from omnigent.server.workspace_transition import require_workspace_ready
+
+        require_workspace_ready(session_id, conv)
         if ".." in path.split("/"):
             raise HTTPException(status_code=400, detail="Parent segments are not permitted")
         if baseline == "last_turn" and turn_id is None:
@@ -3089,7 +3097,10 @@ def register_resources_routes(
             turn_id = selection.get("turn_id")
         if baseline == "last_turn" and turn_id != "current":
             items, truncated = await asyncio.to_thread(
-                read_recorded_turn_items, conversation_store, session_id
+                read_recorded_turn_items,
+                conversation_store,
+                session_id,
+                after_item_id=(conv.workspace_transition or {}).get("history_boundary"),
             )
             history = recorded_agent_changes(
                 items, "", conv.workspace, baseline, turn_id, truncated=truncated
@@ -3164,6 +3175,9 @@ def register_resources_routes(
     ) -> Any:
         """List Git-backed session status or explicitly scoped captured agent history."""
         conv = await _authorize_browse_read(session_id, request, path)
+        from omnigent.server.workspace_transition import require_workspace_ready
+
+        require_workspace_ready(session_id, conv)
         runner_path = (
             f"/v1/sessions/{session_id}/resources/environments"
             f"/{_runner_environment_segment(environment_id)}/changes"
@@ -3201,7 +3215,10 @@ def register_resources_routes(
         if live is not None and live.get("source") != "agent":
             live = None
         items, truncated = await asyncio.to_thread(
-            read_recorded_turn_items, conversation_store, session_id
+            read_recorded_turn_items,
+            conversation_store,
+            session_id,
+            after_item_id=(conv.workspace_transition or {}).get("history_boundary"),
         )
         persisted = recorded_agent_changes(
             items, path, conv.workspace, baseline, turn_id, truncated=truncated
@@ -3545,6 +3562,9 @@ def register_resources_routes(
                 max(_browse_level(path, within_workspace=LEVEL_EDIT) for path, _write in paths),
             )
         body = {key: value for key, value in body.items() if not key.startswith("_")}
+        from omnigent.server.workspace_transition import require_workspace_write_context
+
+        require_workspace_write_context(conv, body)
         body["_owner"] = _get_user_id(request, auth_provider) or "local-owner"
         runner_path = (
             f"/v1/sessions/{session_id}/resources/environments/"

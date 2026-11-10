@@ -6214,6 +6214,9 @@ async def _launch_runner_on_host_impl(
             if last is not None and last.runner_id == fresh.runner_id:
                 return last
             return _HostLaunchAttempt(runner_id=fresh.runner_id)
+        from omnigent.server.workspace_transition import require_workspace_ready
+
+        require_workspace_ready(conv.id, fresh)
         attempt = await _launch_runner_on_host_locked(
             fresh, conversation_store, host_registry, host_conn
         )

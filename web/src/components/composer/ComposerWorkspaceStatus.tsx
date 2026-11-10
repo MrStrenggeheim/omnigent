@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { FolderIcon, GitForkIcon } from "lucide-react";
 
 import { COMPOSER_WORKSPACE_COLLAPSED_LABEL_CLASS } from "./ChatComposer";
@@ -25,8 +26,9 @@ function branchLabel(state: ComposerBranchState, branch: string | null): string 
   }
 }
 
-/** Read-only workspace identity for an existing session's composer bar. */
+/** Workspace identity and optional switch control for an existing session's composer. */
 export function ComposerWorkspaceStatus({
+  workspaceControl,
   workspacePath,
   worktreePath,
   isWorktree,
@@ -35,6 +37,7 @@ export function ComposerWorkspaceStatus({
   creationBranch,
   showWorktree,
 }: {
+  workspaceControl?: ReactNode;
   workspacePath: string | null;
   worktreePath: string | null;
   isWorktree: boolean | null;
@@ -51,15 +54,21 @@ export function ComposerWorkspaceStatus({
 
   return (
     <>
-      <WorkspaceStatusItem
-        icon={FolderIcon}
-        label={workspacePath ? pathTail(workspacePath) : "No workspace"}
-        title={workspacePath ? `Working directory: ${workspacePath}` : "No working directory bound"}
-        ariaLabel={
-          workspacePath ? `Working directory: ${workspacePath}` : "Working directory: Not selected"
-        }
-        testId="composer-workspace-dir"
-      />
+      {workspaceControl ?? (
+        <WorkspaceStatusItem
+          icon={FolderIcon}
+          label={workspacePath ? pathTail(workspacePath) : "No workspace"}
+          title={
+            workspacePath ? `Working directory: ${workspacePath}` : "No working directory bound"
+          }
+          ariaLabel={
+            workspacePath
+              ? `Working directory: ${workspacePath}`
+              : "Working directory: Not selected"
+          }
+          testId="composer-workspace-dir"
+        />
+      )}
       {showWorktree ? (
         <WorkspaceStatusItem
           icon={GitForkIcon}

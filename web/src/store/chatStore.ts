@@ -614,6 +614,8 @@ export interface PendingUserMessage {
  * Persisted per authenticated user and server in IndexedDB, including files.
  */
 export interface QueuedMessage {
+  workspaceRoot?: string;
+  workspaceRevision?: string;
   /** Captured at enqueue time so background dispatch preserves the control. */
   command?: "compact";
   /** Opaque client-only id, distinct across reloads. */
@@ -730,6 +732,7 @@ export interface ConversationState {
    * for the rest of the session lifetime.
    */
   sessionStatus: SessionStatus;
+  workspaceSwitching: boolean;
   backgroundTaskCount: number;
   /**
    * Per-shell detail behind `backgroundTaskCount`, kept in lockstep with it,
@@ -1199,6 +1202,7 @@ export interface AppChatState {
 
 /** Actions exposed on the root store. */
 export interface ChatActions {
+  setWorkspaceSwitching: (sessionId: string, switching: boolean) => void;
   send: (text: string, agentId: string, files?: File[], opts?: SendOptions) => Promise<void>;
   clearSideChatToOpen: () => void;
   /** Open a generic side chat as a rail tab under `parentId`, seeding its
@@ -2129,6 +2133,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
   interruptedResponseIds: [],
   status: "idle",
   sessionStatus: "idle",
+  workspaceSwitching: false,
   backgroundTaskCount: 0,
   backgroundTasks: [],
   blockedOn: null,
@@ -2210,6 +2215,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
         ...s.queuedMessages,
         {
           queueId,
+          ...queuedWorkspaceContext(conversationId),
           text,
           ...(isCompactControl(sessionHarness, text, files) ? { command: "compact" as const } : {}),
           stableId,
@@ -2284,7 +2290,8 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     if (target.command === "compact" && rejectBusyCompact(target.conversationId)) return;
     // Nothing can be steered past a first message still held for startup; it stays queued.
     const targetState = setterForState(target.conversationId);
-    if (targetState !== null && holdsInitialDraft(targetState)) return;
+    if (targetState !== null && (holdsInitialDraft(targetState) || targetState.workspaceSwitching))
+      return;
     // Remove BEFORE the POST so a concurrent flush can't also send it.
     setActive({ queuedMessages: s.queuedMessages.filter((m) => m.queueId !== queueId) });
     void s.send(target.text, agentId, target.files, queuedSendOptions(target));
@@ -2295,7 +2302,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     const own = s.queuedMessages.filter((m) => m.conversationId === conversationId);
     if (own.length === 0) return;
     const state = setterForState(conversationId);
-    if (state !== null && holdsInitialDraft(state)) return;
+    if (state !== null && (holdsInitialDraft(state) || state.workspaceSwitching)) return;
     // When the first one will be held for startup, the rest stay queued behind it.
     if (state !== null && wouldHoldSend(state)) {
       s.steerMessage(own[0]!.queueId);
@@ -2368,6 +2375,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       s.conversationId === null ||
       s.boundAgentId === null ||
       s.sessionStatus === "running" ||
+      s.workspaceSwitching ||
       holdsInitialDraft(s)
     ) {
       return;
@@ -2392,6 +2400,12 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     // head-only guard would let it block this conversation's messages forever.
     const head = s.queuedMessages.find((m) => m.conversationId === s.conversationId);
     if (head === undefined || head.requiresRetry || head.waitingForHost) return;
+    if (
+      queueContextChanged(head, queryClient?.getQueryData<Session>(["session", s.conversationId]))
+    ) {
+      holdQueueForWorkspace(head);
+      return;
+    }
     // Remove it BEFORE the POST so a re-entrant flush can't double-send.
     target.write({ queuedMessages: s.queuedMessages.filter((m) => m.queueId !== head.queueId) });
     void s.send(head.text, head.agentId ?? s.boundAgentId, head.files, queuedSendOptions(head));
@@ -2416,13 +2430,21 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     // scrolled past the loaded pages has no row here → treated as not-idle and
     // left for the foreground flush when the user navigates back to it.
     const statusById = new Map<string, string | undefined>();
+    const contextById = new Map<
+      string,
+      { workspace?: string | null; workspaceRevision?: string | null }
+    >();
     for (const [, data] of queryClient.getQueriesData<ConversationsInfiniteData>({
       queryKey: ["conversations"],
     })) {
       for (const page of data?.pages ?? []) {
         for (const row of page.data) {
           if (candidateIds.has(row.id) && !statusById.has(row.id)) {
-            statusById.set(row.id, row.status);
+            statusById.set(row.id, row.workspace_switching ? "switching" : row.status);
+            contextById.set(row.id, {
+              workspace: row.workspace,
+              workspaceRevision: row.workspace_revision,
+            });
           }
         }
       }
@@ -2435,7 +2457,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       if (statusById.get(conversationId) !== "idle") continue;
       // The sidebar can still say idle while a compact control starts.
       const local = setterForState(conversationId);
-      if (local !== null && holdsInitialDraft(local)) continue;
+      if (local !== null && (holdsInitialDraft(local) || local.workspaceSwitching)) continue;
       if (
         local?.sessionHarness === "codex-native" ||
         local?.sessionHarness === "claude-sdk" ||
@@ -2457,6 +2479,10 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       if (cooldownUntil !== undefined && cooldownUntil > now) continue;
       const head = get().queuedMessages.find((m) => m.conversationId === conversationId);
       if (head === undefined || head.requiresRetry || head.waitingForHost) continue;
+      if (queueContextChanged(head, contextById.get(conversationId))) {
+        holdQueueForWorkspace(head);
+        continue;
+      }
       const compactAgentId = head.agentId ?? local?.boundAgentId;
       if (head.command === "compact" && !compactAgentId) continue;
 
@@ -2569,6 +2595,9 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       };
     });
   },
+  setWorkspaceSwitching: (sessionId, switching) => {
+    setterFor(sessionId)({ workspaceSwitching: switching });
+  },
   send: async (text, agentId, files, opts) => {
     if (!agentId) {
       throw new Error("chatStore.send: no agentId");
@@ -2652,6 +2681,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
             ...s.queuedMessages,
             {
               queueId: `q_${randomUUID()}`,
+              ...queuedWorkspaceContext(target),
               text,
               stableId,
               conversationId: target,
@@ -3878,12 +3908,43 @@ export function rejectBusyCompact(conversationId: string | null): boolean {
  * waits ahead of the conversation's other queued messages until
  * `releaseHostHeldMessages` runs, then flushes like any queued message.
  */
+function queuedWorkspaceContext(sessionId: string) {
+  const session = queryClient?.getQueryData<Session>(["session", sessionId]);
+  return {
+    ...(session?.workspace ? { workspaceRoot: session.workspace } : {}),
+    ...(session?.workspaceRevision ? { workspaceRevision: session.workspaceRevision } : {}),
+  };
+}
+
+function queueContextChanged(
+  message: QueuedMessage,
+  context: { workspace?: string | null; workspaceRevision?: string | null } | undefined,
+) {
+  return (
+    !!context &&
+    ((message.workspaceRoot !== undefined &&
+      context.workspace !== undefined &&
+      message.workspaceRoot !== context.workspace) ||
+      (!!context.workspaceRevision && message.workspaceRevision !== context.workspaceRevision))
+  );
+}
+
+function holdQueueForWorkspace(message: QueuedMessage) {
+  setActive((state) => ({
+    queuedMessages: state.queuedMessages.map((item) =>
+      item.conversationId === message.conversationId ? { ...item, requiresRetry: true } : item,
+    ),
+  }));
+  toast.info("Workspace changed. Review queued messages before retrying.");
+}
+
 function holdSendForHost(
   conversationId: string,
   notice: string,
   message: Omit<QueuedMessage, "queueId" | "conversationId">,
 ): void {
   const held: QueuedMessage = {
+    ...queuedWorkspaceContext(conversationId),
     ...message,
     queueId: `q_${randomUUID()}`,
     conversationId,
@@ -5036,6 +5097,7 @@ async function bindStream(
         // The voided page's stale early-return skips its own flag clear.
         loadingMoreHistory: false,
         sessionStatus: session.status,
+        workspaceSwitching: session.workspaceSwitching ?? false,
         // Mid-turn first open: the snapshot carries the in-flight turn's
         // `activeResponseId`, and the turn-start `running` edge that would
         // have opened the streaming lifecycle is long gone from the SSE
@@ -5310,6 +5372,7 @@ function reconnectStatusPatch(
 ): Partial<ChatState> {
   const patch: Partial<ChatState> = {
     sessionStatus: session.status,
+    workspaceSwitching: session.workspaceSwitching ?? false,
     ...mcpStartupSnapshotPatch(session, s, launchBeforeFetch),
     ...launchSnapshotPatch(session, s),
     // A `session.model` missed in the gap would otherwise hold a first
@@ -8141,6 +8204,29 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
       // one while a different conversation is on screen, and claiming at the
       // visible session would be rejected as an owner mismatch.
       emitBrowserActionRequest(event, sourceConversationId);
+      return;
+    case "session_workspace":
+      applyToNamedConversation(event.conversationId, (s) => ({
+        workspaceSwitching: event.switching,
+        queuedMessages: s.queuedMessages.map((message) =>
+          message.conversationId === event.conversationId
+            ? { ...message, requiresRetry: true }
+            : message,
+        ),
+      }));
+      if (queryClient !== null) {
+        void queryClient.invalidateQueries({
+          queryKey: ["session-workspace", event.conversationId],
+        });
+        if (!event.switching) {
+          void queryClient.invalidateQueries({
+            predicate: (query) => query.queryKey[1] === event.conversationId,
+          });
+          void queryClient.invalidateQueries({ queryKey: ["session", event.conversationId] });
+          void queryClient.invalidateQueries({ queryKey: ["chat-workbench-workspace"] });
+          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
+      }
       return;
     case "session_status": {
       // Captured BEFORE the patch below adopts event.responseId, so a

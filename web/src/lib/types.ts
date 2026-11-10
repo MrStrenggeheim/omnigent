@@ -344,6 +344,8 @@ export interface Session {
    * ``"/Users/alice/myrepo"`` (or a worktree path). ``null`` when
    * unbound. The fork-resume picker prefills the source's value.
    */
+  workspaceSwitching?: boolean;
+  workspaceRevision?: string | null;
   workspace?: string | null;
   /**
    * Native-terminal CLI args the session was launched with, e.g.

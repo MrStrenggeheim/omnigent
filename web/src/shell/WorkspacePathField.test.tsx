@@ -154,6 +154,32 @@ describe("WorkspacePathField", () => {
     expect(screen.queryByText("/Users/corey/.hidden")).toBeNull();
   });
 
+  it("keeps inline suggestions stable until a form action receives its click", () => {
+    mockListing(ENTRIES);
+    const apply = vi.fn();
+    render(
+      <div>
+        <WorkspacePathField
+          hostId="host_1"
+          value="/Users/corey/"
+          onChange={vi.fn()}
+          onBrowse={vi.fn()}
+          recent={[]}
+        />
+        <button type="button" onClick={apply}>
+          Apply folder
+        </button>
+      </div>,
+    );
+    fireEvent.focus(screen.getByTestId("workspace-path-input"));
+    const action = screen.getByRole("button", { name: "Apply folder" });
+    fireEvent.mouseDown(action);
+    expect(screen.getByTestId("workspace-path-dropdown")).toBeInTheDocument();
+    fireEvent.click(action);
+    expect(apply).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("workspace-path-dropdown")).toBeNull();
+  });
+
   it("calls onChange with the match path when a row is clicked", () => {
     // The regression: rows must be selectable. Selection fires on
     // mousedown (not click) so it beats the input's blur.

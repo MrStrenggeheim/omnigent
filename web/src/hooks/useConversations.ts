@@ -172,6 +172,8 @@ export interface Conversation {
    * for sessions not bound to a host workspace.
    */
   workspace?: string | null;
+  workspace_switching?: boolean;
+  workspace_revision?: string | null;
   /** Durable identifier of the bound agent, e.g. ``"ag_abc123"``. */
   agent_id?: string;
   /** Human-readable name of the bound agent, e.g. ``"research-agent"``. */
@@ -501,6 +503,8 @@ export async function fetchConversationById(id: string): Promise<Conversation | 
     runner_id: wire.runner_id ?? null,
     host_id: wire.host_id ?? null,
     workspace: wire.workspace ?? null,
+    workspace_switching: wire.workspace_switching ?? false,
+    workspace_revision: wire.workspace_revision ?? null,
     agent_id: wire.agent_id,
     agent_name: wire.agent_name ?? null,
     harness: wire.harness ?? null,

@@ -119,7 +119,9 @@ def recorded_turn_file_diff(
     }
 
 
-def read_recorded_turn_items(store: Any, session_id: str) -> tuple[list[ConversationItem], bool]:
+def read_recorded_turn_items(
+    store: Any, session_id: str, after_item_id: str | None = None
+) -> tuple[list[ConversationItem], bool]:
     """Read at most eight pages, 4096 items and 32 MiB of tool output."""
     items = []
     cursor = None
@@ -127,6 +129,8 @@ def read_recorded_turn_items(store: Any, session_id: str) -> tuple[list[Conversa
     for _ in range(8):
         page = store.list_items(session_id, limit=512, after=cursor, order="desc")
         for item in page.data:
+            if after_item_id is not None and item.id == after_item_id:
+                return items, False
             output = getattr(item.data, "output", None)
             if isinstance(output, str):
                 size += len(output.encode("utf-8"))

@@ -2428,9 +2428,28 @@ function AppShellImpl() {
     (workspaceScope ? null : environmentQuery.data?.root) ??
     null;
   const workspaceHome = environmentQuery.data?.home ?? null;
+  const beforeWorkspaceChange = useCallback(
+    (apply: () => void, cancel?: () => void) => {
+      const guards = [...fileNavigationGuardsRef.current];
+      const proceed = (index: number) => {
+        const guard = guards[index];
+        if (guard)
+          guard("", { workspaceId: "workspace-transition" }, () => proceed(index + 1), cancel);
+        else {
+          setSelectedFilePath(null);
+          setFileNavigation(undefined);
+          clearFileViewerUrl();
+          apply();
+        }
+      };
+      proceed(0);
+    },
+    [clearFileViewerUrl],
+  );
   const fileViewerContextValue = useMemo(
     () => ({
       openFile: openChatFile,
+      beforeWorkspaceChange,
       registerNavigationGuard,
       openGithubTab,
       isChangedPath,
@@ -2447,6 +2466,7 @@ function AppShellImpl() {
     }),
     [
       openChatFile,
+      beforeWorkspaceChange,
       registerNavigationGuard,
       openGithubTab,
       isChangedPath,

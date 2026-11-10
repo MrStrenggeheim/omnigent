@@ -4558,6 +4558,18 @@ def create_app(
         permission_store=permission_store,
     )
     app.state.workbench_workspace_service = workbench_workspace_service
+    from omnigent.server.routes.session_workspace import create_session_workspace_router
+    from omnigent.server.workspace_transition import WorkspaceTransitionService
+
+    app.state.workspace_transition_service = WorkspaceTransitionService(
+        workbench_workspace_service, runner_router, initializer=runner_session_initializer
+    )
+    app.include_router(
+        create_session_workspace_router(app.state.workspace_transition_service),
+        prefix="/v1",
+        tags=["sessions"],
+    )
+
     app.include_router(
         create_workbench_workspaces_router(workbench_workspace_service),
         prefix="/v1",

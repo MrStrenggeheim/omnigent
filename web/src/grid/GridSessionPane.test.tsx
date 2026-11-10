@@ -20,6 +20,10 @@ const fixture = vi.hoisted(() => ({
   terminals: [] as TerminalsModule.TerminalInfo[],
   terminalPending: false,
 }));
+vi.mock("@/hooks/useWorkbenchSelection", () => ({
+  useWorkbenchSelection: () => ({ workspace: undefined }),
+}));
+
 vi.mock("@/lib/sessionsApi", async (original) => ({
   ...(await original<typeof SessionsApi>()),
   retrySession: vi.fn(async () => ({ recovered: true })),

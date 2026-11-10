@@ -484,9 +484,9 @@ export function computePullRequestPollInterval(info: PullRequestInfo | undefined
  */
 export function usePullRequestInfo(
   rawConversationId: string | undefined,
-  options?: { poll?: boolean; prUrl?: string },
+  options?: { poll?: boolean; prUrl?: string; scope?: "folder" | "workspace" },
 ) {
-  const workspace = usePullRequestWorkspace(rawConversationId);
+  const workspace = usePullRequestWorkspace(rawConversationId, options?.scope !== "workspace");
   const identity = pullRequestIdentity(workspace, rawConversationId);
   // A `temp:*` id (navigate-first new-chat window) has no server session.
   const conversationId = isTempConvId(rawConversationId) ? undefined : rawConversationId;

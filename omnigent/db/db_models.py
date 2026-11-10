@@ -653,6 +653,7 @@ class SqlConversationMetadata(OmnigentBase):
     terminal_launch_args: Mapped[str | None] = mapped_column(CompressedText, nullable=True)
     # Required when host_id is set; enforced by check constraint below.
     workspace: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    workspace_transition: Mapped[str | None] = mapped_column(Text, nullable=True)
     git_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Live-state columns, written by the replica holding the runner
     # tunnel so any replica can serve the sidebar's live fields.

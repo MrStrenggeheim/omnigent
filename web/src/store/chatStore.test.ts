@@ -20754,3 +20754,58 @@ it.each(["restore", "newer", "foreign", "delivered", "no-id", "refused", "unsett
     if (scenario !== "foreign") expect(takeFailedSendDraft(id, false)).toBeNull();
   },
 );
+
+it("pauses queued dispatch during a workspace switch and requires review afterward", async () => {
+  const id = "workspace-queue";
+  seedSession(id);
+  await useChatStore.getState().switchTo(id);
+  useChatStore.setState({ boundAgentId: "agent", sessionStatus: "running" });
+  useChatStore.getState().enqueueMessage("Use the old workspace file");
+  const queued = useChatStore.getState().queuedMessages[0]!;
+  handleSessionEvent({ type: "session_workspace", conversationId: id, switching: true });
+  useChatStore.setState({ sessionStatus: "idle" });
+  useChatStore.getState().maybeFlushQueuedHead();
+  expect(useChatStore.getState().workspaceSwitching).toBe(true);
+  expect(useChatStore.getState().queuedMessages[0]?.queueId).toBe(queued.queueId);
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/events") && init?.method === "POST",
+    ),
+  ).toEqual([]);
+  handleSessionEvent({ type: "session_workspace", conversationId: id, switching: false });
+  useChatStore.getState().maybeFlushQueuedHead();
+  expect(useChatStore.getState().workspaceSwitching).toBe(false);
+  expect(useChatStore.getState().queuedMessages[0]?.requiresRetry).toBe(true);
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/events") && init?.method === "POST",
+    ),
+  ).toEqual([]);
+});
+
+it("holds a restored queue when the workspace changed while this client was away", async () => {
+  const id = "workspace-queue-reload";
+  seedSession(id);
+  await useChatStore.getState().switchTo(id);
+  useChatStore.setState({ boundAgentId: "agent", sessionStatus: "running" });
+  client.setQueryData(["session", id], {
+    ...client.getQueryData(["session", id]),
+    workspace: "/old",
+    workspaceRevision: "first",
+  });
+  useChatStore.getState().enqueueMessage("Queued for the old folder");
+  expect(useChatStore.getState().queuedMessages[0]?.workspaceRoot).toBe("/old");
+  client.setQueryData(["session", id], {
+    ...client.getQueryData(["session", id]),
+    workspace: "/new",
+    workspaceRevision: "second",
+  });
+  useChatStore.setState({ sessionStatus: "idle" });
+  useChatStore.getState().maybeFlushQueuedHead();
+  expect(useChatStore.getState().queuedMessages[0]?.requiresRetry).toBe(true);
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/events") && init?.method === "POST",
+    ),
+  ).toEqual([]);
+});

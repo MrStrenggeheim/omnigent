@@ -1,3 +1,4 @@
+import { useConversationEntryState } from "@/hooks/useConversationEntryState";
 // xterm.js view bridged to an agent's tmux session over a WebSocket.
 //
 // The xterm + WebSocket lifecycle lives in `TerminalSession` (plain
@@ -162,7 +163,7 @@ export function TerminalView({
   workspaceId,
   sessionId,
   terminalId,
-  readOnly = false,
+  readOnly: requestedReadOnly = false,
   onStateChange,
   onActivity,
   onInput,
@@ -173,6 +174,8 @@ export function TerminalView({
   focusOnConnect = active,
   directAttachUrl,
 }: TerminalViewProps) {
+  const workspaceSwitching = useConversationEntryState(sessionId).workspaceSwitching;
+  const readOnly = requestedReadOnly || (!workspaceId && workspaceSwitching);
   const openFile = useFileViewer();
   const workspacePaths = useWorkspacePaths();
   const fileLinkRef = useRef({ openFile, ...workspacePaths });

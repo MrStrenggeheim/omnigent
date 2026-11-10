@@ -1092,6 +1092,10 @@ def register_events_routes(
                 _EXTERNAL_ASSISTANT_MESSAGE_TYPE,
             ),
         )
+        if body.type in {"message", "session_message"}:
+            from omnigent.server.workspace_transition import require_workspace_ready
+
+            require_workspace_ready(session_id, conv)
         peer_message = body.type == "session_message"
         if peer_message:
             if not isinstance(request, Request):

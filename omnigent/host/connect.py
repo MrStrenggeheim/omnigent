@@ -2142,6 +2142,15 @@ class HostProcess:
             f"{session_line}",
             flush=True,
         )
+        if frame.session_id:
+            from omnigent.native.launch_directory import record_host_launch_directory
+
+            try:
+                record_host_launch_directory(frame.harness, frame.session_id, str(workspace))
+            except (OSError, ValueError):
+                _logger.exception(
+                    "Could not record native launch directory for %s", frame.session_id
+                )
         return HostLaunchRunnerResultFrame(
             request_id=frame.request_id,
             status="launched",

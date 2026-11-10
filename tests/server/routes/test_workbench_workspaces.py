@@ -72,8 +72,8 @@ async def workspace_stack(db_uri, tmp_path):
                 conn.pending_stats[frame.request_id].set_result(
                     {
                         "status": "ok",
-                        "exists": True,
-                        "type": "directory",
+                        "exists": Path(frame.path).expanduser().exists(),
+                        "type": "directory" if Path(frame.path).expanduser().is_dir() else "file",
                         "canonical_path": str(Path(frame.path).expanduser().resolve()),
                     }
                 )

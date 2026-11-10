@@ -1269,6 +1269,12 @@ def _build_session_list_item(
             else pending_count
         ),
         workspace=conv.workspace,
+        workspace_switching=bool(
+            conv.workspace_transition and conv.workspace_transition.get("blocked")
+        ),
+        workspace_revision=conv.workspace_transition.get("id")
+        if conv.workspace_transition
+        else None,
         git_branch=conv.git_branch,
         archived=conv.archived,
         comments_count=comments_fingerprint.count if comments_fingerprint else 0,
@@ -1538,6 +1544,12 @@ def _build_session_response(
         # (their message is already persisted into ``items``).
         pending_inputs=pending_inputs.snapshot_for(conv.id),
         workspace=conv.workspace,
+        workspace_switching=bool(
+            conv.workspace_transition and conv.workspace_transition.get("blocked")
+        ),
+        workspace_revision=conv.workspace_transition.get("id")
+        if conv.workspace_transition
+        else None,
         git_branch=conv.git_branch,
         archived=conv.archived,
         # Replay the last native Plan after a Server restart.
@@ -7654,6 +7666,9 @@ def _mark_dispatch_in_flight(conversation_id: str) -> Iterator[None]:
 
     :param conversation_id: Session/conversation identifier.
     """
+    from omnigent.server.workspace_transition import require_workspace_ready
+
+    require_workspace_ready(conversation_id)
     _dispatch_in_flight[conversation_id] = _dispatch_in_flight.get(conversation_id, 0) + 1
     try:
         yield
@@ -7885,6 +7900,10 @@ async def _dispatch_session_event_to_runner_impl(
         persisted item id (non-native) or the pending-input id
         (claude-native message bypass).
     """
+    from omnigent.server.workspace_transition import require_workspace_ready
+
+    fresh = await asyncio.to_thread(conversation_store.get_conversation, session_id)
+    require_workspace_ready(session_id, fresh)
     if runner_router is not None:
         await asyncio.to_thread(runner_router.require_mcp_registry_support, conv)
     if body.type == "message":

@@ -538,3 +538,13 @@ describe("parseEvent — response.elicitation_resolved", () => {
     } satisfies ElicitationResolved);
   });
 });
+
+it("parses workspace transition admission events without interpreting them as agent turns", () => {
+  expect(
+    parseEvent("session.workspace", {
+      conversation_id: "chat",
+      switching: true,
+      operation_id: "switch",
+    }),
+  ).toEqual({ type: "session_workspace", conversationId: "chat", switching: true });
+});

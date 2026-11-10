@@ -2968,3 +2968,31 @@ async def test_pr_resources_follow_folder_scope_and_reject_escape(
             response = await client.get(url, params={"folder": folder})
             assert response.status_code in {400, 403, 404}, response.text
         assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_delayed_file_write_cannot_be_reinterpreted_in_another_workspace(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "current-root"
+    root.mkdir()
+    app = create_runner_app(runner_workspace=root, server_client=NullServerClient())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://runner"
+    ) as client:
+        env = (await client.get("/v1/sessions/conv_new/resources/environments/default")).json()
+        current = Path(env["metadata"]["root"])
+        current.mkdir(parents=True, exist_ok=True)
+        path = current / "same.txt"
+        path.write_text("new workspace file")
+        url = "/v1/sessions/conv_new/resources/environments/default/filesystem/same.txt"
+        refused = await client.put(
+            url, json={"content": "old draft", "workspace_root": "/previous-root"}
+        )
+        assert refused.status_code == 409, refused.text
+        assert path.read_text() == "new workspace file"
+        saved = await client.put(
+            url, json={"content": "new draft", "workspace_root": str(current)}
+        )
+        assert saved.status_code == 200, saved.text
+        assert path.read_text() == "new draft"

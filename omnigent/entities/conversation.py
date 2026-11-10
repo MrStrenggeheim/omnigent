@@ -259,6 +259,7 @@ class Conversation:
     external_session_id: str | None = None
     terminal_launch_args: list[str] | None = None
     workspace: str | None = None
+    workspace_transition: dict[str, Any] | None = None
     git_branch: str | None = None
     archived: bool = False
     # Live-state fields written by the replica holding the runner tunnel

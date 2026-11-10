@@ -83,7 +83,9 @@ def _state_dir_for_conversation_id(conversation_id: str) -> Path:
     return state_dir
 
 
-def write_launch_state(conversation_id: str, working_directory: str) -> None:
+def write_launch_state(
+    conversation_id: str, working_directory: str, *, replace_existing: bool = False
+) -> None:
     """
     Persist a session's launch state at creation time.
 
@@ -104,7 +106,11 @@ def write_launch_state(conversation_id: str, working_directory: str) -> None:
         raise ValueError("working_directory must be a non-empty absolute path")
     state_dir = _state_dir_for_conversation_id(conversation_id)
     existing = read_launch_state(conversation_id)
-    if existing is not None and existing.working_directory != working_directory:
+    if (
+        existing is not None
+        and existing.working_directory != working_directory
+        and not replace_existing
+    ):
         _logger.warning(
             "codex-native launch state mismatch for %s: existing=%r new=%r; "
             "keeping existing value",
@@ -122,6 +128,11 @@ def write_launch_state(conversation_id: str, working_directory: str) -> None:
     tmp = target.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8")
     os.replace(tmp, target)
+
+
+def redirect_launch_state(conversation_id: str, working_directory: str) -> None:
+    """Record an explicitly authorized workspace change without changing native identity."""
+    write_launch_state(conversation_id, working_directory, replace_existing=True)
 
 
 def read_launch_state(conversation_id: str) -> CodexNativeLaunchState | None:
