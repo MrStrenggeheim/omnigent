@@ -349,8 +349,13 @@ def test_explorer_size_and_menu_share_space_on_hover_and_focus(
     page.mouse.move(0, 0)
     expect(size).to_have_css("opacity", "1")
     expect(actions).to_have_css("opacity", "0")
+    marker = row.locator("[data-file-status]")
+    expect(marker).to_have_text("M")
+    meta = row.locator("[data-explorer-meta]")
+    expect(meta).to_have_css("opacity", "1")
     before = row.bounding_box()
     row.hover()
+    expect(meta).to_have_css("opacity", "0")
     expect(size).to_have_css("opacity", "0")
     expect(actions).to_have_css("opacity", "1")
     assert row.bounding_box() == before
@@ -364,6 +369,18 @@ def test_explorer_size_and_menu_share_space_on_hover_and_focus(
     expect(actions).to_have_css("opacity", "1")
     page.keyboard.press("Enter")
     expect(page.get_by_role("menuitem", name="Copy", exact=True)).to_be_visible()
+    page.keyboard.press("Escape")
+    panel.get_by_role("tab", name=re.compile("^Changes")).click()
+    changed = _entry(panel, _FILE)
+    changed_meta = changed.locator("[data-explorer-meta]")
+    changed_action = changed.get_by_role("button", name=f"Actions for {_FILE}", exact=True)
+    expect(changed_meta).to_have_css("opacity", "1")
+    expect(changed.locator("[data-file-status]")).to_have_text("M")
+    rest = changed.bounding_box()
+    changed.hover()
+    expect(changed_meta).to_have_css("opacity", "0")
+    expect(changed_action).to_have_css("opacity", "1")
+    assert changed.bounding_box() == rest
 
 
 def test_mobile_explorer_selection_is_explicit(page: Page, ownership: Ownership) -> None:

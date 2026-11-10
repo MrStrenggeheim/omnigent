@@ -1365,16 +1365,22 @@ export function ExplorerRowActions({
   directory = false,
   deleted = false,
   bytes = null,
+  marker,
 }: {
   path: string;
   directory?: boolean;
   deleted?: boolean;
   bytes?: number | null;
   conversationId?: string;
+  marker?: ReactNode;
 }) {
   const ctx = useContext(ExplorerContext);
   const revealBase = useContext(RevealBaseContext);
   const entry = { path: joinBrowseLocation(ctx?.entryBase ?? revealBase, path), directory };
+  const restingMetaClass =
+    ctx &&
+    !deleted &&
+    "[[data-explorer-entry]:hover_&]:opacity-0 [[data-explorer-entry]:focus-within_&]:opacity-0 [@media(hover:none)]:hidden";
   return (
     <span
       data-explorer-action
@@ -1389,19 +1395,20 @@ export function ExplorerRowActions({
           className="size-5"
         />
       )}
-      <span className="relative flex items-center justify-end">
-        {bytes !== null && !deleted && (
-          <span
-            data-file-size
-            className={cn(
-              "text-sm text-muted-foreground",
-              ctx &&
-                "[[data-explorer-entry]:hover_&]:opacity-0 [[data-explorer-entry]:focus-within_&]:opacity-0 [@media(hover:none)]:hidden",
-            )}
-          >
-            {formatBytes(bytes)}
-          </span>
+      <span
+        className={cn(
+          "relative flex items-center justify-end",
+          ctx && !deleted && "min-h-6 min-w-6",
         )}
+      >
+        <span data-explorer-meta className={cn("flex items-center gap-1.5", restingMetaClass)}>
+          {marker}
+          {bytes !== null && !deleted && (
+            <span data-file-size className={cn("text-sm text-muted-foreground", restingMetaClass)}>
+              {formatBytes(bytes)}
+            </span>
+          )}
+        </span>
         {ctx && !deleted && (
           <Button
             type="button"

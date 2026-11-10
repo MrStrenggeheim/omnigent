@@ -5,13 +5,14 @@ Git supplies change status by default; explicit captured comparisons retain the 
 
 ## Sub-features
 
-- `quiet-row-menu`: file size shows at rest; the trailing menu replaces it on hover or keyboard focus without adding reserved button width; touch devices retain a tappable menu.
+- `quiet-row-menu`: file size and status marker show at rest; the trailing menu replaces it on hover or keyboard focus without adding reserved button width; touch devices retain a tappable menu.
 - `adaptive-viewer`: the button immediately before the open file path toggles Explorer and remembers the choice at every panel width, including phones; before the first explicit choice, desktop widths of at least 720px show it automatically.
 - `explorer-resize`: Explorer retains its resizable width (180px minimum), while narrow splits keep at least 240px for the viewer and allow horizontal overflow; toggling preserves the file editor and Explorer state.
 
 - `create`: create a file or folder with a name dialog; existing destinations produce an error.
 - `organize`: rename, move, duplicate, cut, copy and paste files or folders, with explicit overwrite selection.
 - `selection`: Shift-click selects the inclusive visible range from the retained anchor and Ctrl/Cmd-click toggles the clicked entry; modified clicks never expand folders, and the anchor survives opening a preview; clicking empty Explorer space clears the selection and anchor; More file actions → Select files… enables explicit checkbox/tap selection on touch, and Done selecting or Escape exits.
+- `folder-status`: direct folder letters require explicit directory comparison evidence; descendant colors prioritize modified, added, then deleted, with mixed counts in the shared tooltip.
 - `row-controls`: retain file size and a compact trailing three-dot menu with right-click actions; no hover checkbox/download/copy cluster reserves space.
 - `transfer`: upload files or directory structures and download folders or selected entries as ZIP, with shared [notification center](notifications.md) progress and cancellation.
 - `recovery`: move selected entries to recoverable trash and restore them without overwriting newer files.
@@ -59,6 +60,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Desktop and phone More file actions → the shared comparison dropdown, nested repository status, retained parent status during delayed discovery, absent historical paths and reload persistence: `tests/e2e_ui/files/test_explorer_git_tracking.py::test_shared_comparison_keeps_files_live_and_gates_mixed_revisions`.
 - The same browser scenario checks Git deletions in Changes on desktop; on a phone, close Files, choose Workspace → Changes and open a deleted text file for review as a separate manual check.
 - Select different comparison modes in Files and Changes, switch between them and reload; each view should retain its choice and Files should never reconstruct a removed path.
+- Folder direct/descendant distinction, mixed counts and color ordering: `web/src/shell/fileStatusUtils.test.ts` and `web/src/shell/FolderTree.test.tsx`.
 - Nearest-repository discovery, explicit directory scopes, Git-file worktrees, nested repository boundaries and current status are covered by `tests/test_workspace_git.py`.
 - Overlay preferences and live tree behavior have component coverage in `web/src/lib/filesPanelPreferences.test.ts`, `web/src/shell/FilesPanel.test.tsx` and `web/src/shell/FolderTree.test.tsx`.
 - Expanded-directory invalidation: `web/src/store/chatStore.test.ts`.

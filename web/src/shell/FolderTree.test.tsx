@@ -232,11 +232,7 @@ describe("FolderTree file size / download alignment", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
-  it("puts a folder's dirty dot and a file's status letter in one shared column", () => {
-    // The two git-status markers must land in the same x down the tree. Each
-    // sized to its own content instead put them ~4px apart: the dot had a
-    // fixed 22px box while the letter was a variable-width badge centred on
-    // itself. Both now centre in ROW_STATUS_SLOT_CLASS.
+  it("uses the shared status slot inside each row's replaceable metadata", () => {
     renderTree({
       files: [dir("src"), file("app.ts")],
       changedFiles: [
@@ -262,11 +258,105 @@ describe("FolderTree file size / download alignment", () => {
     });
 
     const dotSlot = screen.getByText("●").parentElement;
-    const letterSlot = screen.getByTitle("Added").parentElement;
+    const letterSlot = screen.getByText("A").parentElement;
     for (const slot of [dotSlot, letterSlot]) {
       expect(slot).toHaveClass(ROW_STATUS_SLOT_CLASS);
       expect(slot).toHaveClass("justify-center");
+      expect(slot?.closest("[data-explorer-meta]")).not.toBeNull();
+      expect(slot?.closest("button")).toBeNull();
     }
+  });
+});
+
+describe("FolderTree folder comparison evidence", () => {
+  it.each([false, true])(
+    "shows mixed descendant counts in tree and filename results (search=%s)",
+    async (search) => {
+      renderTree({
+        conversationId: `folder-counts-${search}`,
+        files: [dir("src")],
+        changedFiles: [
+          change("src/new.ts", "created"),
+          change("src/deep/edited.ts"),
+          change("src/gone.ts", "deleted"),
+          change("elsewhere/no.ts"),
+        ],
+        includeMissingChanges: false,
+        ...(search ? { searchQuery: "src", searchResults: [dir("src")] } : {}),
+      });
+      const label = screen.getByText("src/");
+      const button = screen.getByRole("button", { name: "src/" });
+      expect(label.closest("span")).toHaveClass("text-orange-500");
+      expect(button).toHaveAttribute(
+        "aria-description",
+        "src\nDescendants: 1 modified, 1 added, 1 deleted",
+      );
+      expect(button).not.toHaveAttribute("title");
+      expect(screen.queryByText("A")).toBeNull();
+      fireEvent.focus(button);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
+        "Descendants: 1 modified, 1 added, 1 deleted",
+      );
+      fireEvent.keyDown(button, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+    },
+  );
+
+  it("never labels an existing Git folder added because every changed child is new", () => {
+    renderTree({
+      files: [dir("src")],
+      changedFiles: [change("src/new.ts", "created"), change("src/deep/new.ts", "created")],
+      includeMissingChanges: false,
+    });
+    expect(screen.getByText("src/")).toHaveClass("text-green-500");
+    expect(screen.getByText("●")).toBeInTheDocument();
+    expect(screen.queryByText("A")).toBeNull();
+    expect(screen.getByRole("button", { name: "src/" })).toHaveAttribute(
+      "aria-description",
+      "src\nDescendants: 2 added",
+    );
+  });
+
+  it.each(["created", "modified", "deleted"] as const)(
+    "requires a typed directory record for its own %s label",
+    (status) => {
+      renderTree({
+        files: [dir("src")],
+        changedFiles: [{ ...change("src", status), type: "directory" }, change("src/edited.ts")],
+        includeMissingChanges: false,
+      });
+      expect(screen.getByText("src/")).toHaveClass("text-orange-500");
+      const letter = { created: "A", modified: "M", deleted: "D" }[status];
+      expect(screen.getByText(letter)).toBeInTheDocument();
+      expect(screen.queryByText("●")).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "src/" }).getAttribute("aria-description"),
+      ).toContain(
+        `Folder: ${{ created: "Added", modified: "Modified", deleted: "Deleted" }[status]}\nDescendants: 1 modified`,
+      );
+    },
+  );
+
+  it("does not treat an untyped path match as independent directory status", () => {
+    renderTree({
+      files: [dir("src")],
+      changedFiles: [change("src", "created")],
+      includeMissingChanges: false,
+    });
+    expect(screen.queryByText("A")).toBeNull();
+    expect(screen.queryByText("●")).toBeNull();
+    expect(screen.getByRole("button", { name: "src/" })).toHaveAttribute("aria-description", "src");
+  });
+
+  it("keeps a deleted comparison file focusable for its status without opening it", async () => {
+    const onFileSelect = vi.fn();
+    renderTree({ files: [], changedFiles: [change("gone.ts", "deleted")], onFileSelect });
+    const button = screen.getByRole("button", { name: "gone.ts" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.focus(button);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Deleted");
+    fireEvent.click(button);
+    expect(onFileSelect).not.toHaveBeenCalled();
   });
 });
 
@@ -545,8 +635,8 @@ describe("FolderTree change-status overlay", () => {
       workspaceRoot,
       includeMissingChanges: false,
     });
-    expect(screen.getByText("app.ts")).toHaveClass("text-amber-500");
-    expect(screen.getByTitle("Modified")).toHaveTextContent("M");
+    expect(screen.getByText("app.ts")).toHaveClass("text-orange-500");
+    expect(screen.getByText("M")).toHaveTextContent("M");
     expect(screen.queryByText("unrelated.ts")).not.toBeInTheDocument();
   });
 
@@ -564,7 +654,7 @@ describe("FolderTree change-status overlay", () => {
       includeMissingChanges: false,
     });
     fireEvent.click(screen.getByRole("button", { name: "repo/" }));
-    expect(await screen.findByText("live.ts")).toHaveClass("text-amber-500");
+    expect(await screen.findByText("live.ts")).toHaveClass("text-orange-500");
     expect(screen.queryByText("gone.ts")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "old/" })).not.toBeInTheDocument();
   });
@@ -599,14 +689,14 @@ describe("FolderTree change-status overlay", () => {
 
     expect(screen.getByText("new.ts")).toHaveClass("text-green-500");
     expect(screen.getByText("new.ts")).not.toHaveClass("font-semibold");
-    expect(screen.getByTitle("Added")).toHaveTextContent("A");
+    expect(screen.getByText("A")).toHaveTextContent("A");
 
     fireEvent.click(screen.getByRole("button", { name: "src/" }));
     const deleted = await screen.findByText("gone.ts");
     expect(deleted).toHaveClass("line-through");
     expect(deleted).not.toHaveClass("text-destructive");
     expect(deleted.closest("div.group")).toHaveClass("opacity-50");
-    expect(screen.getByTitle("Deleted")).toHaveTextContent("D");
+    expect(screen.getByText("D")).toHaveTextContent("D");
   });
 
   it("matches workspace-root change paths after re-rooting into a subfolder", () => {
@@ -626,8 +716,8 @@ describe("FolderTree change-status overlay", () => {
       ],
     });
 
-    expect(screen.getByText("app.ts")).toHaveClass("text-amber-500");
-    expect(screen.getByTitle("Modified")).toHaveTextContent("M");
+    expect(screen.getByText("app.ts")).toHaveClass("text-orange-500");
+    expect(screen.getByText("M")).toHaveTextContent("M");
   });
 });
 
@@ -668,8 +758,8 @@ describe("FolderTree Git-ignore metadata", () => {
 
       expect(screen.getByText("cache/")).toHaveClass("opacity-50");
       expect(screen.getByRole("button", { name: "cache/" })).toHaveAttribute(
-        "title",
-        "Ignored by Git",
+        "aria-description",
+        "cache\nIgnored by Git",
       );
     },
   );
@@ -708,7 +798,8 @@ describe("FolderTree nested lazy loading", () => {
       expect(label).toHaveClass("opacity-50");
       expect(label.parentElement?.closest(".opacity-50")).toBeNull();
       expect(button?.querySelector("svg")?.closest(".opacity-50")).not.toBeNull();
-      expect(button).toHaveAttribute("title", "Ignored by Git");
+      expect(button?.getAttribute("aria-description")).toContain("Ignored by Git");
+      expect(button).not.toHaveAttribute("title");
       expect(button).toBeEnabled();
     }
     for (const name of ["tracked.txt", "legacy.txt"]) {

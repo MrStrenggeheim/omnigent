@@ -13,13 +13,24 @@ import {
 } from "@/hooks/useWorkspaceChangedFiles";
 import { cn } from "@/lib/utils";
 import { isExplorerInternalPath } from "@/lib/explorerOperations";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  TooltipButton,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { RunnerAsleepHint } from "./RunnerAsleepHint";
 import { type ChangedSort, compareChangedFiles, type SortableFile } from "./FlatFileList";
-import { ROW_STATUS_SLOT_CLASS, gitStatusLabel, gitStatusLetter } from "./fileStatusUtils";
+import {
+  folderStatuses,
+  gitStatusColor,
+  statusDescription,
+  type FolderStatus,
+} from "./fileStatusUtils";
 import { RevealBaseContext, useRevealMenu } from "./RevealInFileManager";
-import { useCursorTooltip } from "./useCursorTooltip";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
+import { FileStatusMarker } from "./FileStatusMarker";
 import {
   ExplorerRowActions,
   explorerRowClass,
@@ -541,7 +552,7 @@ function FolderTreeInner({
       .map((file): WorkspaceFile => ({
         path: file.path,
         name: file.name,
-        type: "file",
+        type: file.type ?? "file",
         bytes: file.bytes,
         modified_at: file.modified_at,
       }));
@@ -605,26 +616,12 @@ function FolderTreeInner({
 
   // Map from file path → change status, for file-level badges in the tree.
   const changedFileMap = useMemo<Map<string, WorkspaceChangedFile["status"]>>(() => {
-    return new Map(scopedChangedFiles.map((f) => [f.path, f.status]));
+    return new Map(
+      scopedChangedFiles.filter((f) => f.type !== "directory").map((f) => [f.path, f.status]),
+    );
   }, [scopedChangedFiles]);
 
-  // Map from directory path → highest-priority change status of any descendant.
-  // Priority: created (3) > modified (2) > deleted (1).
-  const dirtyDirMap = useMemo<Map<string, WorkspaceChangedFile["status"]>>(() => {
-    const STATUS_PRIORITY = { created: 3, modified: 2, deleted: 1 } as const;
-    const result = new Map<string, WorkspaceChangedFile["status"]>();
-    for (const file of scopedChangedFiles) {
-      const parts = file.path.split("/");
-      for (let i = 1; i < parts.length; i++) {
-        const dirPath = parts.slice(0, i).join("/");
-        const existing = result.get(dirPath);
-        if (!existing || STATUS_PRIORITY[file.status] > STATUS_PRIORITY[existing]) {
-          result.set(dirPath, file.status);
-        }
-      }
-    }
-    return result;
-  }, [scopedChangedFiles]);
+  const folderStatusMap = useMemo(() => folderStatuses(scopedChangedFiles), [scopedChangedFiles]);
 
   const startPathMotion = useCallback(
     (path: string, motion: TreeMotion) => {
@@ -952,13 +949,13 @@ function FolderTreeInner({
       return (
         <p className="px-2 py-1 text-muted-foreground text-sm">
           {hiddenCount} match{hiddenCount === 1 ? "" : "es"} in hidden directories.{" "}
-          <button
+          <TooltipButton
             type="button"
             className="cursor-pointer underline hover:text-foreground"
             onClick={() => onShowHidden?.()}
           >
             Show hidden files
-          </button>
+          </TooltipButton>
           {searchTruncated && " Search stopped early — results may be incomplete."}
         </p>
       );
@@ -983,6 +980,7 @@ function FolderTreeInner({
               onRevealDir={revealDirectory}
               conversationId={conversationId}
               changedFileMap={changedFileMap}
+              folderStatusMap={folderStatusMap}
             />
           ))}
         </ul>
@@ -1064,7 +1062,7 @@ function FolderTreeInner({
                   conversationId={conversationId}
                   onTogglePath={togglePath}
                   changedFileMap={changedFileMap}
-                  dirtyDirMap={dirtyDirMap}
+                  folderStatusMap={folderStatusMap}
                   onNavigateDir={onNavigateDir}
                   highlighted={row.kind === "node" && row.key === revealedPath}
                 />
@@ -1114,7 +1112,7 @@ function FileRowItem({
   onFileSelect,
   conversationId,
 }: {
-  /** Canonical workspace-relative path, used for file actions and title. */
+  /** Browse-relative path, used for file actions and the status description. */
   path: string;
   /** Text shown in the label span — full path for search results, filename for tree. */
   displayLabel: string;
@@ -1131,13 +1129,8 @@ function FileRowItem({
   conversationId: string | undefined;
 }) {
   const isDeleted = fileStatus === "deleted";
-  const fileColorClass =
-    fileStatus === "created"
-      ? "text-green-500 dark:text-green-400"
-      : fileStatus === "modified"
-        ? "text-amber-500 dark:text-amber-400"
-        : undefined;
-  const { handlers, tooltip } = useCursorTooltip(path);
+  const fileColorClass = isDeleted ? undefined : gitStatusColor(fileStatus);
+  const description = statusDescription(path, fileStatus, undefined, gitIgnored);
   const reveal = useRevealMenu(isDeleted ? null : path);
   const explorer = useExplorerRow(path, false, isDeleted);
 
@@ -1155,57 +1148,40 @@ function FileRowItem({
         style={{ paddingLeft: `${indentFor(depth)}px` }}
       >
         <IndentGuides depth={depth} />
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
-          onClick={() => !isDeleted && onFileSelect(path)}
-          disabled={isDeleted}
-          title={gitIgnored ? "Ignored by Git" : undefined}
-        >
-          <WorkspaceFileIcon path={path} className={gitIgnored ? "opacity-50" : undefined} />
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate text-ui",
-              labelIsPath && "[direction:rtl]",
-              isDeleted && "line-through",
-              fileColorClass,
-              gitIgnored && "opacity-50",
-            )}
-            {...handlers}
-          >
-            {labelIsPath ? <bdi>{displayLabel}</bdi> : displayLabel}
-          </span>
-          {fileStatus && (
-            // Centred in the shared status column so the A/M/D badge lands in
-            // the same x as a directory row's dirty dot.
-            <span
-              className={cn("flex shrink-0 items-center justify-center", ROW_STATUS_SLOT_CLASS)}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <TooltipButton
+              type="button"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+              onClick={() => !isDeleted && onFileSelect(path)}
+              aria-disabled={isDeleted || undefined}
+              aria-description={description}
             >
+              <WorkspaceFileIcon path={path} className={gitIgnored ? "opacity-50" : undefined} />
               <span
                 className={cn(
-                  "rounded px-1 py-0.5 font-mono text-[10px]",
-                  isDeleted
-                    ? "bg-destructive/10 text-destructive"
-                    : fileStatus === "created"
-                      ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                  "min-w-0 flex-1 truncate text-ui",
+                  labelIsPath && "[direction:rtl]",
+                  isDeleted && "line-through",
+                  fileColorClass,
+                  gitIgnored && "opacity-50",
                 )}
-                title={gitStatusLabel(fileStatus)}
               >
-                {gitStatusLetter(fileStatus)}
+                {labelIsPath ? <bdi>{displayLabel}</bdi> : displayLabel}
               </span>
-            </span>
-          )}
-        </button>
+            </TooltipButton>
+          </TooltipTrigger>
+          <TooltipContent className="whitespace-pre-line">{description}</TooltipContent>
+        </Tooltip>
         <ExplorerRowActions
           path={path}
           deleted={isDeleted}
           bytes={bytes}
+          marker={<FileStatusMarker status={fileStatus} />}
           conversationId={conversationId}
         />
         {reveal.menu}
       </div>
-      {tooltip}
     </li>
   );
 }
@@ -1220,6 +1196,7 @@ function SearchResultRow({
   onRevealDir,
   conversationId,
   changedFileMap,
+  folderStatusMap,
 }: {
   file: WorkspaceFile;
   onFileSelect: (path: string) => void;
@@ -1227,9 +1204,16 @@ function SearchResultRow({
   onRevealDir: (path: string) => void;
   conversationId: string | undefined;
   changedFileMap: Map<string, WorkspaceChangedFile["status"]>;
+  folderStatusMap: Map<string, FolderStatus>;
 }) {
   if (file.type === "directory") {
-    return <SearchDirRow file={file} onRevealDir={onRevealDir} />;
+    return (
+      <SearchDirRow
+        file={file}
+        onRevealDir={onRevealDir}
+        folderStatus={folderStatusMap.get(file.path)}
+      />
+    );
   }
   return (
     <FileRowItem
@@ -1258,10 +1242,13 @@ function SearchResultRow({
 function SearchDirRow({
   file,
   onRevealDir,
+  folderStatus,
 }: {
   file: WorkspaceFile;
   onRevealDir: (path: string) => void;
+  folderStatus?: FolderStatus;
 }) {
+  const description = statusDescription(file.path, undefined, folderStatus, file.git_ignored);
   const reveal = useRevealMenu(file.path, true);
   const explorer = useExplorerRow(file.path, true);
   return (
@@ -1275,28 +1262,43 @@ function SearchDirRow({
           explorer.selected && "bg-accent",
         )}
       >
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
-          onClick={() => onRevealDir(file.path)}
-          title={file.git_ignored ? "Ignored by Git" : undefined}
-        >
-          <FolderIcon
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground",
-              file.git_ignored && "opacity-50",
-            )}
-          />
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate text-ui [direction:rtl]",
-              file.git_ignored && "opacity-50",
-            )}
-          >
-            <bdi>{file.path}/</bdi>
-          </span>
-        </button>
-        <ExplorerRowActions path={file.path} directory />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <TooltipButton
+              type="button"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+              onClick={() => onRevealDir(file.path)}
+              aria-description={description}
+            >
+              <FolderIcon
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground",
+                  file.git_ignored && "opacity-50",
+                )}
+              />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-ui [direction:rtl]",
+                  gitStatusColor(folderStatus?.descendant),
+                  file.git_ignored && "opacity-50",
+                )}
+              >
+                <bdi>{file.path}/</bdi>
+              </span>
+            </TooltipButton>
+          </TooltipTrigger>
+          <TooltipContent className="whitespace-pre-line">{description}</TooltipContent>
+        </Tooltip>
+        <ExplorerRowActions
+          path={file.path}
+          directory
+          marker={
+            <FileStatusMarker
+              status={folderStatus?.direct ?? folderStatus?.descendant}
+              inherited={!folderStatus?.direct}
+            />
+          }
+        />
         {reveal.menu}
       </div>
     </li>
@@ -1353,7 +1355,7 @@ const TreeNodeRow = memo(function TreeNodeRow({
   conversationId,
   onTogglePath,
   changedFileMap,
-  dirtyDirMap,
+  folderStatusMap,
   onNavigateDir,
   highlighted = false,
 }: {
@@ -1365,7 +1367,7 @@ const TreeNodeRow = memo(function TreeNodeRow({
   conversationId: string | undefined;
   onTogglePath: (path: string) => void;
   changedFileMap: Map<string, WorkspaceChangedFile["status"]>;
-  dirtyDirMap: Map<string, WorkspaceChangedFile["status"]>;
+  folderStatusMap: Map<string, FolderStatus>;
   onNavigateDir?: (relativePath: string) => void;
   /** Briefly flash this row — used when a folder is revealed from search. */
   highlighted?: boolean;
@@ -1387,15 +1389,9 @@ const TreeNodeRow = memo(function TreeNodeRow({
     );
   }
 
-  const dirStatus = dirtyDirMap.get(node.path);
-  const dirDotClass =
-    dirStatus === "created"
-      ? "text-green-500 dark:text-green-400"
-      : dirStatus === "modified"
-        ? "text-amber-500 dark:text-amber-400"
-        : dirStatus === "deleted"
-          ? "text-destructive"
-          : undefined;
+  const folderStatus = folderStatusMap.get(node.path);
+  const dirColorClass = gitStatusColor(folderStatus?.descendant);
+  const description = statusDescription(node.path, undefined, folderStatus, node.gitIgnored);
 
   return (
     // The row is a div so the copy control can remain a sibling of the folder
@@ -1414,53 +1410,59 @@ const TreeNodeRow = memo(function TreeNodeRow({
       style={{ paddingLeft: `${indentFor(depth)}px` }}
     >
       <IndentGuides depth={depth} />
-      <button
-        type="button"
-        className="group/folder flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
-        onClick={() => onTogglePath(node.path)}
-        onDoubleClick={onNavigateDir ? () => onNavigateDir(node.path) : undefined}
-        aria-expanded={open}
-        title={node.gitIgnored ? "Ignored by Git" : undefined}
-      >
-        <span
-          className={cn(
-            "relative flex size-3.5 shrink-0 items-center justify-center",
-            node.gitIgnored && "opacity-50",
-          )}
-        >
-          <span className="flex transition-opacity group-hover/folder:opacity-0 group-focus-visible/folder:opacity-0">
-            {open ? (
-              <FolderOpenIcon className="size-3.5 text-muted-foreground" />
-            ) : (
-              <FolderIcon className="size-3.5 text-muted-foreground" />
-            )}
-          </span>
-          <ChevronRightIcon
-            className={cn(
-              "absolute size-3.5 text-muted-foreground opacity-0 transition-[transform,opacity] group-hover/folder:opacity-100 group-focus-visible/folder:opacity-100",
-              open && "rotate-90",
-            )}
-          />
-        </span>
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-ui",
-            dirDotClass,
-            node.gitIgnored && "opacity-50",
-          )}
-        >
-          {node.name}/
-        </span>
-        {dirStatus && (
-          <span
-            className={cn("flex shrink-0 items-center justify-center", ROW_STATUS_SLOT_CLASS)}
-            aria-hidden
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <TooltipButton
+            type="button"
+            className="group/folder flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+            onClick={() => onTogglePath(node.path)}
+            onDoubleClick={onNavigateDir ? () => onNavigateDir(node.path) : undefined}
+            aria-expanded={open}
+            aria-description={description}
           >
-            <span className={cn("text-[8px] leading-none", dirDotClass)}>●</span>
-          </span>
-        )}
-      </button>
-      <ExplorerRowActions path={node.path} directory />
+            <span
+              className={cn(
+                "relative flex size-3.5 shrink-0 items-center justify-center",
+                node.gitIgnored && "opacity-50",
+              )}
+            >
+              <span className="flex transition-opacity group-hover/folder:opacity-0 group-focus-visible/folder:opacity-0">
+                {open ? (
+                  <FolderOpenIcon className="size-3.5 text-muted-foreground" />
+                ) : (
+                  <FolderIcon className="size-3.5 text-muted-foreground" />
+                )}
+              </span>
+              <ChevronRightIcon
+                className={cn(
+                  "absolute size-3.5 text-muted-foreground opacity-0 transition-[transform,opacity] group-hover/folder:opacity-100 group-focus-visible/folder:opacity-100",
+                  open && "rotate-90",
+                )}
+              />
+            </span>
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-ui",
+                dirColorClass,
+                node.gitIgnored && "opacity-50",
+              )}
+            >
+              {node.name}/
+            </span>
+          </TooltipButton>
+        </TooltipTrigger>
+        <TooltipContent className="whitespace-pre-line">{description}</TooltipContent>
+      </Tooltip>
+      <ExplorerRowActions
+        path={node.path}
+        directory
+        marker={
+          <FileStatusMarker
+            status={folderStatus?.direct ?? folderStatus?.descendant}
+            inherited={!folderStatus?.direct}
+          />
+        }
+      />
       {reveal.menu}
     </div>
   );

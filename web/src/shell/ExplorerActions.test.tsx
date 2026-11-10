@@ -41,7 +41,12 @@ function Row({ entry }: { entry: ExplorerEntry }) {
   return (
     <div {...row.props} data-testid={`row-${entry.path}`}>
       <button type="button">{entry.path}</button>
-      <ExplorerRowActions path={entry.path} directory={entry.directory} />
+      <ExplorerRowActions
+        path={entry.path}
+        directory={entry.directory}
+        bytes={entry.directory ? null : 10}
+        marker={<span data-file-status> M </span>}
+      />
     </div>
   );
 }
@@ -103,6 +108,36 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Explorer actions", () => {
+  it.each(["a.txt", "folder"])(
+    "replaces status and size with one keyboard/touch menu for %s",
+    async (path) => {
+      const user = userEvent.setup();
+      setup();
+      const row = screen.getByTestId(`row-${path}`);
+      const marker = row.querySelector("[data-file-status]");
+      const metadata = marker?.closest("[data-explorer-meta]");
+      const actions = within(row).getByRole("button", { name: `Actions for ${path}` });
+      expect(metadata).toHaveClass(
+        "[[data-explorer-entry]:hover_&]:opacity-0",
+        "[[data-explorer-entry]:focus-within_&]:opacity-0",
+        "[@media(hover:none)]:hidden",
+      );
+      expect(metadata?.parentElement).toBe(actions.parentElement);
+      expect(actions).toHaveClass(
+        "absolute",
+        "[@media(hover:none)]:static",
+        "[@media(hover:none)]:opacity-100",
+      );
+      expect(actions.parentElement).toHaveClass("min-w-6");
+      if (path === "a.txt") expect(metadata?.querySelector("[data-file-size]")).not.toBeNull();
+      actions.focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByRole("menuitem", { name: "Copy" })).toBeInTheDocument();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("menu")).toBeNull();
+    },
+  );
+
   it("shows only the trailing menu and preserves right-click actions and destructive trash styling", async () => {
     setup();
     const row = screen.getByTestId("row-a.txt");
