@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { MessageContentBlock } from "@/lib/blocks";
 import type { Bubble } from "@/lib/renderItems";
 import { FileViewerContext } from "@/shell/FileViewerContext";
@@ -45,10 +46,16 @@ function assistantBubble(
 }
 
 function renderBubble(bubble: Bubble) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <FileViewerContext.Provider value={FILE_VIEWER_NOOP}>
       <BubbleView bubble={bubble} />
     </FileViewerContext.Provider>,
+    {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    },
   );
 }
 
@@ -159,8 +166,8 @@ describe("UserBubble system messages", () => {
     // A real bubble with both screenshots — not the blank pill the stolen
     // file blocks used to leave behind.
     expect(screen.getByTestId("message-bubble")).toBeInTheDocument();
-    expect(screen.getByAltText("shot1.png")).toBeInTheDocument();
-    expect(screen.getByAltText("shot2.png")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "shot1.png" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "shot2.png" })).toBeInTheDocument();
     // Upload markers are stripped from the text, and an empty text renders
     // nothing rather than an empty markdown block.
     expect(screen.queryByText(/\[Attached:/)).toBeNull();

@@ -1,4 +1,4 @@
-import type { ChatAttachmentContent } from "@/lib/chatAttachments";
+import { normalizeAttachmentContent, type ChatAttachmentContent } from "@/lib/chatAttachments";
 import {
   createContext,
   lazy,
@@ -6,15 +6,24 @@ import {
   useContext,
   useEffect,
   useState,
-  type ReactNode,
+  type ComponentPropsWithoutRef,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { DownloadIcon, FileIcon, Loader2Icon } from "lucide-react";
+import { DownloadIcon, Loader2Icon, MoreHorizontalIcon, ScanEyeIcon } from "lucide-react";
 import { authenticatedFetch } from "@/lib/identity";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
 import { downloadBlob } from "@/lib/explorerOperations";
 import { toast } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { WorkspaceFileIcon } from "@/shell/WorkspaceFileIcon";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +50,38 @@ export type AttachmentContent = ChatAttachmentContent;
 const MAX_BYTES = 50 * 1024 * 1024;
 const TEXT_BYTES = 512 * 1024;
 
+/** Filename-only reference that shares the product's file icons and path tooltip. */
+export function InlineFileReference({
+  path,
+  filename = path.split(/[\\/]/).at(-1) || "Attachment",
+  mimeType,
+  className,
+  ...props
+}: ComponentPropsWithoutRef<"button"> & {
+  path: string;
+  filename?: string;
+  mimeType?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <TooltipButton
+          {...props}
+          type="button"
+          className={cn(
+            "not-prose inline-flex max-w-full items-baseline gap-1.5 rounded-md border border-border/60 bg-muted/70 px-1.5 py-0.5 align-baseline text-sm leading-none text-link hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            className,
+          )}
+        >
+          <WorkspaceFileIcon path={filename} mimeType={mimeType} className="self-center" />
+          <span className="truncate leading-normal">{filename}</span>
+        </TooltipButton>
+      </TooltipTrigger>
+      <TooltipContent className="break-all">{path}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function useObjectUrl(blob: Blob | undefined) {
   const [value, setValue] = useState<{ blob: Blob; url: string }>();
   useEffect(() => {
@@ -55,19 +96,18 @@ function useObjectUrl(blob: Blob | undefined) {
 /** One authenticated file surface for uploads, agent artifacts and captured Markdown references. */
 export function ChatAttachment({
   sessionId,
-  attachment,
+  attachment: rawAttachment,
   reference,
   itemId,
-  label,
   compact = false,
 }: {
   sessionId: string | null;
   attachment?: AttachmentContent;
   reference?: string;
   itemId?: string | null;
-  label?: ReactNode;
   compact?: boolean;
 }) {
+  const attachment = normalizeAttachmentContent(rawAttachment);
   const [open, setOpen] = useState(false);
   const [failedImage, setFailedImage] = useState<string>();
   const filenameHint = attachment?.filename ?? reference?.split(/[\\/]/).at(-1) ?? "Attachment";
@@ -102,7 +142,7 @@ export function ChatAttachment({
       }>;
     },
   });
-  const filename = metadata.data?.name ?? filenameHint;
+  const filename = (metadata.data?.name ?? filenameHint).split(/[\\/]/).at(-1) || "Attachment";
   const image =
     /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i.test(filename) || inline?.startsWith("data:image/");
   const content = useQuery({
@@ -148,12 +188,21 @@ export function ChatAttachment({
     }
   }
   const available = !!url || !!inline?.startsWith("data:");
+  const details = [
+    reference && !storedReference ? reference : null,
+    detectLang(filename) === "markdown" ? "Markdown" : mime,
+    metadata.data || content.data
+      ? formatBytes(content.data?.size ?? metadata.data!.metadata.bytes)
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <span
       className={
         compact
           ? "not-prose inline"
-          : "not-prose my-1 inline-flex max-w-full flex-col gap-1 rounded-md border border-border p-2 align-top"
+          : "not-prose my-2 flex w-[398px] max-w-full flex-col gap-2 rounded-lg border border-border bg-background p-3"
       }
       data-testid="chat-attachment"
     >
@@ -165,37 +214,81 @@ export function ChatAttachment({
           onError={() => setFailedImage(blobUrl)}
         />
       )}
-      <span className={compact ? "inline" : "flex min-w-0 items-center gap-2"}>
-        {!compact && <FileIcon className="size-4 shrink-0 text-muted-foreground" />}
-        <button
-          type="button"
-          className="min-w-0 truncate text-left text-sm text-link hover:underline"
+      {compact ? (
+        <InlineFileReference
+          path={reference ?? filenameHint}
+          filename={filename}
+          mimeType={metadata.data?.metadata.content_type}
           onClick={() => setOpen(true)}
-        >
-          {label ?? filename}
-        </button>
-        {!compact && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`Download ${filename}`}
-            disabled={!available || content.isFetching}
-            onClick={() => void download()}
-          >
-            <DownloadIcon />
-          </Button>
-        )}
-      </span>
-      {!compact && (
-        <span className="max-w-full truncate text-xs text-muted-foreground" title={mime}>
-          {mime}
-          {(metadata.data || content.data) &&
-            ` · ${formatBytes(content.data?.size ?? metadata.data!.metadata.bytes)}`}
+        />
+      ) : (
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+            <WorkspaceFileIcon
+              path={filename}
+              mimeType={metadata.data?.metadata.content_type}
+              className="size-5"
+            />
+          </span>
+          <span className="min-w-0 flex-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <TooltipButton
+                  type="button"
+                  className="block max-w-full truncate text-left text-sm font-semibold hover:text-link focus-visible:outline-ring"
+                  onClick={() => setOpen(true)}
+                >
+                  {filename}
+                </TooltipButton>
+              </TooltipTrigger>
+              <TooltipContent className="break-all">{reference ?? filenameHint}</TooltipContent>
+            </Tooltip>
+            <span className="mt-1 block truncate text-xs text-muted-foreground">{details}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Download ${filename}`}
+                  disabled={!available || content.isFetching}
+                  onClick={() => void download()}
+                >
+                  <DownloadIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Download original</TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`More actions for ${filename}`}
+                >
+                  <MoreHorizontalIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setOpen(true)}>
+                  <ScanEyeIcon /> Preview
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!available || content.isFetching}
+                  onSelect={() => void download()}
+                >
+                  <DownloadIcon /> Download original
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
         </span>
       )}
       {content.isFetching && (
-        <span role="status" className="flex items-center gap-1 text-xs">
+        <span role="status" className={compact ? "sr-only" : "flex items-center gap-1 text-xs"}>
           <Loader2Icon className="size-3 animate-spin" />
           Loading file…
         </span>
@@ -208,7 +301,7 @@ export function ChatAttachment({
       {error && (
         <span role="alert" className="text-xs text-destructive">
           {error.message}{" "}
-          <button
+          <TooltipButton
             type="button"
             className="underline"
             onClick={() => {
@@ -217,7 +310,7 @@ export function ChatAttachment({
             }}
           >
             Retry
-          </button>
+          </TooltipButton>
         </span>
       )}
       {!available && !attachment?.error && (
@@ -234,9 +327,14 @@ export function ChatAttachment({
             <DialogDescription>
               {mime}
               {content.data && ` · ${formatBytes(content.data.size)}`} ·{" "}
-              <button type="button" className="text-link underline" onClick={() => void download()}>
+              <TooltipButton
+                type="button"
+                aria-label={`Download ${filename}`}
+                className="text-link underline"
+                onClick={() => void download()}
+              >
                 Download original
-              </button>
+              </TooltipButton>
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 overflow-auto">
@@ -390,15 +488,7 @@ function AttachmentPdf({
   }, [blob, filename]);
   return data ? <PdfViewer data={data} conversationId={sessionId} /> : <p>Loading PDF…</p>;
 }
-export function ScopedChatAttachment({
-  reference,
-  label,
-}: {
-  reference: string;
-  label?: ReactNode;
-}) {
+export function ScopedChatAttachment({ reference }: { reference: string }) {
   const { sessionId, itemId } = useContext(ChatAttachmentContext);
-  return (
-    <ChatAttachment sessionId={sessionId} itemId={itemId} reference={reference} label={label} />
-  );
+  return <ChatAttachment sessionId={sessionId} itemId={itemId} reference={reference} compact />;
 }

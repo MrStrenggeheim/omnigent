@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RenderItem } from "@/lib/renderItems";
 import { ConversationScrollLockContext } from "@/components/ai-elements/conversation";
 import { FileViewerContext } from "@/shell/FileViewerContext";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { normalizeExplicitMathDelimiters } from "@/components/ai-elements/mathMarkdown";
 import { BlockRenderer, rendersOnlyWorkedFold } from "./BlockRenderer";
 
@@ -2304,7 +2306,9 @@ function TestProviders({
 }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <FileViewerContext.Provider value={fileViewerContext}>{children}</FileViewerContext.Provider>
+      <FileViewerContext.Provider value={fileViewerContext}>
+        <TooltipProvider>{children}</TooltipProvider>
+      </FileViewerContext.Provider>
     </QueryClientProvider>
   );
 }
@@ -2325,7 +2329,8 @@ function renderMessage(
     workspaceHome: null,
     ...ctx,
   };
-  const items: RenderItem[] = [{ kind: "text", itemId: "t1", text, final: true }];
+  // Legacy messages use the FileViewer; captured messages use attachment snapshots.
+  const items: RenderItem[] = [{ kind: "text", itemId: null, text, final: true }];
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
@@ -2347,6 +2352,52 @@ describe("BlockRenderer inline file-path linkification", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.resetAllMocks();
+  });
+
+  it("opens a captured reference in its original conversation and message instead of the selected FileViewer", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("Captured file contents", { headers: { "Content-Type": "text/plain" } }),
+    );
+    const openFile = vi.fn();
+    render(
+      <TestProviders
+        queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+        fileViewerContext={{
+          openFile,
+          openGithubTab: () => {},
+          isChangedPath: () => true,
+          conversationId: "selected-chat",
+          workspaceRoot: "/selected/workspace",
+          workspaceHome: "/home/agent",
+        }}
+      >
+        <ConversationScopeContext.Provider value="original-chat">
+          <BlockRenderer
+            items={[
+              {
+                kind: "text",
+                itemId: "original-item",
+                text: "Read [the notes](/original/workspace/notes.txt).",
+                final: true,
+              },
+            ]}
+            sessionStatus="idle"
+          />
+        </ConversationScopeContext.Provider>
+      </TestProviders>,
+    );
+    const chip = screen.getByRole("button", { name: "notes.txt" });
+    expect(chip).toHaveTextContent(/^notes\.txt$/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(screen.getByRole("dialog")).toHaveTextContent("Captured file contents"),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/sessions/original-chat/attachments/references/original-item?path=%2Foriginal%2Fworkspace%2Fnotes.txt",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(openFile).not.toHaveBeenCalled();
   });
 
   it("linkifies a file that exists in the workspace but was not agent-changed", async () => {

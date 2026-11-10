@@ -205,6 +205,15 @@ def test_preview_selection_comments_and_annotated_chat_draft(
     target = preview.locator("strong").last
     target.select_text()
     page.mouse.up()
+    menu = page.locator("[data-text-selection-menu]")
+    expect(menu).to_be_visible()
+    selection_box = target.bounding_box()
+    menu_box = menu.bounding_box()
+    assert selection_box is not None and menu_box is not None
+    gap = selection_box["y"] - menu_box["y"] - menu_box["height"]
+    assert 0 <= gap <= 12, {"selection": selection_box, "menu": menu_box}
+    assert menu_box["x"] >= 0
+    assert menu_box["x"] + menu_box["width"] <= page.viewport_size["width"]
     page.get_by_role("menuitem", name="Ask in chat", exact=True).click()
     if mobile:
         page.get_by_role("button", name="Close file viewer", exact=True).click()
@@ -336,3 +345,43 @@ def test_codex_viewed_image_becomes_a_persistent_chat_attachment(
             )
         finally:
             client.delete(f"/v1/sessions/{chat}")
+
+
+@pytest.mark.parametrize("mobile", [False, True], ids=["desktop", "phone"])
+def test_inline_file_reference_keeps_filename_and_original_preview(
+    page: Page, ownership: Ownership, mobile: bool
+):
+    from urllib.parse import quote
+
+    filename = "guide file ü.md"
+    source = ownership.roots[0] / filename
+    original = "# Original file preview\n\nThis is the original Markdown file.\n"
+    source.write_text(original)
+    _say(ownership, f"The shared instruction file is [{source}]({quote(str(source))}).")
+    _open(page, ownership)
+    if mobile:
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.keyboard.press("ControlOrMeta+b")
+        page.keyboard.press("ControlOrMeta+i")
+    chip = page.get_by_test_id("chat-attachment").filter(has_text=filename)
+    link = chip.get_by_role("button", name=filename, exact=True)
+    expect(link).to_be_visible(timeout=30_000)
+    expect(chip).to_have_text(filename)
+    expect(chip.locator('[data-file-type="document"]')).to_have_count(1)
+    assert not chip.locator(".lucide-chevron-right").count()
+    if not mobile:
+        link.hover()
+        tooltip = page.locator('[data-slot="tooltip-content"]').filter(has_text=str(source))
+        expect(tooltip).to_be_visible()
+        assert page.locator('[data-slot="tooltip-content"]').count() == 1
+    link.click()
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_contain_text("Original file preview")
+    with page.expect_download() as downloaded:
+        dialog.get_by_role("button", name=f"Download {filename}", exact=True).click()
+    assert Path(downloaded.value.path()).read_text() == original
+    page.keyboard.press("Escape")
+    source.unlink()
+    page.reload()
+    chip.get_by_role("button", name=filename, exact=True).click()
+    expect(page.get_by_role("dialog")).to_contain_text("Original file preview")

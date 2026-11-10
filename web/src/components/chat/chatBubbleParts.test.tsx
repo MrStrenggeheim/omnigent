@@ -6,6 +6,7 @@ import type { Bubble } from "@/lib/renderItems";
 import { useChatStore, type ChatState } from "@/store/chatStore";
 import { ForkDialogContextProvider } from "@/shell/ForkDialogContext";
 import { BubbleView, containsMermaidDiagram } from "./chatBubbleParts";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const fetchMock = vi.fn();
 const initialStoreState = useChatStore.getState();
@@ -56,6 +57,36 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   useChatStore.setState(initialStoreState);
+});
+
+it("places explicit user attachments after the message text", async () => {
+  fetchMock.mockResolvedValue(
+    jsonResponse({ name: "notes.txt", metadata: { bytes: 12, content_type: "text/plain" } }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <TooltipProvider>
+        <BubbleView
+          bubble={{
+            kind: "user",
+            itemId: "user_file",
+            content: [
+              { type: "input_file", file_id: "original-file", filename: "notes.txt" },
+              { type: "input_text", text: "Review these notes." },
+            ],
+          }}
+          isLastAssistant={false}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+  const text = screen.getByText("Review these notes.");
+  const attachment = screen.getByTestId("chat-attachment");
+  expect(text.compareDocumentPosition(attachment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(await screen.findByText("text/plain · 12 B")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download notes.txt" })).toBeEnabled();
 });
 
 describe("Mermaid diagram width", () => {

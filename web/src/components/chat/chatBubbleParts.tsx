@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { userColor, userColorTint, userInitials } from "@/lib/userBadge";
 import {
   Message,
@@ -821,45 +821,6 @@ function UserBubble({ bubble }: { bubble: Extract<Bubble, { kind: "user" }> }) {
               showAuthorBadge && author ? { backgroundColor: userColorTint(author) } : undefined
             }
           >
-            {/* Inline image previews. Wrap rather than scroll horizontally:
-                a landscape image fills the bubble width, so a second one in a
-                non-wrapping strip would sit off-screen in the overflow and
-                look like it never rendered. */}
-            {images.length > 0 && (
-              <div className="mb-1.5 flex flex-wrap items-start gap-2">
-                {keyedAttachments(
-                  images,
-                  (img) => img.file_id ?? img.image_url ?? img.filename,
-                ).map(({ key, item: img }) => {
-                  const preview = imagePreview(img);
-                  if (preview.kind === "uploaded") {
-                    return <ChatAttachment key={key} sessionId={sessionId} attachment={img} />;
-                  }
-                  if (preview.kind === "inline") {
-                    return (
-                      <InlineImage
-                        key={key}
-                        src={preview.src}
-                        alt={preview.alt}
-                        className="rounded-md object-contain"
-                      />
-                    );
-                  }
-                  // In-flight upload, or a block with nothing renderable on it.
-                  return <AttachmentChip key={key} icon={ImageIcon} label={preview.label} />;
-                })}
-              </div>
-            )}
-            {/* Non-image file chips */}
-            {fileChips.length > 0 && (
-              <div className="mb-1.5 flex flex-wrap gap-1.5">
-                {keyedAttachments(fileChips, (att) => att.file_id ?? att.filename).map(
-                  ({ key, item: att }) => (
-                    <ChatAttachment key={key} sessionId={sessionId} attachment={att} />
-                  ),
-                )}
-              </div>
-            )}
             {/* "@"-mentioned workspace files/folders (delivered as text markers) */}
             {mentionedChips.length > 0 && (
               <div className="mb-1.5 flex flex-wrap gap-1.5">
@@ -915,7 +876,7 @@ function UserBubble({ bubble }: { bubble: Extract<Bubble, { kind: "user" }> }) {
                   )}
                 </div>
                 {isLong && (
-                  <button
+                  <TooltipButton
                     type="button"
                     onClick={() => setIsCollapsed((c) => !c)}
                     className="mt-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -923,9 +884,48 @@ function UserBubble({ bubble }: { bubble: Extract<Bubble, { kind: "user" }> }) {
                     {isCollapsed
                       ? `Show full prompt (${text.length.toLocaleString()} chars)`
                       : "Collapse prompt"}
-                  </button>
+                  </TooltipButton>
                 )}
               </>
+            )}
+            {/* Inline image previews. Wrap rather than scroll horizontally:
+                a landscape image fills the bubble width, so a second one in a
+                non-wrapping strip would sit off-screen in the overflow and
+                look like it never rendered. */}
+            {images.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-start gap-2">
+                {keyedAttachments(
+                  images,
+                  (img) => img.file_id ?? img.image_url ?? img.filename,
+                ).map(({ key, item: img }) => {
+                  const preview = imagePreview(img);
+                  if (preview.kind === "uploaded") {
+                    return <ChatAttachment key={key} sessionId={sessionId} attachment={img} />;
+                  }
+                  if (preview.kind === "inline") {
+                    return (
+                      <InlineImage
+                        key={key}
+                        src={preview.src}
+                        alt={preview.alt}
+                        className="rounded-md object-contain"
+                      />
+                    );
+                  }
+                  // In-flight upload, or a block with nothing renderable on it.
+                  return <AttachmentChip key={key} icon={ImageIcon} label={preview.label} />;
+                })}
+              </div>
+            )}
+            {/* Non-image file chips */}
+            {fileChips.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {keyedAttachments(fileChips, (att) => att.file_id ?? att.filename).map(
+                  ({ key, item: att }) => (
+                    <ChatAttachment key={key} sessionId={sessionId} attachment={att} />
+                  ),
+                )}
+              </div>
             )}
           </MessageContent>
         </div>

@@ -16,6 +16,7 @@ Generated attachments keep their original bytes; workspace references use their 
 - `scope`: message references retain their original workspace/environment, owner and filesystem generation; switching workspace never reinterprets a path.
 - `security`: arbitrary Markdown paths cannot read the server filesystem; traversal, outward symlinks and cross-session file IDs are refused.
 - `persistence`: explicit uploads survive deletion of their source, reload and reconnect; authorized workspace-reference snapshots survive source deletion after their first preview.
+- `presentation`: inline references show only the filename, a descriptive file-type icon and a full-path tooltip; explicit attachments use compact rows below message text.
 - `states`: loading, malformed data, missing files, unsupported previews and size limits remain visible without breaking the conversation.
 
 ## How to get to it (user POV)
@@ -37,6 +38,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md) 
 - All file families, session ownership, traversal/symlink checks and durable reference snapshots: `tests/server/routes/test_chat_attachments.py`.
 - Provider byte persistence, malformed/oversized isolation, MIME and model replay: `tests/runtime/test_chat_attachment_outputs.py` and `tests/runtime/test_content_resolver.py`.
 - Native viewed/generated events and local-reader bounds: `tests/native/test_attachment_upload.py`.
+- Filename-only path chips, original Markdown preview/download and deleted-source reload: `tests/e2e_ui/files/test_chat_attachments.py::test_inline_file_reference_keeps_filename_and_original_preview`.
 - File card, sandbox, media controls, errors and query identity: `web/src/components/ChatAttachment.test.tsx`.
 - Live file-only messages and stream finalization: `web/src/lib/blockStream.test.ts`; fork references: `tests/stores/test_chat_attachment_fork.py`.
 

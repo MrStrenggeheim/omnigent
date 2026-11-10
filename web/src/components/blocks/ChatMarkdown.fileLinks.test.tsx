@@ -14,6 +14,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileViewerContext } from "@/shell/FileViewerContext";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { FilePathAwareMessageResponse } from "./ChatMarkdown";
 
 vi.mock("@/components/ui/toast", () => ({ showToast: vi.fn() }));
@@ -100,6 +102,7 @@ function renderMarkdown(
   markdown: string,
   changed: string[] = [],
   viewer: typeof FILE_VIEWER = FILE_VIEWER,
+  sourceItemId?: string,
 ): void {
   changedPaths = changed;
   openFile.mockClear();
@@ -109,13 +112,72 @@ function renderMarkdown(
   render(
     <QueryClientProvider client={client}>
       <FileViewerContext.Provider value={viewer}>
-        <FilePathAwareMessageResponse>{markdown}</FilePathAwareMessageResponse>
+        <TooltipProvider delayDuration={0}>
+          <ConversationScopeContext.Provider value="conv_1">
+            <FilePathAwareMessageResponse sourceItemId={sourceItemId}>
+              {markdown}
+            </FilePathAwareMessageResponse>
+          </ConversationScopeContext.Provider>
+        </TooltipProvider>
       </FileViewerContext.Provider>
     </QueryClientProvider>,
   );
 }
 
 describe("markdown links to workspace files", () => {
+  it.each([
+    "See [Read the instructions](/original/workspace/AGENTS.md).",
+    "See `/original/workspace/AGENTS.md:12`.",
+  ])(
+    "renders captured references inline and opens their original message scope: %s",
+    async (markdown) => {
+      fetchMock.mockResolvedValue(
+        new Response("# Captured instructions", { headers: { "Content-Type": "text/markdown" } }),
+      );
+      renderMarkdown(markdown, [], FILE_VIEWER_WITH_SESSION, "original-item");
+      const chip = screen.getByRole("button", { name: "AGENTS.md" });
+      expect(chip).toHaveTextContent(/^AGENTS\.md$/);
+      expect(chip.querySelectorAll("svg")).toHaveLength(1);
+      expect(fetchMock).not.toHaveBeenCalled();
+      fireEvent.focus(chip);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("/original/workspace/AGENTS.md");
+      fireEvent.click(chip);
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/v1/sessions/conv_1/attachments/references/original-item?path=%2Foriginal%2Fworkspace%2FAGENTS.md",
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
+      expect(openFile).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders stored file links inline while retaining the stored file identity", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: "stored.pdf",
+          metadata: { bytes: 12, content_type: "application/pdf" },
+        }),
+      ),
+    );
+    renderMarkdown(
+      "Read [the report](/v1/sessions/conv_1/resources/files/original-file/content).",
+      [],
+      FILE_VIEWER_WITH_SESSION,
+      "original-item",
+    );
+    const chip = await screen.findByRole("button", { name: "stored.pdf" });
+    expect(chip).toHaveClass("inline-flex", "align-baseline");
+    expect(screen.queryByRole("button", { name: "Download stored.pdf" })).toBeNull();
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/v1/sessions/conv_1/resources/files/original-file/content",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+  });
   it("plays an existing root-level recording outside the changed-file list", async () => {
     fetchMock.mockResolvedValue(dirListing(["demo.webm"]));
     renderMarkdown("[Screen recording](demo.webm)", [], FILE_VIEWER_WITH_SESSION);
@@ -238,19 +300,21 @@ describe("markdown links to workspace files", () => {
     expect(link.querySelector("svg")).toBeNull();
   });
 
-  // Overriding the `a` slot replaces Streamdown's link component, so its
-  // styling and marker attribute have to be reproduced. index.css keys the
-  // pointer cursor and the table-cell overflow-wrap rule (which stops a
-  // link-only table column collapsing to ~2ch) on the attribute.
-  it.each([
-    ["an external link", "[docs](https://example.com/page)", "docs", [] as string[]],
-    ["a workspace file link", "[notes.md](docs/notes.md)", "notes.md", ["docs/notes.md"]],
-  ])("keeps Streamdown's link styling on %s", (_label, markdown, name, changed) => {
-    renderMarkdown(markdown, changed);
-
-    const link = screen.getByText(name).closest("a");
+  it("keeps Streamdown's link styling on external links", () => {
+    renderMarkdown("[docs](https://example.com/page)");
+    const link = screen.getByRole("link", { name: "docs" });
     expect(link).toHaveAttribute("data-streamdown", "link");
     expect(link).toHaveClass("wrap-anywhere", "font-medium", "text-link", "underline");
+  });
+
+  it("renders local links as baseline chips with a descriptive file icon", () => {
+    renderMarkdown("See [notes.md](docs/notes.md).", ["docs/notes.md"]);
+    const link = screen.getByRole("button", { name: "notes.md" });
+    expect(link).toHaveAttribute("data-streamdown", "link");
+    expect(link).toHaveClass("inline-flex", "align-baseline", "items-baseline");
+    expect(link.querySelector("svg")).toHaveAttribute("data-file-type", "document");
+    expect(link.querySelectorAll("svg")).toHaveLength(1);
+    expect(link).not.toHaveAttribute("title");
   });
 
   it("keeps the source hast node out of the DOM", () => {
@@ -435,17 +499,19 @@ describe("cited line ranges", () => {
   });
 });
 
-// A full path says little to the reader and makes replies verbose, so a file
-// link shows just the file name (and cited position); the full path stays the
-// link's accessible name and hover title, and is still what opens.
+// File chips show the target filename; citations still control the viewer position.
 describe("file link labels", () => {
-  it("labels an inline-code file link by its file name and position", () => {
+  it("labels an inline-code file link by its filename and exposes its full path on focus", async () => {
     const citation = `${WORKSPACE}/sql/core/SQLFunctionExpression.scala:68-72`;
     renderMarkdown(`see \`${citation}\``, ["sql/core/SQLFunctionExpression.scala"]);
 
     const link = screen.getByRole("button", { name: citation });
-    expect(link).toHaveTextContent(/^SQLFunctionExpression\.scala:68-72$/);
-    expect(link).toHaveAttribute("title", citation);
+    expect(link).toHaveTextContent(/^SQLFunctionExpression\.scala$/);
+    expect(link).not.toHaveAttribute("title");
+    fireEvent.focus(link);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      `${WORKSPACE}/sql/core/SQLFunctionExpression.scala`,
+    );
   });
 
   it("leaves a bare file name and a non-openable path as written", () => {
@@ -461,8 +527,8 @@ describe("file link labels", () => {
     renderMarkdown("[docs/notes.md:12](docs/notes.md#L12)", ["docs/notes.md"]);
 
     const link = screen.getByRole("button", { name: "docs/notes.md:12" });
-    expect(link).toHaveTextContent(/^notes\.md:12$/);
-    expect(link).toHaveAttribute("title", "docs/notes.md#L12");
+    expect(link).toHaveTextContent(/^notes\.md$/);
+    expect(link).not.toHaveAttribute("title");
     fireEvent.click(link);
     expect(openFile).toHaveBeenCalledWith("docs/notes.md", { line: 12 });
   });
@@ -486,13 +552,16 @@ describe("file link labels", () => {
       "[docs/notes.md:12:5](docs/notes.md#L12C9)",
       "docs/notes.md:12:5",
     ],
-  ])("keeps %s as written", (_label, markdown, text) => {
-    renderMarkdown(markdown, ["docs/notes.md"]);
+  ])(
+    "shows the target filename while retaining %s as its accessible label",
+    (_label, markdown, text) => {
+      renderMarkdown(markdown, ["docs/notes.md"]);
 
-    const link = screen.getByRole("button", { name: text });
-    expect(link).toHaveTextContent(text);
-    expect(link).not.toHaveAttribute("aria-label");
-  });
+      const link = screen.getByRole("button", { name: text });
+      expect(link).toHaveTextContent(/^notes\.md$/);
+      expect(link).toHaveAttribute("aria-label", text);
+    },
+  );
 });
 
 // Files OUTSIDE the workspace root. The FileViewer and filesystem API open

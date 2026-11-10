@@ -1,4 +1,8 @@
-import { ChatAttachmentContext, ChatAttachment } from "@/components/ChatAttachment";
+import {
+  ChatAttachmentContext,
+  ChatAttachment,
+  InlineFileReference,
+} from "@/components/ChatAttachment";
 import { useScopedConversationId } from "@/components/chat/conversationScope";
 // Markdown rendering for chat text: assistant bubbles, user bubbles, and any
 // other surface that shows agent-authored markdown.
@@ -21,7 +25,6 @@ import remarkBreaks from "remark-breaks";
 import { normalizeExplicitMathDelimiters } from "@/components/ai-elements/mathMarkdown";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
-  shortFileCitationLabel,
   splitWorkspaceFileCitation,
   WORKSPACE_FILE_LINK_ATTR,
   WORKSPACE_IMAGE_ATTR,
@@ -97,8 +100,7 @@ function useWorkspaceFileOpener(text: string, explicitLink = false): WorkspaceFi
   // Agents cite a file with the position they mean, `docs/notes.md:12` or
   // `:12:7`. The position is not part of the filename, so no such path is ever
   // in the changed-files list or on disk; drop it before resolving, but keep
-  // the line so the viewer can land on the cited change. The link shows the file
-  // name and position; the full citation stays its accessible name.
+  // the line so the viewer can land on the cited change.
   const citation = splitWorkspaceFileCitation(text);
   const cited = citation.path;
   const citedLine = citation.line;
@@ -168,8 +170,7 @@ function useWorkspaceFileOpener(text: string, explicitLink = false): WorkspaceFi
  * that the filesystem API confirms points at a real file in the workspace.
  * Everything else (prose-y inline code, non-existent paths) falls back to a
  * styled `<code>` matching Streamdown's default inline appearance. A link
- * displays only the file name and cited position; the full text the agent
- * wrote stays its accessible name and hover title.
+ * displays only the filename; its full path appears in the shared tooltip.
  *
  * Rendered by Streamdown as a real component (via the `inlineCode` slot), so
  * it may call hooks: the existence query re-renders this span when it settles,
@@ -186,7 +187,7 @@ function WorkspacePathInlineCode({
   // non-openable one just stays styled inline code — only an explicit
   // markdown link (WorkspaceFileLink) earns dead-path feedback.
   const scope = useContext(ChatAttachmentContext);
-  const { open: openWorkspaceFile } = useWorkspaceFileOpener(scope.itemId ? "" : text);
+  const { open: openWorkspaceFile, copyPath } = useWorkspaceFileOpener(scope.itemId ? "" : text);
   const citedPath = splitWorkspaceFileCitation(text).path;
   if (
     scope.itemId &&
@@ -199,31 +200,16 @@ function WorkspacePathInlineCode({
         sessionId={scope.sessionId}
         itemId={scope.itemId}
         reference={citedPath}
-        label={<code className={className}>{text}</code>}
       />
     );
   }
   if (openWorkspaceFile) {
-    const shortLabel = shortFileCitationLabel(text);
-    // Rendered as an inline <code> (not a <button>): a button is laid out as
-    // an atomic inline-block, so a long path can't break across lines and
-    // drops below the list marker as a whole unit. An inline <code> flows and
-    // wraps like the surrounding text; role/tabIndex/keydown restore the
-    // button semantics.
     return (
-      <code
-        role="button"
-        tabIndex={0}
+      <InlineFileReference
+        path={copyPath}
+        filename={citedPath.split(/[\\/]/).at(-1)}
+        aria-label={text}
         data-streamdown="inline-code"
-        // Keep the base inline-code class/props (merge, don't replace) so the
-        // link only adds the underline affordance on top of Streamdown's
-        // styling and any caller-provided attributes survive.
-        className={cn(
-          "font-mono text-ui text-link underline decoration-dotted underline-offset-2 transition-colors cursor-pointer",
-          className,
-        )}
-        aria-label={shortLabel ? text : undefined}
-        title={shortLabel ? text : undefined}
         onClick={openWorkspaceFile}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -231,10 +217,8 @@ function WorkspacePathInlineCode({
             openWorkspaceFile();
           }
         }}
-        {...codeProps}
-      >
-        {shortLabel ?? codeChildren}
-      </code>
+        id={codeProps.id}
+      />
     );
   }
   // Match Streamdown's default inline-code styling so non-path inline code
@@ -318,13 +302,13 @@ function WorkspaceFileLink({
   } = useWorkspaceFileOpener(attachmentScope.itemId ? "" : path, true);
   // Scopes the desktop in-app browser route to this conversation's view.
   const conversationId = useFileViewerConversationId();
-  const { root, home } = useWorkspacePaths();
 
   if (path && attachmentScope.itemId) {
     const stored = path.match(/^\/v1\/sessions\/([^/]+)\/resources\/files\/([^/]+)\/content$/);
     if (stored && decodeURIComponent(stored[1]) === attachmentScope.sessionId)
       return (
         <ChatAttachment
+          compact
           sessionId={attachmentScope.sessionId}
           attachment={{
             file_id: decodeURIComponent(stored[2]),
@@ -334,10 +318,10 @@ function WorkspaceFileLink({
       );
     return (
       <ChatAttachment
+        compact
         sessionId={attachmentScope.sessionId}
         itemId={attachmentScope.itemId}
         reference={splitWorkspaceFileCitation(path).path}
-        label={children}
       />
     );
   }
@@ -451,39 +435,23 @@ function WorkspaceFileLink({
     );
   }
 
-  // Link text that spells out the linked file and position shows just its name;
-  // a descriptive label, or text citing a different place, is kept as written.
-  const linkText = typeof children === "string" ? children : null;
-  const shortLabel =
-    linkText && citesSamePlace(linkText, path, resolvedPath, root, home)
-      ? shortFileCitationLabel(linkText)
-      : null;
-
-  // No href: the parked fragment would still navigate on cmd/middle-click, and
-  // no URL opens the FileViewer. role/tabIndex/onKeyDown restore button semantics.
   return (
     <FileLinkContextMenu path={copyPath}>
-      <a
-        {...props}
-        role="button"
-        tabIndex={0}
-        aria-label={shortLabel && linkText ? linkText : props["aria-label"]}
-        title={title ?? path}
-        data-streamdown="link"
-        // Dotted underline distinguishes "opens in the FileViewer" from a link
-        // that leaves the app; the rest matches Streamdown so a file link in a
-        // table cell wraps like any other.
-        className={cn(STREAMDOWN_LINK_CLASS, "decoration-dotted underline-offset-2", className)}
-        onClick={openWorkspaceFile}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openWorkspaceFile();
-          }
-        }}
-      >
-        {shortLabel ?? children}
-      </a>
+      <span className="inline">
+        <InlineFileReference
+          path={copyPath}
+          filename={splitWorkspaceFileCitation(path).path.split(/[\\/]/).at(-1)}
+          aria-label={props["aria-label"] ?? (typeof children === "string" ? children : undefined)}
+          data-streamdown="link"
+          onClick={openWorkspaceFile}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              openWorkspaceFile();
+            }
+          }}
+        />
+      </span>
     </FileLinkContextMenu>
   );
 }
@@ -505,24 +473,6 @@ function FileLinkContextMenu({ path, children }: { path: string; children: React
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
-  );
-}
-
-function citesSamePlace(
-  text: string,
-  target: string,
-  resolvedTarget: string,
-  root: string | null,
-  home: string | null,
-): boolean {
-  const cited = splitWorkspaceFileCitation(text);
-  const linked = splitWorkspaceFileCitation(target);
-  return (
-    resolveChatFilePath(cited.path, root, home)?.path === resolvedTarget &&
-    (!cited.hasPosition ||
-      (cited.line === linked.line &&
-        cited.column === linked.column &&
-        cited.endLine === linked.endLine))
   );
 }
 
