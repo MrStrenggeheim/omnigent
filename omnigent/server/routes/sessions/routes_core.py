@@ -225,6 +225,7 @@ from omnigent.stores.conversation_store import (
     pinned_label_key,
     runner_seen_is_fresh,
 )
+from omnigent.stores.conversation_store.message_search import MAX_SEARCH_QUERY, MessageSearchPage
 from omnigent.stores.file_store import FileStore
 from omnigent.stores.permission_store import PermissionStore
 from omnigent.stores.project_store import ProjectStore
@@ -399,6 +400,69 @@ def _unsupported_model_detail(result: _RunnerForwardResult | None) -> str | None
         return None
     detail = _runner_reply_field(result.body, "detail")
     return detail if isinstance(detail, str) and detail else "This terminal cannot use that model."
+
+
+def _session_visibility_filters(
+    user_id: str | None,
+    visibility: str,
+    include_archived: bool,
+    project: str | None = None,
+) -> dict[str, Any]:
+    """Share session-list ownership and archive rules with message search."""
+    # Map the visibility filter to store-level ACL params.
+    # "mine": only sessions the caller owns — no accessible_by needed
+    #   because owner-level implies access.
+    # "shared": sessions accessible but not owned — shared_only=True
+    #   computes the set difference (accessible − owned).
+    # "all": all accessible sessions (legacy default). A project folder
+    #   additionally gates on owned_by so a shared session with a
+    #   like-named project stays out of the viewer's own folder.
+    # mine/shared require an identity anchor (owned_by / accessible_by).
+    # Passing None into the store's shared_only path raises ValueError.
+    # "archived" carries no ownership semantics — preserve it in no-auth.
+    effective_visibility = visibility
+    if user_id is None and visibility in ("mine", "shared"):
+        effective_visibility = "all"
+    if effective_visibility == "mine":
+        accessible_by_param: str | None = None
+        owned_by_param: str | None = user_id
+        shared_only_param = False
+        include_archived_param = False
+        archived_only_param = False
+    elif effective_visibility == "shared":
+        accessible_by_param = user_id
+        owned_by_param = None
+        shared_only_param = True
+        include_archived_param = False
+        archived_only_param = False
+    elif effective_visibility == "archived":
+        accessible_by_param = user_id
+        owned_by_param = None
+        shared_only_param = False
+        # archived_only=True implies include_archived=True — the store
+        # filters to archived=True regardless of include_archived.
+        include_archived_param = True
+        archived_only_param = True
+    else:  # "all"
+        accessible_by_param = user_id
+        # A specific project folder ("My sessions"-only) must show only the
+        # viewer's own sessions — a session shared with them but filed under a
+        # like-named project belongs on "Shared with me", not in this folder.
+        # Passing owned_by here also scopes the dual-read's first-class half:
+        # the store resolves the project NAME to the caller's own project id.
+        # The flat list (project=None) and Unfiled (project="") stay unscoped so
+        # shared sessions still surface for the "Shared with me" tab.
+        owned_by_param = user_id if project else None
+        shared_only_param = False
+        include_archived_param = include_archived
+        archived_only_param = False
+    return {
+        "accessible_by": accessible_by_param,
+        "owned_by": owned_by_param,
+        "shared_only": shared_only_param,
+        "include_archived": include_archived_param,
+        "archived_only": archived_only_param,
+    }
 
 
 def register_core_routes(
@@ -1726,6 +1790,34 @@ def register_core_routes(
             harnesses_by_id,
         )
 
+    @router.get("/sessions/search/messages", response_model=MessageSearchPage)
+    async def search_session_messages(
+        request: Request,
+        query: str = Query(max_length=MAX_SEARCH_QUERY),
+        session_id: str | None = Query(default=None, pattern="^[0-9a-f]{32}$"),
+        limit: int = Query(default=40, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=1024),
+        include_archived: bool = Query(default=False),
+        visibility: str = Query(default="all", pattern="^(all|mine|shared|archived)$"),
+    ) -> MessageSearchPage:
+        """Return bounded authorized message hits, including unloaded history.
+
+        Text retains the stored raw text-block join (one space); all offsets
+        use UTF-16. Truncated text reports its full-source offset explicitly.
+        """
+        user_id = _require_user(request, auth_provider)
+        try:
+            return await asyncio.to_thread(
+                conversation_store.search_messages,
+                query,
+                conversation_id=session_id,
+                limit=limit,
+                cursor=cursor,
+                **_session_visibility_filters(user_id, visibility, include_archived),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @router.get(
         "/sessions",
         response_model=None,
@@ -1822,53 +1914,9 @@ def register_core_routes(
         # disabled entirely — no auth_provider).
         user_id = _require_user(request, auth_provider)
         normalized_query = search_query if search_query else None
-        # Map the visibility filter to store-level ACL params.
-        # "mine": only sessions the caller owns — no accessible_by needed
-        #   because owner-level implies access.
-        # "shared": sessions accessible but not owned — shared_only=True
-        #   computes the set difference (accessible − owned).
-        # "all": all accessible sessions (legacy default). A project folder
-        #   additionally gates on owned_by so a shared session with a
-        #   like-named project stays out of the viewer's own folder.
-        # mine/shared require an identity anchor (owned_by / accessible_by).
-        # Passing None into the store's shared_only path raises ValueError.
-        # "archived" carries no ownership semantics — preserve it in no-auth.
-        effective_visibility = visibility
-        if user_id is None and visibility in ("mine", "shared"):
-            effective_visibility = "all"
-        if effective_visibility == "mine":
-            accessible_by_param: str | None = None
-            owned_by_param: str | None = user_id
-            shared_only_param = False
-            include_archived_param = False
-            archived_only_param = False
-        elif effective_visibility == "shared":
-            accessible_by_param = user_id
-            owned_by_param = None
-            shared_only_param = True
-            include_archived_param = False
-            archived_only_param = False
-        elif effective_visibility == "archived":
-            accessible_by_param = user_id
-            owned_by_param = None
-            shared_only_param = False
-            # archived_only=True implies include_archived=True — the store
-            # filters to archived=True regardless of include_archived.
-            include_archived_param = True
-            archived_only_param = True
-        else:  # "all"
-            accessible_by_param = user_id
-            # A specific project folder ("My sessions"-only) must show only the
-            # viewer's own sessions — a session shared with them but filed under a
-            # like-named project belongs on "Shared with me", not in this folder.
-            # Passing owned_by here also scopes the dual-read's first-class half:
-            # the store resolves the project NAME to the caller's own project id.
-            # The flat list (project=None) and Unfiled (project="") stay unscoped so
-            # shared sessions still surface for the "Shared with me" tab.
-            owned_by_param = user_id if project else None
-            shared_only_param = False
-            include_archived_param = include_archived
-            archived_only_param = False
+        visibility_filters = _session_visibility_filters(
+            user_id, visibility, include_archived, project
+        )
         page = await asyncio.to_thread(
             conversation_store.list_conversations,
             limit=limit,
@@ -1876,9 +1924,6 @@ def register_core_routes(
             before=before,
             agent_id=agent_id,
             agent_name=agent_name,
-            accessible_by=accessible_by_param,
-            owned_by=owned_by_param,
-            shared_only=shared_only_param,
             has_agent_id=True,
             # The store treats ``None`` as "no kind filter"; the API
             # spells that ``kind=any`` to keep the param required-ish
@@ -1888,10 +1933,9 @@ def register_core_routes(
             sort_by=sort_by,
             search_query=normalized_query,
             search_scope=search_scope,
-            include_archived=include_archived_param,
-            archived_only=archived_only_param,
             project=project,
             pinned=pinned,
+            **visibility_filters,
             # Pins are per-user: filter to the caller's own pin key.
             pinned_owner=user_id,
         )

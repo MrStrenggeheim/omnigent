@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from collections.abc import Mapping
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from pathlib import PureWindowsPath
 from typing import Any, Protocol, cast
 
@@ -31,7 +32,11 @@ from sqlalchemy.orm import QueryableAttribute, Session, load_only
 from sqlalchemy.sql.selectable import Subquery
 
 from omnigent._wrapper_labels import UI_MODE_LABEL_KEY, WRAPPER_LABEL_KEY
-from omnigent.db.account_authority import AccountAuthority, require_active_account
+from omnigent.db.account_authority import (
+    AccountAuthority,
+    account_generation,
+    require_active_account,
+)
 from omnigent.db.compression import encode as compress_text
 from omnigent.db.converters import sql_agent_to_entity
 from omnigent.db.db_models import (
@@ -102,6 +107,7 @@ from omnigent.stores.conversation_store import (
     PENDING_INPUT_RESPONSE_ID,
     PINNED_LABEL_KEY,
     PROJECT_LABEL_KEY,
+    SIDE_CHAT_LABEL_KEY,
     ConversationAlreadyExistsError,
     ConversationNotFoundError,
     ConversationStore,
@@ -110,6 +116,16 @@ from omnigent.stores.conversation_store import (
     DailyCostState,
     SessionConnectivity,
     pinned_label_key,
+)
+from omnigent.stores.conversation_store.message_search import (
+    MAX_SEARCH_QUERY,
+    MessageSearchPage,
+    build_message_hit,
+    decode_search_cursor,
+    encode_search_cursor,
+    literal_matcher,
+    search_fingerprint,
+    sqlite_message_search,
 )
 from omnigent.stores.conversation_store.overrides import (
     decode_session_overrides as _decode_session_overrides,
@@ -2096,6 +2112,190 @@ class SqlAlchemyConversationStore(ConversationStore):
                 return None
             return AccountAuthority(row.user_id, row.account_generation, current_workspace_id())
 
+    def _can_search_conversation(
+        self,
+        conversation_id: str,
+        *,
+        accessible_by: str | None,
+        owned_by: str | None,
+        shared_only: bool,
+    ) -> bool:
+        """Use normal parent, public and admin access for an explicit chat."""
+        from omnigent.server.auth import LEVEL_OWNER, LEVEL_READ
+        from omnigent.server.permissions import check_session_access
+        from omnigent.stores.permission_store.sqlalchemy_store import SqlAlchemyPermissionStore
+
+        permissions = SqlAlchemyPermissionStore(self.storage_location)
+        if shared_only and accessible_by is None:
+            raise ValueError("shared_only=True requires accessible_by to be set")
+        if accessible_by is not None and not check_session_access(
+            accessible_by, conversation_id, LEVEL_READ, permissions, self
+        ):
+            return False
+        owner_user = owned_by if owned_by is not None else accessible_by
+        if shared_only or owned_by is not None:
+            is_owner = check_session_access(
+                owner_user, conversation_id, LEVEL_OWNER, permissions, self
+            )
+            return not is_owner if shared_only else is_owner
+        return True
+
+    def search_messages(
+        self,
+        query: str,
+        *,
+        conversation_id: str | None = None,
+        limit: int = 40,
+        cursor: str | None = None,
+        accessible_by: str | None = None,
+        owned_by: str | None = None,
+        shared_only: bool = False,
+        include_archived: bool = False,
+        archived_only: bool = False,
+    ) -> MessageSearchPage:
+        """Search persisted messages without fetching conversation histories.
+
+        Order is session ID, immutable item position, ID and creation time.
+        Limit+1 establishes has_more without a count or an offset scan.
+        """
+        if not 1 <= limit <= 100:
+            raise ValueError("Message search limit must be between 1 and 100")
+        if len(query) > MAX_SEARCH_QUERY or "\x00" in query:
+            raise ValueError("Invalid message search query")
+        fingerprint = search_fingerprint(
+            {
+                "query": query,
+                "conversation_id": conversation_id,
+                "accessible_by": accessible_by,
+                "owned_by": owned_by,
+                "generation": account_generation(accessible_by or owned_by or ""),
+                "shared_only": shared_only,
+                "include_archived": include_archived,
+                "archived_only": archived_only,
+                "workspace": current_workspace_id(),
+                "server": str(self._conv_engine.url),
+            }
+        )
+        anchor = decode_search_cursor(cursor, fingerprint) if cursor else None
+        if not query:
+            return MessageSearchPage(data=[], has_more=False, next_cursor=None)
+        if conversation_id is not None and not self._can_search_conversation(
+            conversation_id,
+            accessible_by=accessible_by,
+            owned_by=owned_by,
+            shared_only=shared_only,
+        ):
+            return MessageSearchPage(data=[], has_more=False, next_cursor=None)
+        matcher = literal_matcher(query)
+        stmt = (
+            select(SqlConversationItem, SqlConversation.title)
+            .join(
+                SqlConversation,
+                and_(
+                    SqlConversation.workspace_id == SqlConversationItem.workspace_id,
+                    SqlConversation.id == SqlConversationItem.conversation_id,
+                ),
+            )
+            .where(
+                SqlConversation.workspace_id == current_workspace_id(),
+                SqlConversation.agent_id.is_not(None),
+                SqlConversationItem.type == encode_item_type("message"),
+            )
+        )
+        # All-chat search follows the sidebar's top-level scope. Explicit
+        # current-chat searches can address authorized child conversations.
+        if conversation_id is None:
+            stmt = stmt.where(
+                SqlConversation.parent_conversation_id.is_(None),
+                ~select(SqlConversationLabel.conversation_id)
+                .where(
+                    SqlConversationLabel.workspace_id == SqlConversation.workspace_id,
+                    SqlConversationLabel.conversation_id == SqlConversation.id,
+                    SqlConversationLabel.key == SIDE_CHAT_LABEL_KEY,
+                )
+                .exists(),
+            )
+        else:
+            stmt = stmt.where(SqlConversation.id == conversation_id)
+        if conversation_id is None:
+            stmt, _ = self._conversation_permission_scope(
+                stmt, accessible_by=accessible_by, owned_by=owned_by, shared_only=shared_only
+            )
+        if archived_only:
+            stmt = stmt.where(SqlConversation.archived.is_(True))
+        elif not include_archived:
+            stmt = stmt.where(SqlConversation.archived.is_(False))
+        if anchor:
+            stmt = stmt.where(
+                tuple_(
+                    SqlConversationItem.conversation_id,
+                    SqlConversationItem.position,
+                    SqlConversationItem.id,
+                    SqlConversationItem.created_at,
+                )
+                > anchor
+            )
+        stmt = stmt.order_by(
+            SqlConversationItem.conversation_id,
+            SqlConversationItem.position,
+            SqlConversationItem.id,
+            SqlConversationItem.created_at,
+        ).limit(limit + 1)
+        with self._conv_session("search_session_messages") as session:
+            if self._conv_engine.dialect.name == "sqlite":
+                connection = cast(
+                    sqlite3.Connection, session.connection().connection.driver_connection
+                )
+                search_scope = sqlite_message_search(
+                    connection, matcher, _SEARCH_STATEMENT_TIMEOUT_MS
+                )
+                stmt = stmt.where(
+                    func.omnigent_message_matches(SqlConversationItem.search_text) == 1
+                )
+            else:
+                search_scope = nullcontext()
+                stmt = stmt.where(
+                    SqlConversationItem.search_text.ilike(
+                        _like_contains_pattern(query), escape=_LIKE_ESCAPE
+                    )
+                )
+                if is_postgresql_family(self._conv_engine.dialect.name):
+                    session.execute(
+                        text(f"SET LOCAL statement_timeout = {int(_SEARCH_STATEMENT_TIMEOUT_MS)}")
+                    )
+            with search_scope:
+                rows = session.execute(stmt).all()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            decoded = self._decode_item_data_batch([row.data for row, _title in rows])
+            hits = []
+            for (row, title), data in zip(rows, decoded, strict=True):
+                message = json.loads(data)
+                # The search index strips NULs; offsets must address stored content.
+                source = " ".join(
+                    block["text"]
+                    for block in message["content"]
+                    if isinstance(block, dict) and block.get("text")
+                )
+                hit = build_message_hit(
+                    source=source,
+                    matcher=matcher,
+                    session_id=row.conversation_id,
+                    title=title,
+                    item_id=row.id,
+                    role=message["role"],
+                    created_at=row.created_at,
+                )
+                if hit is not None:
+                    hits.append(hit)
+            next_cursor = None
+            if has_more and rows:
+                last = rows[-1][0]
+                next_cursor = encode_search_cursor(
+                    fingerprint, last.conversation_id, last.position, last.id, last.created_at
+                )
+            return MessageSearchPage(data=hits, has_more=has_more, next_cursor=next_cursor)
+
     def search(
         self,
         query: str,
@@ -2988,6 +3188,126 @@ class SqlAlchemyConversationStore(ConversationStore):
 
         run_write_transaction(self._conv_session_immediate, "delete_label", write)
 
+    def _conversation_permission_scope(
+        self,
+        stmt: Select,
+        *,
+        accessible_by: str | None,
+        owned_by: str | None,
+        shared_only: bool,
+    ) -> tuple[Select, list[str] | None]:
+        """Apply the session-list ACL in either shared-DB or split-DB mode."""
+        from omnigent.server.auth import LEVEL_OWNER
+
+        # kind and archived both live on the AP ``conversations`` table now
+        # (kind derived from parent-nullness, archived a real column), so they
+        # are filtered directly on the AP query below. The only filters that
+        # still require Omnigent-side data are the permission scopes.
+        # shared_only (accessible − owned) is a permission scope too.
+        needs_meta_filter = (accessible_by is not None) or (owned_by is not None) or shared_only
+        if shared_only and accessible_by is None:
+            raise ValueError("shared_only=True requires accessible_by to be set")
+
+        # ACL strategy. Single-DB (the AP and Omnigent tables share one bind):
+        # push the permission check into the conversations query as a
+        # correlated EXISTS, so LIMIT bounds the work and no ids round-trip
+        # through Python — the prefetch otherwise costs O(all-accessible) per
+        # request (ids out, ids back in as an IN clause, two UUID conversions
+        # each). Split-DB: a cross-DB EXISTS is impossible, so keep the
+        # prefetch fallback.
+        acl_pushdown = needs_meta_filter and self._conv_engine is self._engine
+
+        qualifying_ids: list[str] | None = None
+        if needs_meta_filter and not acl_pushdown:
+            # Pre-fetch permission-qualifying IDs from the Omnigent DB
+            # (session_permissions), then filter the AP query. accessible_by and
+            # owned_by are intersected (both applied) to match the prior
+            # behaviour.
+            with self._session("list_conversations") as meta_sess:
+                accessible_set: set[str] | None = None
+                owned_set: set[str] | None = None
+                if accessible_by is not None or shared_only:
+                    acl_user = accessible_by
+                    accessible_set = set(
+                        meta_sess.execute(
+                            select(SqlSessionPermission.conversation_id).where(
+                                SqlSessionPermission.workspace_id == current_workspace_id(),
+                                SqlSessionPermission.user_id == acl_user,
+                            )
+                        ).scalars()
+                    )
+                if owned_by is not None or shared_only:
+                    # shared_only needs the owned set to subtract from the
+                    # accessible set; use accessible_by as the user anchor when
+                    # owned_by isn't explicitly set (they refer to the same user).
+                    owner_user = owned_by if owned_by is not None else accessible_by
+                    owned_set = set(
+                        meta_sess.execute(
+                            select(SqlSessionPermission.conversation_id).where(
+                                SqlSessionPermission.workspace_id == current_workspace_id(),
+                                SqlSessionPermission.user_id == owner_user,
+                                SqlSessionPermission.level >= LEVEL_OWNER,
+                            )
+                        ).scalars()
+                    )
+                if shared_only:
+                    # shared_only = accessible but NOT owned
+                    qualifying_ids = list((accessible_set or set()) - (owned_set or set()))
+                elif accessible_set is not None and owned_set is not None:
+                    qualifying_ids = list(accessible_set & owned_set)
+                else:
+                    qualifying_ids = list(
+                        accessible_set if accessible_set is not None else owned_set or set()
+                    )
+
+        if qualifying_ids is not None:
+            stmt = stmt.where(SqlConversation.id.in_(qualifying_ids))
+
+        if acl_pushdown:
+            # Correlated on both PK members so Postgres can drive the
+            # semi-join off pk_session_permissions
+            # (workspace_id, user_id, conversation_id). accessible_by and
+            # owned_by are intersected (both applied), matching the
+            # prefetch path.
+            if accessible_by is not None:
+                stmt = stmt.where(
+                    select(SqlSessionPermission.conversation_id)
+                    .where(
+                        SqlSessionPermission.workspace_id == SqlConversation.workspace_id,
+                        SqlSessionPermission.conversation_id == SqlConversation.id,
+                        SqlSessionPermission.user_id == accessible_by,
+                    )
+                    .exists()
+                )
+            if shared_only:
+                # shared_only = accessible but NOT owned: an anti-semi-join
+                # (NOT EXISTS on an owner-level grant) mirrors the prefetch
+                # path's set difference row by row.
+                owner_user = owned_by if owned_by is not None else accessible_by
+                stmt = stmt.where(
+                    ~select(SqlSessionPermission.conversation_id)
+                    .where(
+                        SqlSessionPermission.workspace_id == SqlConversation.workspace_id,
+                        SqlSessionPermission.conversation_id == SqlConversation.id,
+                        SqlSessionPermission.user_id == owner_user,
+                        SqlSessionPermission.level >= LEVEL_OWNER,
+                    )
+                    .exists()
+                )
+            elif owned_by is not None:
+                stmt = stmt.where(
+                    select(SqlSessionPermission.conversation_id)
+                    .where(
+                        SqlSessionPermission.workspace_id == SqlConversation.workspace_id,
+                        SqlSessionPermission.conversation_id == SqlConversation.id,
+                        SqlSessionPermission.user_id == owned_by,
+                        SqlSessionPermission.level >= LEVEL_OWNER,
+                    )
+                    .exists()
+                )
+
+        return stmt, qualifying_ids
+
     def list_conversations(
         self,
         limit: int = 20,
@@ -3088,8 +3408,6 @@ class SqlAlchemyConversationStore(ConversationStore):
             objects.
         :raises ValueError: If ``search_scope`` is not a known scope.
         """
-        from omnigent.server.auth import LEVEL_OWNER
-
         sort_col = self._resolve_sort_column(sort_by)
         is_desc = order == "desc"
         sort_fn = desc if is_desc else asc
@@ -3104,68 +3422,8 @@ class SqlAlchemyConversationStore(ConversationStore):
         elif kind == "default":
             kind_requires_parent = False
 
-        # kind and archived both live on the AP ``conversations`` table now
-        # (kind derived from parent-nullness, archived a real column), so they
-        # are filtered directly on the AP query below. The only filters that
-        # still require Omnigent-side data are the permission scopes.
-        # shared_only (accessible − owned) is a permission scope too.
-        needs_meta_filter = (accessible_by is not None) or (owned_by is not None) or shared_only
-        if shared_only and accessible_by is None:
-            raise ValueError("shared_only=True requires accessible_by to be set")
         if search_scope not in _SEARCH_SCOPES:
             raise ValueError(f"invalid search_scope: {search_scope!r}")
-
-        # ACL strategy. Single-DB (the AP and Omnigent tables share one bind):
-        # push the permission check into the conversations query as a
-        # correlated EXISTS, so LIMIT bounds the work and no ids round-trip
-        # through Python — the prefetch otherwise costs O(all-accessible) per
-        # request (ids out, ids back in as an IN clause, two UUID conversions
-        # each). Split-DB: a cross-DB EXISTS is impossible, so keep the
-        # prefetch fallback.
-        acl_pushdown = needs_meta_filter and self._conv_engine is self._engine
-
-        qualifying_ids: list[str] | None = None
-        if needs_meta_filter and not acl_pushdown:
-            # Pre-fetch permission-qualifying IDs from the Omnigent DB
-            # (session_permissions), then filter the AP query. accessible_by and
-            # owned_by are intersected (both applied) to match the prior
-            # behaviour.
-            with self._session("list_conversations") as meta_sess:
-                accessible_set: set[str] | None = None
-                owned_set: set[str] | None = None
-                if accessible_by is not None or shared_only:
-                    acl_user = accessible_by
-                    accessible_set = set(
-                        meta_sess.execute(
-                            select(SqlSessionPermission.conversation_id).where(
-                                SqlSessionPermission.workspace_id == current_workspace_id(),
-                                SqlSessionPermission.user_id == acl_user,
-                            )
-                        ).scalars()
-                    )
-                if owned_by is not None or shared_only:
-                    # shared_only needs the owned set to subtract from the
-                    # accessible set; use accessible_by as the user anchor when
-                    # owned_by isn't explicitly set (they refer to the same user).
-                    owner_user = owned_by if owned_by is not None else accessible_by
-                    owned_set = set(
-                        meta_sess.execute(
-                            select(SqlSessionPermission.conversation_id).where(
-                                SqlSessionPermission.workspace_id == current_workspace_id(),
-                                SqlSessionPermission.user_id == owner_user,
-                                SqlSessionPermission.level >= LEVEL_OWNER,
-                            )
-                        ).scalars()
-                    )
-                if shared_only:
-                    # shared_only = accessible but NOT owned
-                    qualifying_ids = list((accessible_set or set()) - (owned_set or set()))
-                elif accessible_set is not None and owned_set is not None:
-                    qualifying_ids = list(accessible_set & owned_set)
-                else:
-                    qualifying_ids = list(
-                        accessible_set if accessible_set is not None else owned_set or set()
-                    )
 
         with self._conv_session("list_conversations") as session:
             # Bound the content-search scan server-side (Postgres only). SET
@@ -3188,51 +3446,9 @@ class SqlAlchemyConversationStore(ConversationStore):
                 SqlConversation.workspace_id == current_workspace_id()
             )
 
-            if qualifying_ids is not None:
-                stmt = stmt.where(SqlConversation.id.in_(qualifying_ids))
-
-            if acl_pushdown:
-                # Correlated on both PK members so Postgres can drive the
-                # semi-join off pk_session_permissions
-                # (workspace_id, user_id, conversation_id). accessible_by and
-                # owned_by are intersected (both applied), matching the
-                # prefetch path.
-                if accessible_by is not None:
-                    stmt = stmt.where(
-                        select(SqlSessionPermission.conversation_id)
-                        .where(
-                            SqlSessionPermission.workspace_id == SqlConversation.workspace_id,
-                            SqlSessionPermission.conversation_id == SqlConversation.id,
-                            SqlSessionPermission.user_id == accessible_by,
-                        )
-                        .exists()
-                    )
-                if shared_only:
-                    # shared_only = accessible but NOT owned: an anti-semi-join
-                    # (NOT EXISTS on an owner-level grant) mirrors the prefetch
-                    # path's set difference row by row.
-                    owner_user = owned_by if owned_by is not None else accessible_by
-                    stmt = stmt.where(
-                        ~select(SqlSessionPermission.conversation_id)
-                        .where(
-                            SqlSessionPermission.workspace_id == SqlConversation.workspace_id,
-                            SqlSessionPermission.conversation_id == SqlConversation.id,
-                            SqlSessionPermission.user_id == owner_user,
-                            SqlSessionPermission.level >= LEVEL_OWNER,
-                        )
-                        .exists()
-                    )
-                elif owned_by is not None:
-                    stmt = stmt.where(
-                        select(SqlSessionPermission.conversation_id)
-                        .where(
-                            SqlSessionPermission.workspace_id == SqlConversation.workspace_id,
-                            SqlSessionPermission.conversation_id == SqlConversation.id,
-                            SqlSessionPermission.user_id == owned_by,
-                            SqlSessionPermission.level >= LEVEL_OWNER,
-                        )
-                        .exists()
-                    )
+            stmt, qualifying_ids = self._conversation_permission_scope(
+                stmt, accessible_by=accessible_by, owned_by=owned_by, shared_only=shared_only
+            )
 
             # Kind filter as parent-nullness (see above): sub_agent ⇔ parent set.
             if kind_requires_parent is True:

@@ -23,6 +23,7 @@ MAX_PENDING_INPUTS = 100
 
 if TYPE_CHECKING:
     from omnigent.db.account_authority import AccountAuthority
+    from omnigent.stores.conversation_store.message_search import MessageSearchPage
 
 # Label set on a fork of a session that had a working directory, or a
 # runner-bound native session whose working-directory metadata was lost.
@@ -971,6 +972,26 @@ class ConversationStore(ABC):
             would be indistinguishable from a completed enumeration.
         """
         ...
+
+    def search_messages(
+        self,
+        query: str,
+        *,
+        conversation_id: str | None = None,
+        limit: int = 40,
+        cursor: str | None = None,
+        accessible_by: str | None = None,
+        owned_by: str | None = None,
+        shared_only: bool = False,
+        include_archived: bool = False,
+        archived_only: bool = False,
+    ) -> "MessageSearchPage":
+        """Search message source with the session-list ACL and bounded keyset pages.
+
+        Ranges and text_start use UTF-16 offsets; occurrence_count covers only
+        the bounded returned text, and no unestablished total is reported.
+        """
+        raise NotImplementedError("Message search is not supported by this store")
 
     @abstractmethod
     def search(

@@ -17,11 +17,15 @@ tests drive the real routes against file-backed SQLite stores with header auth.
 
 from __future__ import annotations
 
+import base64
+import json
+
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
+from omnigent.entities import MessageData, NewConversationItem
 from omnigent.errors import OmnigentError
 from omnigent.server.auth import LEVEL_OWNER, LEVEL_READ, UnifiedAuthProvider
 from omnigent.server.routes.sessions import create_sessions_router
@@ -181,3 +185,199 @@ def test_client_scopes_preserve_owned_projects_and_shared_archives(
         response = client.get("/v1/sessions", params=params, headers={"X-Forwarded-Email": ALICE})
     assert response.status_code == 200
     assert {row["id"] for row in response.json()["data"]} == {ids[name] for name in expected}
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({}, {"owned", "shared"}),
+        ({"visibility": "mine", "include_archived": "true"}, {"owned"}),
+        ({"visibility": "shared", "include_archived": "true"}, {"shared"}),
+        ({"visibility": "archived"}, {"archived"}),
+        ({"include_archived": "true"}, {"owned", "shared", "archived"}),
+    ],
+)
+def test_message_search_authorized_paging_and_visibility(db_uri, params, expected) -> None:
+    """The message route inherits the list's visibility rules and rechecks each page."""
+    ids = {"shared": _seed_shared_project_session(db_uri)}
+    store = SqlAlchemyConversationStore(db_uri)
+    perms = SqlAlchemyPermissionStore(db_uri)
+    shared = store.get_conversation(ids["shared"])
+    for name, owner in (("owned", ALICE), ("private", BOB), ("archived", BOB)):
+        conv = store.create_conversation(title=name, agent_id=shared.agent_id)
+        ids[name] = conv.id
+        perms.grant(owner, conv.id, LEVEL_OWNER)
+    perms.grant(ALICE, ids["archived"], LEVEL_READ)
+    store.update_conversation(ids["archived"], archived=True)
+    for session_id in ids.values():
+        store.append(
+            session_id,
+            [
+                NewConversationItem(
+                    type="message",
+                    response_id="search-test",
+                    data=MessageData(
+                        role="assistant",
+                        agent="test-agent",
+                        content=[{"type": "output_text", "text": "😀 Écho 50%_/ ÉCHO 50%_/"}],
+                    ),
+                )
+                for _ in range(3)
+            ],
+        )
+    headers = {"X-Forwarded-Email": ALICE}
+    with TestClient(_multi_user_app(db_uri)) as client:
+        seen, cursor = [], None
+        while True:
+            response = client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={
+                    "query": "écho 50%_/",
+                    "limit": 2,
+                    **params,
+                    **({"cursor": cursor} if cursor else {}),
+                },
+            )
+            assert response.status_code == 200, response.text
+            page = response.json()
+            assert "total" not in page
+            seen.extend(page["data"])
+            if not page["has_more"]:
+                assert page["next_cursor"] is None
+                break
+            cursor = page["next_cursor"]
+        assert {hit["session_id"] for hit in seen} == {ids[name] for name in expected}
+        assert len(seen) == 3 * len(expected)
+        assert len({hit["item_id"] for hit in seen}) == len(seen)
+        assert all(hit["role"] == "assistant" and hit["occurrence_count"] == 2 for hit in seen)
+        assert seen[0]["ranges"][0] == {"start": 3, "end": 13}
+        for scope in (ids["shared"], ids["private"]):
+            response = client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={
+                    "query": "ÉCHO",
+                    "session_id": scope,
+                },
+            )
+            assert response.status_code == 200
+            assert len(response.json()["data"]) == (3 if scope == ids["shared"] else 0)
+        first = client.get(
+            "/v1/sessions/search/messages",
+            headers=headers,
+            params={
+                "query": "ÉCHO",
+                "limit": 1,
+                "session_id": ids["shared"],
+            },
+        ).json()
+        for change in ({"query": "other"}, {"session_id": ids["owned"]}, {"visibility": "mine"}):
+            response = client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={
+                    "query": "ÉCHO",
+                    "session_id": ids["shared"],
+                    "cursor": first["next_cursor"],
+                    **change,
+                },
+            )
+            assert response.status_code == 400
+        perms.revoke(ALICE, ids["shared"])
+        response = client.get(
+            "/v1/sessions/search/messages",
+            headers=headers,
+            params={
+                "query": "ÉCHO",
+                "session_id": ids["shared"],
+                "cursor": first["next_cursor"],
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+
+
+def test_message_search_authentication_validation_and_empty_query(db_uri, monkeypatch) -> None:
+    monkeypatch.delenv("OMNIGENT_LOCAL_SINGLE_USER", raising=False)
+    with TestClient(_multi_user_app(db_uri)) as client:
+        assert (
+            client.get("/v1/sessions/search/messages", params={"query": "secret"}).status_code
+            == 401
+        )
+        headers = {"X-Forwarded-Email": ALICE}
+        for params in (
+            {},
+            {"query": "x", "limit": 101},
+            {"query": "x" * 513},
+            {"query": "x", "session_id": "invalid"},
+            {"query": "x", "visibility": "unknown"},
+        ):
+            assert (
+                client.get(
+                    "/v1/sessions/search/messages", headers=headers, params=params
+                ).status_code
+                == 422
+            )
+        assert (
+            client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={"query": "x", "cursor": "bad"},
+            ).status_code
+            == 400
+        )
+        response = client.get(
+            "/v1/sessions/search/messages", headers=headers, params={"query": ""}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"data": [], "has_more": False, "next_cursor": None}
+
+
+def test_message_search_child_inheritance_revocation_and_cursor_bounds(db_uri) -> None:
+    parent_id = _seed_shared_project_session(db_uri)
+    store = SqlAlchemyConversationStore(db_uri)
+    permissions = SqlAlchemyPermissionStore(db_uri)
+    child = store.create_conversation(
+        agent_id=store.get_conversation(parent_id).agent_id, parent_conversation_id=parent_id
+    )
+    store.append(
+        child.id,
+        [
+            NewConversationItem(
+                type="message",
+                response_id="search-child",
+                data=MessageData(role="user", content=[{"type": "input_text", "text": "needle"}]),
+            )
+            for _ in range(3)
+        ],
+    )
+    headers = {"X-Forwarded-Email": ALICE}
+    params = {"query": "needle", "session_id": child.id, "limit": 1}
+    with TestClient(_multi_user_app(db_uri)) as client:
+        first = client.get("/v1/sessions/search/messages", headers=headers, params=params)
+        assert first.status_code == 200
+        page = first.json()
+        assert len(page["data"]) == 1 and page["next_cursor"]
+        payload = json.loads(base64.urlsafe_b64decode(page["next_cursor"] + "=="))
+        for index in (3, 5):
+            invalid = payload.copy()
+            invalid[index] = 10**100
+            cursor = base64.urlsafe_b64encode(json.dumps(invalid).encode()).decode().rstrip("=")
+            response = client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={**params, "cursor": cursor},
+            )
+            assert response.status_code == 400
+        permissions.grant(ALICE, child.id, LEVEL_OWNER)
+        permissions.revoke(ALICE, parent_id)
+        assert client.get(f"/v1/sessions/{child.id}", headers=headers).status_code == 404
+        for cursor in (None, page["next_cursor"]):
+            response = client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={**params, **({"cursor": cursor} if cursor else {})},
+            )
+            assert response.status_code == 200
+            assert response.json() == {"data": [], "has_more": False, "next_cursor": None}
