@@ -28,7 +28,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { BotIcon, WandSparklesIcon, FileTextIcon, Loader2Icon, XIcon } from "lucide-react";
-import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipButton, Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   composerSendShortcutKeys,
   KeyboardShortcutTooltipContent,
@@ -3777,6 +3777,25 @@ function ComposerImpl(
       // ``mentionListingPending``); swallow Enter so the in-progress "@dir/"
       // token isn't sent as a chat message. The menu reopens when entries land.
       if (mentionListingPending) return;
+      if (!fullText.trim() && files.length === 0 && mentionedItems.length === 0) {
+        if (
+          e.repeat ||
+          disabled ||
+          isReadOnly ||
+          unreachable ||
+          composerLockedByBtw ||
+          sendDisabledReason !== null ||
+          hasPendingElicitation
+        )
+          return;
+        // Read the live FIFO head: an idle flush may have consumed the rendered row.
+        const chat = useChatStore.getState();
+        const head = chat.queuedMessages.find(
+          (message) => message.conversationId === conversationId,
+        );
+        if (head) chat.steerMessage(head.queueId);
+        return;
+      }
       submit();
       return;
     }
@@ -4050,14 +4069,14 @@ function ComposerImpl(
                 <div className="border-b border-border bg-card/50 p-4 backdrop-blur-sm">
                   <div className="mb-3 flex items-start justify-between">
                     <h3 className="text-sm font-medium">Claude Quick Answer</h3>
-                    <button
+                    <TooltipButton
                       type="button"
                       onClick={() => dismissBtwSidechat()}
                       className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
                       aria-label="Close side chat"
                     >
                       <XIcon className="size-4" />
-                    </button>
+                    </TooltipButton>
                   </div>
                   <div className="mb-2">
                     <p className="mb-1 text-xs text-muted-foreground">Question:</p>
@@ -4327,6 +4346,7 @@ function ComposerImpl(
                       }
                       title={showInterruptButton ? "Interrupt" : (sendDisabledReason ?? undefined)}
                       label={showInterruptButton ? "Interrupt" : "Send"}
+                      aria-label={showInterruptButton ? "Interrupt" : "Send"}
                     />
                   </TooltipTrigger>
                   {!showInterruptButton && !preventsKeyboardSubmit && (

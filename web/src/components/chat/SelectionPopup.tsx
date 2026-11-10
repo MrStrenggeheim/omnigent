@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { CornerUpLeftIcon, MessagesSquareIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { getEmbedRoot } from "@/lib/host";
+import { TextSelectionMenu, type TextSelectionAction } from "./TextSelectionMenu";
 
 export function SelectionPopup({
   containerRef,
@@ -19,6 +17,7 @@ export function SelectionPopup({
   const selectedTextRef = useRef<string>("");
 
   const updatePopup = useCallback(() => {
+    if (document.activeElement?.closest("[data-text-selection-menu]")) return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
       setPopupPos(null);
@@ -40,19 +39,18 @@ export function SelectionPopup({
       selectedTextRef.current = "";
       return;
     }
-    const anchor = sel.anchorNode;
-    if (!anchor || !container.contains(anchor)) {
+    const range = sel.getRangeAt(0);
+    if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
       setPopupPos(null);
       selectedTextRef.current = "";
       return;
     }
 
-    const range = sel.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    // Position the button just above the selection, horizontally centered.
+    const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+    // Anchor beside the first selected line, including multi-line selections.
     setPopupPos({
-      x: rect.left + rect.width / 2,
-      y: rect.top,
+      x: rect.left,
+      y: rect.top - 6,
     });
     selectedTextRef.current = text;
   }, [containerRef]);
@@ -68,66 +66,23 @@ export function SelectionPopup({
 
   if (!popupPos) return null;
 
-  // Panel containment changes the fixed-position origin; use the viewport.
-  return createPortal(
-    <div
-      style={{
-        position: "fixed",
-        // Translate left by 50% to center the button over the midpoint of the
-        // selection, and up by 100% + 6px to sit just above the selection rect.
-        left: popupPos.x,
-        top: popupPos.y,
-        transform: "translate(-50%, calc(-100% - 6px))",
-        zIndex: 50,
-      }}
-    >
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        // Override shared-variant translucent hover — this button floats over text.
-        className="gap-1 shadow-md hover:bg-secondary hover:brightness-95 dark:hover:brightness-110"
-        onMouseDown={(e) => {
-          // Prevent the mousedown from clearing the selection before we read it.
-          e.preventDefault();
-        }}
-        onClick={() => {
-          const text = selectedTextRef.current;
-          if (text) {
-            onReply(text);
-            window.getSelection()?.removeAllRanges();
-            setPopupPos(null);
-            selectedTextRef.current = "";
-          }
-        }}
-      >
-        <CornerUpLeftIcon className="size-3.5" />
-        Reply ↵
-      </Button>
-      {onAskInSideChat ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="gap-1 shadow-md hover:bg-secondary hover:brightness-95 dark:hover:brightness-110"
-          onMouseDown={(e) => {
-            e.preventDefault();
-          }}
-          onClick={() => {
-            const text = selectedTextRef.current;
-            if (text) {
-              onAskInSideChat(text);
-              window.getSelection()?.removeAllRanges();
-              setPopupPos(null);
-              selectedTextRef.current = "";
-            }
-          }}
-        >
-          <MessagesSquareIcon className="size-3.5" />
-          Ask in side chat
-        </Button>
-      ) : null}
-    </div>,
-    getEmbedRoot() ?? document.body,
-  );
+  const close = () => {
+    setPopupPos(null);
+    selectedTextRef.current = "";
+  };
+  const select = (action: (text: string) => void) => () => {
+    const text = selectedTextRef.current;
+    if (text) action(text);
+    window.getSelection()?.removeAllRanges();
+  };
+  const actions: TextSelectionAction[] = [
+    { label: "Reply ↵", icon: <CornerUpLeftIcon />, onSelect: select(onReply) },
+  ];
+  if (onAskInSideChat)
+    actions.push({
+      label: "Ask in side chat",
+      icon: <MessagesSquareIcon />,
+      onSelect: select(onAskInSideChat),
+    });
+  return <TextSelectionMenu {...popupPos} actions={actions} onClose={close} />;
 }

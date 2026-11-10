@@ -11,6 +11,7 @@ import * as filesApi from "@/lib/filesApi";
 import { CapabilitiesProvider } from "@/lib/CapabilitiesContext";
 import { FALLBACK_SERVER_INFO } from "@/lib/capabilities";
 import { serializeReplyDraft, type StoredReplyDraft } from "@/lib/replyDraft";
+import { ATTACHMENT_SIZE_LIMITS_MB } from "@/lib/attachments";
 import * as sessionsApi from "@/lib/sessionsApi";
 import type * as ChatStoreModule from "@/store/chatStore";
 import { useChatStore, type ChatState } from "@/store/chatStore";
@@ -314,7 +315,8 @@ describe("side-chat selection reply", () => {
   function selectText(element: HTMLElement) {
     const range = document.createRange();
     range.selectNodeContents(element);
-    range.getBoundingClientRect = () => ({ left: 10, top: 30, width: 80 }) as DOMRect;
+    range.getBoundingClientRect = () => new DOMRect(10, 30, 80, 20);
+    range.getClientRects = () => [] as unknown as DOMRectList;
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
@@ -356,7 +358,7 @@ describe("side-chat selection reply", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Remove quote" })[1]);
     const selectedText = "Ask a question here without affecting the main conversation.";
     selectText(screen.getByText(selectedText));
-    fireEvent.click(screen.getByRole("button", { name: "Reply ↵" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reply ↵" }));
     fireEvent.change(tail, { target: { value: "After the added quote" } });
     act(() => mic.current!.onVoiceDiscard!());
 
@@ -392,7 +394,7 @@ describe("side-chat selection reply", () => {
     act(() => mic.current!.onTranscript("spoken addition"));
     expect(tail).toHaveValue("Tail answer spoken addition");
     selectText(screen.getByText("Ask a question here without affecting the main conversation."));
-    fireEvent.click(screen.getByRole("button", { name: "Reply ↵" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reply ↵" }));
     fireEvent.change(tail, { target: { value: "After the added quote" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Reply text before quote 1" }), {
       target: { value: "Edited earlier answer" },
@@ -526,12 +528,12 @@ describe("side-chat selection reply", () => {
       const pane = <SideChatPane childId={childId} fullSession={fullSession} />;
       const view = renderPane(pane);
       selectText(screen.getByText("First passage"));
-      fireEvent.click(screen.getByRole("button", { name: "Reply ↵" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Reply ↵" }));
       fireEvent.change(screen.getByTestId("side-chat-input"), {
         target: { value: "First answer" },
       });
       selectText(screen.getByText("Second passage"));
-      fireEvent.click(screen.getByRole("button", { name: "Reply ↵" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Reply ↵" }));
 
       const between = screen.getByRole("textbox", { name: "Reply text before quote 2" });
       expect(between).toHaveValue("First answer");
@@ -603,47 +605,48 @@ describe("side-chat selection reply", () => {
     );
   });
 
-  it.each([false, true])("rechecks pasted files after policy loads (remounted: %s)", (remount) => {
-    const view = renderPane(
-      <CapabilitiesProvider info="loading">
-        <SideChatPane childId={childId} />
-      </CapabilitiesProvider>,
-    );
-    const notes = new File(["notes"], "notes.txt", { type: "text/plain" });
-    const zip = new File([new Uint8Array(4)], "bundle.zip", { type: "application/zip" });
-    fireEvent.paste(screen.getByTestId("side-chat-input"), {
-      clipboardData: {
-        items: [notes, zip].map((file) => ({
-          kind: "file",
-          type: file.type,
-          getAsFile: () => file,
-        })),
-      },
-    });
-    expect(useChatStore.getState().sideChatComposers[childId].files).toEqual([notes, zip]);
-    expect(screen.getByText("bundle.zip")).toBeInTheDocument();
-    const restrictedPane = (
-      <CapabilitiesProvider
-        info={{
-          ...FALLBACK_SERVER_INFO,
-          filesystem_attachments: { extensions: [], all_types: false },
-        }}
-      >
-        <SideChatPane childId={childId} />
-      </CapabilitiesProvider>
-    );
-    if (remount) {
-      view.unmount();
-      renderPane(restrictedPane);
-    } else view.rerender(restrictedPane);
+  it.each([false, true])(
+    "keeps browser uploads after model policy loads (remounted: %s)",
+    (remount) => {
+      const view = renderPane(
+        <CapabilitiesProvider info="loading">
+          <SideChatPane childId={childId} />
+        </CapabilitiesProvider>,
+      );
+      const notes = new File(["notes"], "notes.txt", { type: "text/plain" });
+      const zip = new File([new Uint8Array(4)], "bundle.zip", { type: "application/zip" });
+      fireEvent.paste(screen.getByTestId("side-chat-input"), {
+        clipboardData: {
+          items: [notes, zip].map((file) => ({
+            kind: "file",
+            type: file.type,
+            getAsFile: () => file,
+          })),
+        },
+      });
+      expect(useChatStore.getState().sideChatComposers[childId].files).toEqual([notes, zip]);
+      expect(screen.getByText("bundle.zip")).toBeInTheDocument();
+      const restrictedPane = (
+        <CapabilitiesProvider
+          info={{
+            ...FALLBACK_SERVER_INFO,
+            filesystem_attachments: { extensions: [], all_types: false },
+          }}
+        >
+          <SideChatPane childId={childId} />
+        </CapabilitiesProvider>
+      );
+      if (remount) {
+        view.unmount();
+        renderPane(restrictedPane);
+      } else view.rerender(restrictedPane);
 
-    expect(useChatStore.getState().sideChatComposers[childId].files).toEqual([notes]);
-    expect(screen.queryByText("bundle.zip")).toBeNull();
-    expect(screen.getByText("notes.txt")).toBeInTheDocument();
-    expect(toast.error).toHaveBeenCalledExactlyOnceWith(
-      expect.stringMatching(/bundle\.zip.*can't be attached/),
-    );
-  });
+      expect(useChatStore.getState().sideChatComposers[childId].files).toEqual([notes, zip]);
+      expect(screen.getByText("bundle.zip")).toBeInTheDocument();
+      expect(screen.getByText("notes.txt")).toBeInTheDocument();
+      expect(toast.error).not.toHaveBeenCalled();
+    },
+  );
 
   it("explains that attachments need a started side chat and preserves its question", () => {
     renderPane(<SideChatPane childId="pending:side" />);
@@ -675,7 +678,7 @@ describe("side-chat selection reply", () => {
     });
     renderPane(<SideChatPane childId={childId} />);
     selectText(screen.getByText("Ask a question here without affecting the main conversation."));
-    fireEvent.click(screen.getByRole("button", { name: "Reply ↵" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reply ↵" }));
 
     expect(useChatStore.getState().sideChatComposers[childId]).toEqual({
       text: "",
@@ -690,7 +693,7 @@ describe("side-chat selection reply", () => {
       ],
     });
     expect(screen.getByTestId("side-chat-input")).toHaveFocus();
-    expect(screen.queryByRole("button", { name: "Reply ↵" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Reply ↵" })).toBeNull();
     expect(useChatStore.getState().sideChatToOpen).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
@@ -698,7 +701,7 @@ describe("side-chat selection reply", () => {
   it("does not offer Reply in a read-only side chat", () => {
     renderPane(<SideChatPane childId={childId} readOnly />);
     selectText(screen.getByText("This side chat has ended and can’t be continued."));
-    expect(screen.queryByRole("button", { name: "Reply ↵" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Reply ↵" })).toBeNull();
   });
 
   it("does not offer Reply while a side chat is starting", () => {
@@ -707,7 +710,7 @@ describe("side-chat selection reply", () => {
     });
     renderPane(<SideChatPane childId="pending:starting" />);
     selectText(screen.getByTestId("working-indicator"));
-    expect(screen.queryByRole("button", { name: "Reply ↵" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Reply ↵" })).toBeNull();
   });
 });
 
@@ -1467,6 +1470,14 @@ it.each([false, true])(
   },
 );
 
+function oversizedFile(): File {
+  const file = new File(["bad"], "oversized.bin", { type: "application/octet-stream" });
+  Object.defineProperty(file, "size", {
+    value: ATTACHMENT_SIZE_LIMITS_MB.file * 1024 * 1024 + 1,
+  });
+  return file;
+}
+
 it.each(["none", "text", "files", "quote", "rejected-file"] as const)(
   "retracts a delivered grid draft only while unchanged: %s",
   (edit) => {
@@ -1476,7 +1487,7 @@ it.each(["none", "text", "files", "quote", "rejected-file"] as const)(
       failedSendDraft: {
         conversationId: childId,
         text: "> Quote\n\nRetry",
-        files: edit === "rejected-file" ? [new File(["bad"], "bad.exe")] : [file],
+        files: edit === "rejected-file" ? [oversizedFile()] : [file],
         stableId: "stable",
       },
     });
@@ -1516,6 +1527,7 @@ it.each([false, true])(
   "revalidates recovered files and preserves newer quoted drafts: %s",
   async (hasNewDraft) => {
     const entry = conversationRegistry.acquire(childId);
+    const rejectedFile = oversizedFile();
     entry.setState({ sessionStatus: "idle", abortController: new AbortController() });
     useChatStore.setState({ send: initialStoreState.send });
     renderPane(<SideChatPane childId={childId} fullSession />);
@@ -1532,7 +1544,7 @@ it.each([false, true])(
         failedSendDraft: {
           conversationId: childId,
           text: "Retry",
-          files: [new File(["bad"], "bad.exe")],
+          files: [rejectedFile],
           stableId: "stable",
         },
       }),
@@ -1543,7 +1555,7 @@ it.each([false, true])(
     if (hasNewDraft)
       expect(screen.getByTestId("composer-reply-quote")).toHaveTextContent("New quote");
     else {
-      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("bad.exe"));
+      expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/oversized\.bin.*too large/));
       const post = vi.spyOn(sessionsApi, "postEvent").mockResolvedValue({ queued: true });
       fireEvent.click(screen.getByTestId("side-chat-send"));
       await waitFor(() => expect(post).toHaveBeenCalledOnce());

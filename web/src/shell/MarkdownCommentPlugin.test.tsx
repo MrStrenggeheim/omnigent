@@ -1,10 +1,7 @@
 // Tests for MarkdownCommentPlugin — the comment interaction layer.
 //
-// The floating "Add comment" button is positioned from
-// window.getSelection().getRangeAt(0).getClientRects(), which jsdom returns as
-// zero-sized rects, so the button never mounts under test (the source bails on
-// a 0×0 rect). These tests therefore cover the parts that ARE deterministic in
-// jsdom:
+// The floating menu's geometry test supplies selection and menu rectangles.
+// Default jsdom rectangles are zero-sized, so other cases cover:
 //   - the component renders no button (returns null) by default;
 //   - the state-sync effect populates commentStateRef and drives the decoration
 //     extension to render comment highlights in a real editor;
@@ -16,7 +13,7 @@
 // A real headless TipTap Editor is used so the decoration extension exercises
 // real ProseMirror behaviour.
 
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
@@ -47,6 +44,7 @@ afterEach(() => {
   cleanup();
   editor?.destroy();
   editor = null;
+  vi.restoreAllMocks();
 });
 
 /** Mounts a real headless editor wired to the shared decoration state ref. */
@@ -128,6 +126,27 @@ describe("MarkdownCommentPlugin render", () => {
 // ---------------------------------------------------------------------------
 // State sync into the decoration extension
 // ---------------------------------------------------------------------------
+
+it("places the menu six pixels above the selected line using its actual height", () => {
+  editor = makeEditor();
+  renderPlugin();
+  const range = document.createRange();
+  range.getClientRects = () => [new DOMRect(120, 200, 80, 20)] as unknown as DOMRectList;
+  const selection = window.getSelection()!;
+  selection.addRange(range);
+  vi.spyOn(selection, "getRangeAt").mockReturnValue(range);
+  const bounds = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue(new DOMRect(0, 0, 260, 36));
+  act(() => {
+    editor!.commands.setTextSelection({ from: 5, to: 10 });
+  });
+  const menu = screen.getByRole("menu", { name: "Selected text" });
+  expect(menu.style.left).toBe("120px");
+  expect(menu.style.top).toBe("158px");
+  bounds.mockRestore();
+  selection.removeAllRanges();
+});
 
 describe("MarkdownCommentPlugin state sync", () => {
   it("rebuilds existing highlights against the newly saved content without a click or new comment", () => {

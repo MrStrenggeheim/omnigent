@@ -110,3 +110,72 @@ def test_queued_attachments_keep_their_real_layout_contract(
     expect(strip).to_have_count(0)
     assert len(chat.event_posts) == 1
     assert not chat.upload_requests
+
+
+@pytest.mark.parametrize("width", [1280, 390], ids=["desktop", "phone"])
+def test_queue_send_controls_preserve_restored_fifo_and_attachment(
+    page: Page, chat_session_contract: ChatSessionContract, width: int
+) -> None:
+    chat = chat_session_contract
+    chat.reject_uploads = False
+    chat.contract.json(
+        f"/v1/sessions/{chat.session_id}/resources/files/browser-upload-1",
+        {"name": "first-notes.txt", "metadata": {"bytes": 21, "content_type": "text/plain"}},
+    )
+    page.set_viewport_size({"width": width, "height": 844})
+    page.goto(chat.url)
+    chat.wait_for_stream()
+    composer = page.get_by_label("Message the agent")
+    expect(composer).to_be_visible(timeout=20_000)
+    composer.fill("Hold the current turn open.")
+    with page.expect_response(
+        lambda response: response.url.endswith(f"/{chat.session_id}/events")
+    ):
+        if width >= 768:
+            composer.press("Enter")
+        else:
+            page.get_by_role("button", name="Send", exact=True).click()
+    chat.emit_busy()
+    page.locator('form.chat-composer-form input[type="file"]').set_input_files(
+        {"name": "first-notes.txt", "mimeType": "text/plain", "buffer": b"queued original bytes"}
+    )
+    composer.fill("First queued message")
+    if width >= 768:
+        composer.press("Enter")
+    else:
+        page.get_by_role("button", name="Send", exact=True).click()
+    strip = page.get_by_test_id("composer-queued-strip")
+    expect(strip).to_contain_text("First queued message")
+    composer.fill("Second queued message")
+    if width >= 768:
+        composer.press("Enter")
+    else:
+        page.get_by_role("button", name="Send", exact=True).click()
+    expect(strip).to_contain_text("Second queued message")
+    assert len(chat.event_posts) == 1
+    page.reload()
+    chat.wait_for_stream()
+    expect(strip).to_contain_text("First queued message", timeout=20_000)
+    expect(strip).to_contain_text("first-notes.txt")
+    expect(composer).to_have_value("")
+    with page.expect_response(
+        lambda response: response.url.endswith(f"/{chat.session_id}/events")
+    ):
+        if width >= 768:
+            composer.press("Enter")
+        else:
+            composer.press("Enter")
+            assert len(chat.event_posts) == 1
+            strip.get_by_role("button", name="Send queued message now", exact=True).first.click()
+    expect(strip).not_to_contain_text("First queued message")
+    expect(strip).to_contain_text("Second queued message")
+    assert len(chat.event_posts) == 2
+    event = chat.event_posts[-1]["body"]
+    assert "First queued message" in str(event)
+    assert "Second queued message" not in str(event)
+    assert len(chat.upload_requests) == 1
+    assert b'filename="first-notes.txt"' in chat.upload_requests[0]["body_bytes"]
+    assert b"queued original bytes" in chat.upload_requests[0]["body_bytes"]
+    # A newline gesture must not send the next queued item.
+    composer.press("Shift+Enter")
+    assert len(chat.event_posts) == 2

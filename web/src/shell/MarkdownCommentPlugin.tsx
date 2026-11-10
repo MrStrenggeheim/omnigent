@@ -191,7 +191,7 @@ export function MarkdownCommentPlugin({
       const range = nativeSel.getRangeAt(0);
       const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) return;
-      setButtonPos({ top: rect.top - 36, left: rect.left });
+      setButtonPos({ top: rect.top - 6, left: rect.left });
     };
 
     const hideButton = () =>

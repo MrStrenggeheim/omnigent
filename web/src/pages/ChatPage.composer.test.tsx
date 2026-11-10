@@ -2787,7 +2787,7 @@ describe("Composer shared visible controls", () => {
     { permissionLevel: 4, enabled: true },
   ])(
     "lets only the owner change the permission mode (level $permissionLevel)",
-    ({ permissionLevel, enabled }) => {
+    async ({ permissionLevel, enabled }) => {
       useChatStore.setState({
         conversationId: "owner-only-permissions",
         codexApprovalMode: "ask-for-approval",
@@ -2804,8 +2804,10 @@ describe("Composer shared visible controls", () => {
         return;
       }
       expect(chip).toBeDisabled();
-      expect(chip).toHaveAttribute(
-        "title",
+      expect(chip).not.toHaveAttribute("title");
+      expect(chip).toHaveAccessibleName("Permission mode: Ask for approval");
+      await userEvent.hover(chip);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
         "Only the session owner can change the permission mode",
       );
       fireEvent.keyDown(chip, { key: "ArrowDown" });
@@ -4634,6 +4636,21 @@ describe("Composer pending elicitation", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
+  it("keeps empty Enter from steering a queue into a pending permission prompt", () => {
+    useChatStore.setState({
+      blocks: [elicitationBlock()],
+      sessionStatus: "running",
+      queuedMessages: [
+        { queueId: "q_permission", text: "Wait for approval", conversationId: "conv_test" },
+      ],
+    });
+    const steer = vi.spyOn(useChatStore.getState(), "steerMessage");
+    renderWithTooltips(<Composer {...composerProps()} />);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(steer).not.toHaveBeenCalled();
+    useChatStore.setState({ queuedMessages: [] });
+  });
+
   it("keeps the interrupt button live while an elicitation is pending", () => {
     // Cancelling the turn is the other legitimate way out of a parked
     // elicitation — the lock must not take the stop control with it.
@@ -5930,6 +5947,191 @@ describe("Composer sub-agent tray", () => {
       textarea().closest("[data-composer-card]"),
     );
     expect(document.querySelector(".composer-workspace-surface")).toBeNull();
+  });
+});
+
+describe("Composer — Enter sends the next queued message", () => {
+  let previous: ChatState;
+  const send = vi.fn().mockResolvedValue(undefined);
+  beforeEach(() => {
+    previous = useChatStore.getState();
+    clearSessionDrafts();
+    send.mockClear();
+    useChatStore.setState({
+      conversationId: "conv_test",
+      boundAgentId: "agent_xyz",
+      status: "streaming",
+      sessionStatus: "running",
+      workspaceSwitching: false,
+      pendingUserMessages: [],
+      blocks: [],
+      btwSidechat: null,
+      send,
+      queuedMessages: [
+        { queueId: "q_other", text: "Other session", conversationId: "other" },
+        {
+          queueId: "q_first",
+          text: "First",
+          stableId: "stable-first",
+          conversationId: "conv_test",
+        },
+        { queueId: "q_next", text: "Next", conversationId: "conv_test" },
+      ],
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    clearSessionDrafts();
+    useChatStore.setState(previous);
+  });
+
+  it("queues a running follow-up and sends only the FIFO head on empty Enter", () => {
+    const props = composerProps({
+      onSend: useChatStore.getState().enqueueMessage,
+      isWorking: true,
+      status: "streaming",
+    });
+    renderWithTooltips(<Composer {...props} />);
+    fireEvent.change(textarea(), { target: { value: "Follow-up" } });
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(send).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessages.map((m) => m.text)).toEqual([
+      "Other session",
+      "First",
+      "Next",
+      "Follow-up",
+    ]);
+    expect(textarea()).toHaveValue("");
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      "First",
+      "agent_xyz",
+      undefined,
+      expect.objectContaining({ stableId: "stable-first", pinnedConversationId: "conv_test" }),
+    );
+    expect(useChatStore.getState().queuedMessages.map((m) => m.text)).toEqual([
+      "Other session",
+      "Next",
+      "Follow-up",
+    ]);
+    fireEvent.keyDown(textarea(), { key: "Enter", repeat: true });
+    expect(send).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]?.[0]).toBe("Next");
+  });
+
+  it("preserves queued files, reply provenance, agent and retry identity on immediate send", () => {
+    const file = new File(["image bytes"], "screenshot.png", { type: "image/png" });
+    const replyDraft = {
+      version: 1 as const,
+      text: "reply",
+      quotes: [{ before: "", text: "quote" }],
+    };
+    const row = {
+      queueId: "q_first",
+      text: serializeReplyDraft(replyDraft),
+      replyDraft,
+      files: [file],
+      stableId: "stable-retry",
+      requiresRetry: true,
+      agentId: "original-agent",
+      conversationId: "conv_test",
+    };
+    useChatStore.setState({ queuedMessages: [row, useChatStore.getState().queuedMessages[2]!] });
+    renderWithTooltips(<Composer {...composerProps()} />);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      row.text,
+      "original-agent",
+      [file],
+      expect.objectContaining({ replyDraft, stableId: "stable-retry" }),
+    );
+    const options = send.mock.calls[0]![3];
+    act(() => options.onError("Try again"));
+    expect(useChatStore.getState().queuedMessages[0]).toEqual(row);
+    expect(useChatStore.getState().queuedMessages.map((m) => m.queueId)).toEqual([
+      "q_first",
+      "q_next",
+    ]);
+  });
+
+  it.each([
+    { disabled: true },
+    { permissionLevel: 1 },
+    { readOnlyReason: "Read only" },
+    { sendDisabledReason: "Starting" },
+    { unreachable: true },
+  ])("keeps the queue parked when the composer is blocked: %j", (overrides) => {
+    renderWithTooltips(<Composer {...composerProps(overrides)} />);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(send).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessages).toHaveLength(3);
+  });
+
+  it("does not send the queue on Shift+Enter, composition, form submit or repeated Enter", () => {
+    renderWithTooltips(<Composer {...composerProps()} />);
+    fireEvent.keyDown(textarea(), { key: "Enter", shiftKey: true });
+    fireEvent.compositionStart(textarea());
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    fireEvent.compositionEnd(textarea());
+    fireEvent.submit(textarea().closest("form")!);
+    fireEvent.keyDown(textarea(), { key: "Enter", repeat: true });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("leaves every Enter chord to a touch keyboard", () => {
+    const restorePointer = forceDesktopCoarsePointer();
+    try {
+      renderWithTooltips(<Composer {...composerProps()} />);
+      fireEvent.keyDown(textarea(), { key: "Enter" });
+      fireEvent.keyDown(textarea(), { key: "Enter", ctrlKey: true });
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      restorePointer();
+    }
+  });
+
+  it("submits an attachment-only draft instead of the queued head", () => {
+    const props = composerProps();
+    renderWithTooltips(<Composer {...props} />);
+    const file = new File(["attachment"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(props.onSend).toHaveBeenCalledWith("", [file]);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not overtake a first message held for startup", () => {
+    useChatStore.setState({
+      pendingUserMessages: [
+        {
+          tempId: "pending-first",
+          content: [{ type: "input_text", text: "First task" }],
+          initialDraft: { text: "First task", files: [] },
+        },
+      ],
+    });
+    renderWithTooltips(<Composer {...composerProps()} />);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(send).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessages).toHaveLength(3);
+  });
+
+  it("does not submit an already consumed head again", () => {
+    useChatStore.setState({ queuedMessages: [useChatStore.getState().queuedMessages[1]!] });
+    renderWithTooltips(<Composer {...composerProps()} />);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    act(() => useChatStore.getState().maybeFlushQueuedHead());
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not bypass a workspace switch", () => {
+    useChatStore.setState({ workspaceSwitching: true });
+    renderWithTooltips(<Composer {...composerProps()} />);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

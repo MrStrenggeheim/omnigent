@@ -189,3 +189,15 @@ it("keeps a menu near the upper-left edge inside the viewport", () => {
   expect(menu.style.left).toBe("8px");
   expect(menu.style.top).toBe("8px");
 });
+
+it("positions the measured menu immediately above its selection anchor", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(0, 0, 260, 36),
+  );
+  renderMenu({ x: 120, y: 194 });
+  const menu = screen.getByRole("menu");
+  expect(menu.style.left).toBe("120px");
+  expect(menu.style.top).toBe("158px");
+  expect(menu).toHaveAttribute("data-text-selection-menu");
+  expect(menu).toHaveAttribute("data-file-selection-menu");
+});

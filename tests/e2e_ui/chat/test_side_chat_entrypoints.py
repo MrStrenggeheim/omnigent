@@ -355,7 +355,7 @@ def test_ask_in_side_chat_opens_a_quoted_side_chat_tab(
     page.goto(f"{base_url}/c/{session_id}")
     _send_parent(page, f"quote-main-{session_id}: how should I retry?", parent_reply)
     page.locator(_ASSISTANT).get_by_text(parent_reply).select_text()
-    page.get_by_role("button", name="Ask in side chat", exact=True).click()
+    page.get_by_role("menuitem", name="Ask in side chat", exact=True).click()
 
     # The tab opens before any fork exists, with the quote in its own composer.
     rail = page.get_by_role("complementary", name="Workspace")
@@ -368,7 +368,7 @@ def test_ask_in_side_chat_opens_a_quoted_side_chat_tab(
 
     page.get_by_test_id("side-chat-input").fill(question)
     page.locator(_ASSISTANT).get_by_text(parent_reply).select_text()
-    page.get_by_role("button", name="Ask in side chat", exact=True).click()
+    page.get_by_role("menuitem", name="Ask in side chat", exact=True).click()
     expect(rail.get_by_role("tab", name=re.compile(r"^Side chat "))).to_have_count(1)
     expect(pane.get_by_test_id("composer-reply-quote")).to_have_count(2)
     expect(pane.get_by_role("textbox", name="Reply text before quote 2")).to_have_value(question)
@@ -383,7 +383,7 @@ def test_ask_in_side_chat_opens_a_quoted_side_chat_tab(
     assert question not in str(_items(base_url, session_id))
 
     page.locator(_ASSISTANT).get_by_text(parent_reply).select_text()
-    page.get_by_role("button", name="Ask in side chat", exact=True).click()
+    page.get_by_role("menuitem", name="Ask in side chat", exact=True).click()
     expect(rail.get_by_role("tab", name=re.compile(r"^Side chat "))).to_have_count(1)
     expect(pane.get_by_test_id("composer-reply-quote")).to_contain_text(parent_reply)
     expect(page.get_by_test_id("side-chat-input")).to_be_focused()
@@ -396,7 +396,7 @@ def test_ask_in_side_chat_opens_a_quoted_side_chat_tab(
     assert followup not in str(_items(base_url, session_id))
 
     pane.locator(_ASSISTANT).get_by_text(followup_reply, exact=True).select_text()
-    reply_popup = page.get_by_role("button", name="Reply ↵", exact=True)
+    reply_popup = page.get_by_role("menuitem", name="Reply ↵", exact=True)
     expect(reply_popup).to_be_visible()
     popup_bounds = reply_popup.bounding_box()
     viewport = page.viewport_size
@@ -410,7 +410,7 @@ def test_ask_in_side_chat_opens_a_quoted_side_chat_tab(
     reply_question = question + " explain this reply"
     page.get_by_test_id("side-chat-input").fill(reply_question)
     pane.locator(_ASSISTANT).get_by_text(side_reply, exact=True).select_text()
-    page.get_by_role("button", name="Reply ↵", exact=True).click()
+    page.get_by_role("menuitem", name="Reply ↵", exact=True).click()
     expect(pane.get_by_test_id("composer-reply-quote")).to_have_count(2)
     earlier_reply = pane.get_by_role("textbox", name="Reply text before quote 2")
     expect(earlier_reply).to_have_value(reply_question)
@@ -475,7 +475,7 @@ def test_side_chat_opens_in_a_drawer_on_mobile(
     page.goto(f"{base_url}/c/{session_id}")
     _send_parent(page, f"mobile-main-{session_id}: how should I retry?", parent_reply)
     page.locator(_ASSISTANT).get_by_text(parent_reply).select_text()
-    page.get_by_role("button", name="Ask in side chat", exact=True).click()
+    page.get_by_role("menuitem", name="Ask in side chat", exact=True).click()
 
     drawer = page.get_by_test_id("side-chats-panel-drawer")
     expect(drawer).to_have_attribute("data-state", "open")
@@ -487,7 +487,7 @@ def test_side_chat_opens_in_a_drawer_on_mobile(
     assert len(side_chat_forks) == 1
 
     drawer.locator(_ASSISTANT).get_by_text(side_reply, exact=True).select_text()
-    reply_popup = page.get_by_role("button", name="Reply ↵", exact=True)
+    reply_popup = page.get_by_role("menuitem", name="Reply ↵", exact=True)
     expect(reply_popup).to_be_visible()
     popup_bounds = reply_popup.bounding_box()
     viewport = page.viewport_size
@@ -500,7 +500,7 @@ def test_side_chat_opens_in_a_drawer_on_mobile(
     first_reply = question + " explain this reply"
     drawer.get_by_test_id("side-chat-input").fill(first_reply)
     drawer.locator(_ASSISTANT).get_by_text(side_detail, exact=True).select_text()
-    page.get_by_role("button", name="Reply ↵", exact=True).click()
+    page.get_by_role("menuitem", name="Reply ↵", exact=True).click()
     expect(drawer.get_by_test_id("composer-reply-quote")).to_have_count(2)
     earlier_reply = drawer.get_by_role("textbox", name="Reply text before quote 2")
     expect(earlier_reply).to_have_value(first_reply)
@@ -543,7 +543,7 @@ def test_side_chat_opens_in_a_drawer_on_mobile(
     assert _items(base_url, session_id) == parent_items
 
     # Closing the drawer keeps the side chat; the header menu brings it back.
-    drawer.get_by_role("button", name="Close", exact=True).click()
+    page.get_by_role("button", name="Close workspace", exact=True).click()
     expect(drawer).to_have_attribute("data-state", "closed")
     page.get_by_role("button", name="Open workspace").click()
     page.get_by_role("tablist", name="Workspace").get_by_role("tab", name="Side chats").click()

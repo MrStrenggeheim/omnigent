@@ -16,6 +16,8 @@ and steers messages while the agent is busy.
 - `single-surface-controls`: both composers place workspace selection between machine and permissions inside the input card; context usage sits between model selection and Send, with no top workspace shelf.
 - `retained-status`: worktree and PR controls remain inside the composer; task, subagent-attention and goal controls sit immediately left of model selection without adding a row; queued messages and child context dock directly onto the card.
 
+- `empty-enter-steer`: the configured send key with an empty composer sends the next queued item immediately, preserving FIFO data and existing newline/permission behavior.
+- `selection-menu`: chat Reply and Ask in side chat share the file-preview selection-menu surface; file menus offer Add comment and Ask in chat.
 - `durable-queue`: queued follow-ups survive reload/client restart on this browser profile, preserving FIFO order, text, attachments, reply context, agent and retry/host-wait flags; storage is scoped to the authenticated user and server.
 
 - `quiet-focus`: typing leaves the composer frame neutral, without an accent border or outline; individual keyboard controls retain their focus indicators.
@@ -668,6 +670,7 @@ Other connection providers alone do not enable the managed MCP picker.
 - **`mobile-labels`, new-session composer:**
   `tests/e2e_ui/mobile/test_composer_model_label_stop_overlap.py::test_new_session_composer_collapses_labels_to_icons_on_mobile`
 
+- Empty-composer queue submission after reload with original attachment bytes: `tests/browser_ui/chat/test_queued_attachment_chips.py::test_queue_send_controls_preserve_restored_fifo_and_attachment`.
 - Queue recovery, attachment restoration, deletion and ordered dispatch through a real reload: `tests/e2e_ui/chat/test_queued_message_reload.py::test_queued_messages_survive_reload_with_attachment_and_delete`; identity races, write ordering and unavailable storage: `web/src/lib/queuedMessagePersistence.test.ts`.
 
 ## Gotchas
