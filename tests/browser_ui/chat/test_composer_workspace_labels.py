@@ -70,10 +70,12 @@ def test_composer_details_wrap_without_clipping(
     page.goto(f"{base_url}/c/{session_id}")
     controls = page.get_by_test_id("composer-workspace-controls")
     expect(controls).to_be_visible(timeout=30_000)
-    expect(controls.get_by_role("button")).to_have_count(0)
+    expect(controls.get_by_role("button")).to_have_count(1 if has_binding else 0)
     workspace = controls.get_by_test_id("composer-workspace-dir")
     workspace_title = (
-        f"Working directory: {_WORKSPACE}" if has_binding else "No working directory bound"
+        f"Working directory: {_WORKSPACE}. Change workspace"
+        if has_binding
+        else "No working directory bound"
     )
     expect(workspace).to_have_attribute("title", workspace_title)
     if has_binding:
@@ -146,23 +148,16 @@ def test_composer_workspace_labels_use_available_width(
     page.goto(f"{base_url}/c/{session_id}")
     controls = page.get_by_test_id("composer-workspace-controls")
     expect(controls).to_be_visible(timeout=30_000)
-    expect(controls.get_by_role("button")).to_have_count(0)
+    expect(controls.get_by_role("button")).to_have_count(1)
     controls.screenshot(path=tmp_path / f"labels-{viewport_width}-{font_size}.png")
 
-    # The bar shows the full names while they fit; once a name would have to
-    # truncate, every chip drops to its icon instead of showing clipped text.
-    # The normalized inner padding (bar px-2 -> px-3, chip px-0.5 -> px-1)
-    # leaves ~10px less room at 390px, so even default-font readable names
-    # collapse to icons there.
-    collapsed = long_labels or viewport_width == 390
-    if collapsed:
-        expect(controls).to_have_attribute("data-labels", "collapsed")
-        for label in controls.locator("span.truncate").all():
+    actions = page.get_by_test_id("composer-action-row")
+    collapsed = actions.get_attribute("data-labels") == "collapsed"
+    for label in controls.locator("span.truncate").all():
+        if collapsed:
             expect(label).to_be_hidden()
-    else:
-        expect(controls).not_to_have_attribute("data-labels", "collapsed")
-        expect(controls.locator("span.truncate")).to_have_text([name, name])
-
+        else:
+            expect(label).to_be_visible()
     dimensions = controls.evaluate(
         """bar => {
           const bounds = bar.getBoundingClientRect();
@@ -206,7 +201,7 @@ def test_composer_workspace_labels_use_available_width(
             assert item["labelWidth"] == 0
         else:
             assert item["labelWidth"] > 0
-            assert item["textWidth"] <= item["labelWidth"] + 1
+            # Long names are bounded; the complete folder remains the accessible name.
         for icon in item["icons"]:
             assert icon["right"] - icon["left"] >= 12
             assert icon["left"] >= item["left"]

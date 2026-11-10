@@ -23,7 +23,6 @@ import { useLocation, useNavigate, useSearchParams } from "@/lib/routing";
 import { MAIN_CANVAS_ID } from "@/canvas/canvasLayout";
 import { CANVAS_QUERY_PARAM, canvasLocation } from "@/canvas/canvasNavigation";
 import {
-  ComposerWorkspaceBar,
   ComposerWorkspaceTrigger,
   ComposerHostTrigger,
   ComposerPermissionPicker,
@@ -6379,472 +6378,6 @@ export function NewChatLandingScreen() {
           )}
           data-testid="new-chat-landing-composer-surface"
         >
-          {/* Keep the tray mounted while the execution target changes. */}
-          {sandboxSelected && (
-            <ComposerWorkspaceBar
-              key="workspace-controls"
-              className="h-7 px-2 py-0.5 md:h-[37px] md:px-3 md:py-1.5"
-              data-testid="new-chat-landing-workspace-controls"
-              trailingContent={mcpRegistryPicker}
-            >
-              {/* Sandbox repository chip — the sandbox counterpart of the
-              working-directory chip. There is no filesystem to browse
-              before the sandbox exists, so the workspace is specified as
-              a git repository URL (+ optional branch) the server clones
-              at create time. Blank = empty server-created workspace. */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={`Sandbox repositories: ${
-                      sandboxRepoSelections.length > 0 ? sandboxRepoLabel : "None selected"
-                    }`}
-                    className="relative inline-flex h-6 min-w-10 max-w-[calc(50%-0.25rem)] cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 text-xs leading-4 font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:min-w-11"
-                    data-testid="new-chat-landing-repo-chip"
-                  >
-                    <GitBranchIcon className="ui-icon" />
-                    <span
-                      data-workspace-collapse-label=""
-                      className={cn(
-                        "min-w-0 truncate text-left",
-                        COMPOSER_WORKSPACE_COLLAPSED_LABEL_CLASS,
-                      )}
-                    >
-                      {sandboxRepoLabel}
-                    </span>
-                    <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-96 p-3">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-medium text-foreground">
-                        Repositories (optional)
-                      </span>
-                      {databricksGitCredentialsTooltipContent && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground"
-                              aria-label="How to set up Databricks git credentials"
-                            >
-                              <CircleHelpIcon className="size-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-64">
-                            {databricksGitCredentialsTooltipContent}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                    </div>
-                    {/* Stale over-cap selection (repos remembered/added under
-                  a multi-repo provider, then switched to a single-repo one):
-                  warn and block submit rather than 422 after the session row
-                  is created. */}
-                    {sandboxRepoOverCap && (
-                      <p
-                        className="text-sm text-warning"
-                        data-testid="new-chat-landing-repo-overcap"
-                      >
-                        This sandbox provider clones at most {maxSandboxRepos}{" "}
-                        {maxSandboxRepos === 1 ? "repository" : "repositories"}. Remove the extra{" "}
-                        {maxSandboxRepos === 1 ? "repositories" : "ones"} to continue.
-                      </p>
-                    )}
-                    {/* Selected repos: each clones into its own sibling dir.
-                  A connected repo gets its branch combobox; a pasted URL a
-                  free-text branch. The remove button drops it. */}
-                    {sandboxRepoSelections.map((sel) => {
-                      const repo = repoForUrl(sel.url);
-                      const name = repo?.full_name ?? deriveRepoName(sel.url) ?? sel.url;
-                      return (
-                        <div
-                          key={sel.url}
-                          className="flex items-center gap-2"
-                          data-testid="new-chat-landing-repo-row"
-                        >
-                          <span className="min-w-0 flex-1 truncate text-sm" title={sel.url}>
-                            {name}
-                          </span>
-                          {repo ? (
-                            <div className="w-36 shrink-0">
-                              <SandboxRepoBranchSelect
-                                fullName={repo.full_name}
-                                value={sel.branch}
-                                defaultBranch={repo.default_branch}
-                                onChange={(b) => setSandboxRepoBranch(sel.url, b)}
-                              />
-                            </div>
-                          ) : (
-                            <input
-                              type="text"
-                              value={sel.branch}
-                              onChange={(e) => setSandboxRepoBranch(sel.url, e.target.value)}
-                              placeholder="branch"
-                              aria-label={`Branch for ${name}`}
-                              className="w-28 shrink-0 rounded-md border border-input bg-background px-2 py-1 text-xs outline-none transition-colors focus-visible:border-ring"
-                            />
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => removeSandboxRepo(sel.url)}
-                            aria-label={`Remove ${name}`}
-                            className="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:text-foreground"
-                            data-testid="new-chat-landing-repo-remove"
-                          >
-                            <XIcon className="size-3.5" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                    {sandboxRepoSelections.length > 0 && (
-                      <div className="my-0.5 border-t border-border" />
-                    )}
-                    {/* Add-repository controls, hidden once the provider's
-                  repo cap is reached — so a single-repo provider shows one
-                  slot and no multi-repo affordance. */}
-                    {sandboxRepoSelections.length < maxSandboxRepos && (
-                      <>
-                        {/* Add from the connected account's repos (only those
-                      not already picked); the free-text URL below is the
-                      fallback for a repo not in the list or no GitHub link. */}
-                        {showGithubRepoPicker && (
-                          <>
-                            <SandboxRepoCombobox
-                              repos={unselectedRepos}
-                              value=""
-                              onSelect={(repo) => {
-                                if (repo) {
-                                  addSandboxRepo(
-                                    repo.clone_url ?? `https://github.com/${repo.full_name}.git`,
-                                  );
-                                }
-                              }}
-                            />
-                            {sandboxReposTruncated && (
-                              <p
-                                className="text-sm text-muted-foreground"
-                                data-testid="new-chat-landing-repo-truncated"
-                              >
-                                Showing your most recently pushed repositories. Don't see one? Paste
-                                its URL below.
-                              </p>
-                            )}
-                            <p className="text-sm text-muted-foreground">
-                              or paste a repository URL:
-                            </p>
-                          </>
-                        )}
-                        {/* Connected but the repo list failed to load: say so
-                      explicitly, so a transient error isn't mistaken for
-                      "GitHub not connected" (the picker just wouldn't render). */}
-                        {githubReposEnabled && sandboxReposErrored && !showGithubRepoPicker && (
-                          <p
-                            className="text-sm text-destructive"
-                            data-testid="new-chat-landing-repo-error"
-                          >
-                            Couldn't load your GitHub repositories. Paste a repository URL below.
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <input
-                            id="landing-repo-url"
-                            type="text"
-                            value={pendingRepoUrl}
-                            onChange={(e) => setPendingRepoUrl(e.target.value)}
-                            onKeyDown={(e) => {
-                              // Enter adds the repo (same as the Add button), so a
-                              // paste-then-Enter flow never needs the mouse.
-                              if (e.key === "Enter" && isValidSandboxRepoUrl(pendingRepoUrl)) {
-                                e.preventDefault();
-                                addSandboxRepo(pendingRepoUrl);
-                                setPendingRepoUrl("");
-                              }
-                            }}
-                            placeholder="https://github.com/org/repo"
-                            aria-label="Repository URL"
-                            className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring"
-                            data-testid="new-chat-landing-repo-input"
-                          />
-                          <button
-                            type="button"
-                            disabled={!isValidSandboxRepoUrl(pendingRepoUrl)}
-                            onClick={() => {
-                              addSandboxRepo(pendingRepoUrl);
-                              setPendingRepoUrl("");
-                            }}
-                            className="flex shrink-0 items-center gap-1 rounded-md border border-input px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-                            data-testid="new-chat-landing-repo-add"
-                          >
-                            <PlusIcon className="size-3.5" />
-                            Add
-                          </button>
-                        </div>
-                      </>
-                    )}
-                    <p className="text-sm text-muted-foreground">
-                      {maxSandboxRepos > 1
-                        ? "Cloned into the sandbox at startup. Several repos are cloned side by side and the agent starts in the parent that holds them; pick one and it starts directly inside it. Leave empty for a blank workspace."
-                        : "Cloned into the sandbox at startup as the working directory. Leave empty for a blank workspace."}
-                    </p>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </ComposerWorkspaceBar>
-          )}
-          {!sandboxSelected && (
-            <ComposerWorkspaceBar
-              key="workspace-controls"
-              className="h-7 px-2 py-0.5 md:h-[37px] md:px-3 md:py-1.5"
-              data-testid="new-chat-landing-workspace-controls"
-              trailingContent={mcpRegistryPicker}
-            >
-              {workspaceLoading && cachedWorkspace === null && (
-                <NewChatPickerLoading
-                  label="Loading working directory"
-                  testId="new-chat-landing-workspace-loading"
-                  className="h-6 md:h-6"
-                />
-              )}
-              <Popover open={workspacePopoverOpen} onOpenChange={setWorkspacePopoverOpen}>
-                {(!workspaceLoading || cachedWorkspace !== null) && (
-                  <PopoverTrigger asChild>{workspaceChip}</PopoverTrigger>
-                )}
-                <PopoverContent
-                  align="start"
-                  sideOffset={4}
-                  className="w-[31rem] max-w-[calc(100vw-2rem)] gap-1 p-1.5"
-                >
-                  {recent.length > 0 && (
-                    <>
-                      <div className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        Recents
-                      </div>
-                      <RecentWorkspaceList
-                        hostId={selectedHostId}
-                        paths={recent}
-                        selectedPath={workspaceTrimmed}
-                        onSelect={(path) => {
-                          workspaceFromConfigRef.current = false;
-                          setWorkspace(path);
-                          addRecent(path);
-                          setWorkspacePopoverOpen(false);
-                        }}
-                        onBrowse={(path) => {
-                          setWorkspacePopoverOpen(false);
-                          setWorkspacePickerInitialPath(isNavigablePath(path) ? path : undefined);
-                          setWorkspacePickerOpen(true);
-                        }}
-                      />
-                      <div className="my-1 h-px bg-border" />
-                    </>
-                  )}
-                  <MenuItem asChild density="compact">
-                    <button
-                      type="button"
-                      className="w-full text-left"
-                      onClick={() => {
-                        setWorkspacePopoverOpen(false);
-                        setWorkspacePickerInitialPath(
-                          isNavigablePath(workspaceTrimmed) ? workspaceTrimmed : undefined,
-                        );
-                        setWorkspacePickerOpen(true);
-                      }}
-                      data-testid="new-chat-landing-workspace-open-folder"
-                    >
-                      <FolderOpenIcon
-                        className="size-4 shrink-0 text-muted-foreground"
-                        data-testid="new-chat-landing-workspace-open-folder-icon"
-                      />
-                      Open folder
-                    </button>
-                  </MenuItem>
-                </PopoverContent>
-              </Popover>
-              {/* Worktree selection stays a separate real action from the directory picker. */}
-              {(!workspaceLoading || cachedWorkspace !== null) &&
-                (noExecutionTargetSelected || workspaceIsGit) && (
-                  <Popover open={worktreePopoverOpen} onOpenChange={setWorktreePopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <ComposerWorkspaceTrigger
-                        kind="worktree"
-                        label={
-                          noExecutionTargetSelected
-                            ? "No host selected"
-                            : visibleWorktreeHeader.branchLabel
-                        }
-                        iconOnly={noExecutionTargetSelected}
-                        aria-label={
-                          noExecutionTargetSelected
-                            ? "No host selected"
-                            : visibleWorktreeHeader.branchDescription
-                        }
-                        title={
-                          worktreePopoverOpen
-                            ? undefined
-                            : noExecutionTargetSelected
-                              ? "No host selected"
-                              : workspaceLoading || worktreeControlAvailable
-                                ? visibleWorktreeHeader.branchDescription
-                                : "Choose a Git working directory to use worktrees"
-                        }
-                        disabled={
-                          noExecutionTargetSelected || workspaceLoading || !worktreeControlAvailable
-                        }
-                        aria-busy={workspaceLoading || undefined}
-                        className={workspaceLoading ? "disabled:opacity-100" : undefined}
-                        data-testid="new-chat-landing-branch-chip"
-                      />
-                    </PopoverTrigger>
-                    <PopoverContent
-                      align="start"
-                      collisionPadding={16}
-                      className="flex max-h-[var(--radix-popover-content-available-height)] w-[min(20rem,calc(100vw-2rem))] flex-col gap-0 overflow-hidden rounded-xl p-2"
-                    >
-                      <div className="flex min-h-0 flex-1 flex-col gap-0">
-                        <div
-                          className="flex min-h-0 flex-1 flex-col"
-                          role="radiogroup"
-                          aria-label="Choose a worktree"
-                        >
-                          <MenuItem
-                            asChild
-                            active={branchName.trim() === "" && activeWorktree === null}
-                            density="compact"
-                          >
-                            <label
-                              className={cn("cursor-pointer", WORKTREE_RADIO_SELECTOR_ROW_CLASS)}
-                              data-testid="new-chat-landing-no-worktree-option"
-                            >
-                              <input
-                                type="radio"
-                                name="new-chat-existing-worktree"
-                                checked={branchName.trim() === "" && activeWorktree === null}
-                                onChange={() => {
-                                  workspaceFromConfigRef.current = false;
-                                  if (activeWorktree !== null && mainWorktree !== null) {
-                                    setWorkspace(mainWorktree.path);
-                                  }
-                                  setBranchName("");
-                                  setAutoSeededBranch("");
-                                  setWorktreePopoverOpen(false);
-                                }}
-                                className={cn(
-                                  "size-4 shrink-0 accent-primary",
-                                  WORKTREE_RADIO_SELECTOR_INPUT_CLASS,
-                                )}
-                              />
-                              <span className="font-normal text-foreground">No worktree</span>
-                            </label>
-                          </MenuItem>
-                          {linkedWorktrees.length > 0 && (
-                            <>
-                              <div className="my-1 h-px shrink-0 bg-border" />
-                              <div
-                                className="flex min-h-0 flex-1 flex-col"
-                                data-testid="new-chat-landing-worktree-section"
-                              >
-                                <span
-                                  className="shrink-0 px-2 py-1 text-xs font-medium leading-4 text-muted-foreground"
-                                  data-testid="new-chat-landing-worktree-heading"
-                                >
-                                  Worktrees
-                                </span>
-                                <div
-                                  className="flex min-h-0 max-h-80 flex-1 flex-col gap-px overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"
-                                  data-testid="new-chat-landing-worktree-dropdown"
-                                >
-                                  <TooltipProvider>
-                                    {linkedWorktrees.map((worktree) => (
-                                      <WorktreeRadioRow
-                                        key={worktree.path}
-                                        worktree={worktree}
-                                        checked={
-                                          branchName.trim() === "" &&
-                                          activeWorktree?.path === worktree.path
-                                        }
-                                        name="new-chat-existing-worktree"
-                                        onSelect={() => {
-                                          workspaceFromConfigRef.current = false;
-                                          setWorkspace(worktree.path);
-                                          setBranchName("");
-                                          setAutoSeededBranch("");
-                                          setWorktreePopoverOpen(false);
-                                        }}
-                                        testId="new-chat-landing-worktree-option"
-                                        variant="selector"
-                                      />
-                                    ))}
-                                  </TooltipProvider>
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                        <div className="my-1 h-px shrink-0 bg-border" />
-                        <label
-                          htmlFor="landing-branch-name"
-                          className="shrink-0 px-2 py-1 text-sm leading-5 text-muted-foreground"
-                        >
-                          New
-                        </label>
-                        <div className="relative flex shrink-0 flex-col">
-                          <input
-                            id="landing-branch-name"
-                            type="text"
-                            value={branchName}
-                            onChange={(e) => setBranchName(e.target.value)}
-                            placeholder="feature/my-branch"
-                            // Suppress the browser's native autofill dropdown so it
-                            // doesn't overlay our worktree combobox. `off` alone is
-                            // ignored by some browsers, so also disable spellcheck /
-                            // autocorrect and give it an unrecognized name.
-                            autoComplete="off"
-                            autoCorrect="off"
-                            autoCapitalize="off"
-                            spellCheck={false}
-                            name="omnigent-worktree-branch"
-                            // pr-9 leaves room for the generate button overlaid at
-                            // the right edge.
-                            className="rounded-md border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none transition-colors focus-visible:border-ring"
-                            data-testid="new-chat-landing-branch-input"
-                          />
-                          {/* Fill a unique branch name for a throwaway worktree.
-                        onMouseDown so it fires before the input's blur closes
-                        the combobox and preventDefault keeps focus on the
-                        input. */}
-                          <button
-                            type="button"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              generateBranchName();
-                            }}
-                            title="Generate a unique branch name"
-                            aria-label="Generate a unique branch name"
-                            className="absolute top-0 right-0 flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-                            data-testid="new-chat-landing-branch-generate"
-                          >
-                            <ShuffleIcon className="size-4" />
-                          </button>
-                        </div>
-                        {branchName.trim() !== "" && (
-                          <input
-                            type="text"
-                            value={baseBranch}
-                            onChange={(e) => setBaseBranch(e.target.value)}
-                            placeholder="Base branch (defaults to current)"
-                            aria-label="Base branch"
-                            className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring"
-                            data-testid="new-chat-landing-base-branch-input"
-                          />
-                        )}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                )}
-            </ComposerWorkspaceBar>
-          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -7260,6 +6793,503 @@ export function NewChatLandingScreen() {
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+
+                    {sandboxSelected && (
+                      <div
+                        key="workspace-controls"
+                        className="flex min-w-0 items-center gap-1"
+                        data-testid="new-chat-landing-workspace-controls"
+                      >
+                        {/* Sandbox repository chip — the sandbox counterpart of the
+              working-directory chip. There is no filesystem to browse
+              before the sandbox exists, so the workspace is specified as
+              a git repository URL (+ optional branch) the server clones
+              at create time. Blank = empty server-created workspace. */}
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label={`Sandbox repositories: ${
+                                sandboxRepoSelections.length > 0
+                                  ? sandboxRepoLabel
+                                  : "None selected"
+                              }`}
+                              className="relative inline-flex h-6 min-w-10 max-w-[calc(50%-0.25rem)] cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 text-xs leading-4 font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:min-w-11"
+                              data-testid="new-chat-landing-repo-chip"
+                            >
+                              <GitBranchIcon className="ui-icon" />
+                              <span
+                                data-workspace-collapse-label=""
+                                className={cn(
+                                  "min-w-0 truncate text-left",
+                                  COMPOSER_WORKSPACE_COLLAPSED_LABEL_CLASS,
+                                )}
+                              >
+                                {sandboxRepoLabel}
+                              </span>
+                              <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent align="start" className="w-96 p-3">
+                            <div className="flex flex-col gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm font-medium text-foreground">
+                                  Repositories (optional)
+                                </span>
+                                {databricksGitCredentialsTooltipContent && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+                                        aria-label="How to set up Databricks git credentials"
+                                      >
+                                        <CircleHelpIcon className="size-3.5" />
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-64">
+                                      {databricksGitCredentialsTooltipContent}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+                              </div>
+                              {/* Stale over-cap selection (repos remembered/added under
+                  a multi-repo provider, then switched to a single-repo one):
+                  warn and block submit rather than 422 after the session row
+                  is created. */}
+                              {sandboxRepoOverCap && (
+                                <p
+                                  className="text-sm text-warning"
+                                  data-testid="new-chat-landing-repo-overcap"
+                                >
+                                  This sandbox provider clones at most {maxSandboxRepos}{" "}
+                                  {maxSandboxRepos === 1 ? "repository" : "repositories"}. Remove
+                                  the extra {maxSandboxRepos === 1 ? "repositories" : "ones"} to
+                                  continue.
+                                </p>
+                              )}
+                              {/* Selected repos: each clones into its own sibling dir.
+                  A connected repo gets its branch combobox; a pasted URL a
+                  free-text branch. The remove button drops it. */}
+                              {sandboxRepoSelections.map((sel) => {
+                                const repo = repoForUrl(sel.url);
+                                const name = repo?.full_name ?? deriveRepoName(sel.url) ?? sel.url;
+                                return (
+                                  <div
+                                    key={sel.url}
+                                    className="flex items-center gap-2"
+                                    data-testid="new-chat-landing-repo-row"
+                                  >
+                                    <span
+                                      className="min-w-0 flex-1 truncate text-sm"
+                                      title={sel.url}
+                                    >
+                                      {name}
+                                    </span>
+                                    {repo ? (
+                                      <div className="w-36 shrink-0">
+                                        <SandboxRepoBranchSelect
+                                          fullName={repo.full_name}
+                                          value={sel.branch}
+                                          defaultBranch={repo.default_branch}
+                                          onChange={(b) => setSandboxRepoBranch(sel.url, b)}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        value={sel.branch}
+                                        onChange={(e) =>
+                                          setSandboxRepoBranch(sel.url, e.target.value)
+                                        }
+                                        placeholder="branch"
+                                        aria-label={`Branch for ${name}`}
+                                        className="w-28 shrink-0 rounded-md border border-input bg-background px-2 py-1 text-xs outline-none transition-colors focus-visible:border-ring"
+                                      />
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeSandboxRepo(sel.url)}
+                                      aria-label={`Remove ${name}`}
+                                      className="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:text-foreground"
+                                      data-testid="new-chat-landing-repo-remove"
+                                    >
+                                      <XIcon className="size-3.5" />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                              {sandboxRepoSelections.length > 0 && (
+                                <div className="my-0.5 border-t border-border" />
+                              )}
+                              {/* Add-repository controls, hidden once the provider's
+                  repo cap is reached — so a single-repo provider shows one
+                  slot and no multi-repo affordance. */}
+                              {sandboxRepoSelections.length < maxSandboxRepos && (
+                                <>
+                                  {/* Add from the connected account's repos (only those
+                      not already picked); the free-text URL below is the
+                      fallback for a repo not in the list or no GitHub link. */}
+                                  {showGithubRepoPicker && (
+                                    <>
+                                      <SandboxRepoCombobox
+                                        repos={unselectedRepos}
+                                        value=""
+                                        onSelect={(repo) => {
+                                          if (repo) {
+                                            addSandboxRepo(
+                                              repo.clone_url ??
+                                                `https://github.com/${repo.full_name}.git`,
+                                            );
+                                          }
+                                        }}
+                                      />
+                                      {sandboxReposTruncated && (
+                                        <p
+                                          className="text-sm text-muted-foreground"
+                                          data-testid="new-chat-landing-repo-truncated"
+                                        >
+                                          Showing your most recently pushed repositories. Don't see
+                                          one? Paste its URL below.
+                                        </p>
+                                      )}
+                                      <p className="text-sm text-muted-foreground">
+                                        or paste a repository URL:
+                                      </p>
+                                    </>
+                                  )}
+                                  {/* Connected but the repo list failed to load: say so
+                      explicitly, so a transient error isn't mistaken for
+                      "GitHub not connected" (the picker just wouldn't render). */}
+                                  {githubReposEnabled &&
+                                    sandboxReposErrored &&
+                                    !showGithubRepoPicker && (
+                                      <p
+                                        className="text-sm text-destructive"
+                                        data-testid="new-chat-landing-repo-error"
+                                      >
+                                        Couldn't load your GitHub repositories. Paste a repository
+                                        URL below.
+                                      </p>
+                                    )}
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      id="landing-repo-url"
+                                      type="text"
+                                      value={pendingRepoUrl}
+                                      onChange={(e) => setPendingRepoUrl(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        // Enter adds the repo (same as the Add button), so a
+                                        // paste-then-Enter flow never needs the mouse.
+                                        if (
+                                          e.key === "Enter" &&
+                                          isValidSandboxRepoUrl(pendingRepoUrl)
+                                        ) {
+                                          e.preventDefault();
+                                          addSandboxRepo(pendingRepoUrl);
+                                          setPendingRepoUrl("");
+                                        }
+                                      }}
+                                      placeholder="https://github.com/org/repo"
+                                      aria-label="Repository URL"
+                                      className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring"
+                                      data-testid="new-chat-landing-repo-input"
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={!isValidSandboxRepoUrl(pendingRepoUrl)}
+                                      onClick={() => {
+                                        addSandboxRepo(pendingRepoUrl);
+                                        setPendingRepoUrl("");
+                                      }}
+                                      className="flex shrink-0 items-center gap-1 rounded-md border border-input px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                                      data-testid="new-chat-landing-repo-add"
+                                    >
+                                      <PlusIcon className="size-3.5" />
+                                      Add
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                              <p className="text-sm text-muted-foreground">
+                                {maxSandboxRepos > 1
+                                  ? "Cloned into the sandbox at startup. Several repos are cloned side by side and the agent starts in the parent that holds them; pick one and it starts directly inside it. Leave empty for a blank workspace."
+                                  : "Cloned into the sandbox at startup as the working directory. Leave empty for a blank workspace."}
+                              </p>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                        {mcpRegistryPicker}
+                      </div>
+                    )}
+                    {!sandboxSelected && (
+                      <div
+                        key="workspace-controls"
+                        className="flex min-w-0 items-center gap-1"
+                        data-testid="new-chat-landing-workspace-controls"
+                      >
+                        {workspaceLoading && cachedWorkspace === null && (
+                          <NewChatPickerLoading
+                            label="Loading working directory"
+                            testId="new-chat-landing-workspace-loading"
+                            className="h-6 md:h-6"
+                          />
+                        )}
+                        <Popover open={workspacePopoverOpen} onOpenChange={setWorkspacePopoverOpen}>
+                          {(!workspaceLoading || cachedWorkspace !== null) && (
+                            <PopoverTrigger asChild>{workspaceChip}</PopoverTrigger>
+                          )}
+                          <PopoverContent
+                            align="start"
+                            sideOffset={4}
+                            className="w-[31rem] max-w-[calc(100vw-2rem)] gap-1 p-1.5"
+                          >
+                            {recent.length > 0 && (
+                              <>
+                                <div className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                  Recents
+                                </div>
+                                <RecentWorkspaceList
+                                  hostId={selectedHostId}
+                                  paths={recent}
+                                  selectedPath={workspaceTrimmed}
+                                  onSelect={(path) => {
+                                    workspaceFromConfigRef.current = false;
+                                    setWorkspace(path);
+                                    addRecent(path);
+                                    setWorkspacePopoverOpen(false);
+                                  }}
+                                  onBrowse={(path) => {
+                                    setWorkspacePopoverOpen(false);
+                                    setWorkspacePickerInitialPath(
+                                      isNavigablePath(path) ? path : undefined,
+                                    );
+                                    setWorkspacePickerOpen(true);
+                                  }}
+                                />
+                                <div className="my-1 h-px bg-border" />
+                              </>
+                            )}
+                            <MenuItem asChild density="compact">
+                              <button
+                                type="button"
+                                className="w-full text-left"
+                                onClick={() => {
+                                  setWorkspacePopoverOpen(false);
+                                  setWorkspacePickerInitialPath(
+                                    isNavigablePath(workspaceTrimmed)
+                                      ? workspaceTrimmed
+                                      : undefined,
+                                  );
+                                  setWorkspacePickerOpen(true);
+                                }}
+                                data-testid="new-chat-landing-workspace-open-folder"
+                              >
+                                <FolderOpenIcon
+                                  className="size-4 shrink-0 text-muted-foreground"
+                                  data-testid="new-chat-landing-workspace-open-folder-icon"
+                                />
+                                Open folder
+                              </button>
+                            </MenuItem>
+                          </PopoverContent>
+                        </Popover>
+                        {/* Worktree selection stays a separate real action from the directory picker. */}
+                        {(!workspaceLoading || cachedWorkspace !== null) &&
+                          (noExecutionTargetSelected || workspaceIsGit) && (
+                            <Popover
+                              open={worktreePopoverOpen}
+                              onOpenChange={setWorktreePopoverOpen}
+                            >
+                              <PopoverTrigger asChild>
+                                <ComposerWorkspaceTrigger
+                                  kind="worktree"
+                                  label={
+                                    noExecutionTargetSelected
+                                      ? "No host selected"
+                                      : visibleWorktreeHeader.branchLabel
+                                  }
+                                  iconOnly={noExecutionTargetSelected}
+                                  aria-label={
+                                    noExecutionTargetSelected
+                                      ? "No host selected"
+                                      : visibleWorktreeHeader.branchDescription
+                                  }
+                                  title={
+                                    worktreePopoverOpen
+                                      ? undefined
+                                      : noExecutionTargetSelected
+                                        ? "No host selected"
+                                        : workspaceLoading || worktreeControlAvailable
+                                          ? visibleWorktreeHeader.branchDescription
+                                          : "Choose a Git working directory to use worktrees"
+                                  }
+                                  disabled={
+                                    noExecutionTargetSelected ||
+                                    workspaceLoading ||
+                                    !worktreeControlAvailable
+                                  }
+                                  aria-busy={workspaceLoading || undefined}
+                                  className={workspaceLoading ? "disabled:opacity-100" : undefined}
+                                  data-testid="new-chat-landing-branch-chip"
+                                />
+                              </PopoverTrigger>
+                              <PopoverContent
+                                align="start"
+                                collisionPadding={16}
+                                className="flex max-h-[var(--radix-popover-content-available-height)] w-[min(20rem,calc(100vw-2rem))] flex-col gap-0 overflow-hidden rounded-xl p-2"
+                              >
+                                <div className="flex min-h-0 flex-1 flex-col gap-0">
+                                  <div
+                                    className="flex min-h-0 flex-1 flex-col"
+                                    role="radiogroup"
+                                    aria-label="Choose a worktree"
+                                  >
+                                    <MenuItem
+                                      asChild
+                                      active={branchName.trim() === "" && activeWorktree === null}
+                                      density="compact"
+                                    >
+                                      <label
+                                        className={cn(
+                                          "cursor-pointer",
+                                          WORKTREE_RADIO_SELECTOR_ROW_CLASS,
+                                        )}
+                                        data-testid="new-chat-landing-no-worktree-option"
+                                      >
+                                        <input
+                                          type="radio"
+                                          name="new-chat-existing-worktree"
+                                          checked={
+                                            branchName.trim() === "" && activeWorktree === null
+                                          }
+                                          onChange={() => {
+                                            workspaceFromConfigRef.current = false;
+                                            if (activeWorktree !== null && mainWorktree !== null) {
+                                              setWorkspace(mainWorktree.path);
+                                            }
+                                            setBranchName("");
+                                            setAutoSeededBranch("");
+                                            setWorktreePopoverOpen(false);
+                                          }}
+                                          className={cn(
+                                            "size-4 shrink-0 accent-primary",
+                                            WORKTREE_RADIO_SELECTOR_INPUT_CLASS,
+                                          )}
+                                        />
+                                        <span className="font-normal text-foreground">
+                                          No worktree
+                                        </span>
+                                      </label>
+                                    </MenuItem>
+                                    {linkedWorktrees.length > 0 && (
+                                      <>
+                                        <div className="my-1 h-px shrink-0 bg-border" />
+                                        <div
+                                          className="flex min-h-0 flex-1 flex-col"
+                                          data-testid="new-chat-landing-worktree-section"
+                                        >
+                                          <span
+                                            className="shrink-0 px-2 py-1 text-xs font-medium leading-4 text-muted-foreground"
+                                            data-testid="new-chat-landing-worktree-heading"
+                                          >
+                                            Worktrees
+                                          </span>
+                                          <div
+                                            className="flex min-h-0 max-h-80 flex-1 flex-col gap-px overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"
+                                            data-testid="new-chat-landing-worktree-dropdown"
+                                          >
+                                            <TooltipProvider>
+                                              {linkedWorktrees.map((worktree) => (
+                                                <WorktreeRadioRow
+                                                  key={worktree.path}
+                                                  worktree={worktree}
+                                                  checked={
+                                                    branchName.trim() === "" &&
+                                                    activeWorktree?.path === worktree.path
+                                                  }
+                                                  name="new-chat-existing-worktree"
+                                                  onSelect={() => {
+                                                    workspaceFromConfigRef.current = false;
+                                                    setWorkspace(worktree.path);
+                                                    setBranchName("");
+                                                    setAutoSeededBranch("");
+                                                    setWorktreePopoverOpen(false);
+                                                  }}
+                                                  testId="new-chat-landing-worktree-option"
+                                                  variant="selector"
+                                                />
+                                              ))}
+                                            </TooltipProvider>
+                                          </div>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                  <div className="my-1 h-px shrink-0 bg-border" />
+                                  <label
+                                    htmlFor="landing-branch-name"
+                                    className="shrink-0 px-2 py-1 text-sm leading-5 text-muted-foreground"
+                                  >
+                                    New
+                                  </label>
+                                  <div className="relative flex shrink-0 flex-col">
+                                    <input
+                                      id="landing-branch-name"
+                                      type="text"
+                                      value={branchName}
+                                      onChange={(e) => setBranchName(e.target.value)}
+                                      placeholder="feature/my-branch"
+                                      // Suppress the browser's native autofill dropdown so it
+                                      // doesn't overlay our worktree combobox. `off` alone is
+                                      // ignored by some browsers, so also disable spellcheck /
+                                      // autocorrect and give it an unrecognized name.
+                                      autoComplete="off"
+                                      autoCorrect="off"
+                                      autoCapitalize="off"
+                                      spellCheck={false}
+                                      name="omnigent-worktree-branch"
+                                      // pr-9 leaves room for the generate button overlaid at
+                                      // the right edge.
+                                      className="rounded-md border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none transition-colors focus-visible:border-ring"
+                                      data-testid="new-chat-landing-branch-input"
+                                    />
+                                    {/* Fill a unique branch name for a throwaway worktree.
+                        onMouseDown so it fires before the input's blur closes
+                        the combobox and preventDefault keeps focus on the
+                        input. */}
+                                    <button
+                                      type="button"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        generateBranchName();
+                                      }}
+                                      title="Generate a unique branch name"
+                                      aria-label="Generate a unique branch name"
+                                      className="absolute top-0 right-0 flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                                      data-testid="new-chat-landing-branch-generate"
+                                    >
+                                      <ShuffleIcon className="size-4" />
+                                    </button>
+                                  </div>
+                                  {branchName.trim() !== "" && (
+                                    <input
+                                      type="text"
+                                      value={baseBranch}
+                                      onChange={(e) => setBaseBranch(e.target.value)}
+                                      placeholder="Base branch (defaults to current)"
+                                      aria-label="Base branch"
+                                      className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring"
+                                      data-testid="new-chat-landing-base-branch-input"
+                                    />
+                                  )}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                        {mcpRegistryPicker}
+                      </div>
+                    )}
 
                     {noExecutionTargetSelected ? (
                       <ComposerPermissionPicker

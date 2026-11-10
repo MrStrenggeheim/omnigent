@@ -308,7 +308,7 @@ function WorkspaceSwitchState({
         type="button"
         variant="ghost"
         size="sm"
-        className="h-6 min-w-0 max-w-[calc(50%-0.25rem)] gap-1 px-1 text-xs font-normal text-muted-foreground"
+        className="h-8 min-w-7 max-w-40 gap-1 px-1 text-xs font-normal text-muted-foreground md:h-7"
         data-testid="composer-workspace-dir"
         aria-label={`Change workspace: ${workspace}`}
         title={disabledReason ?? `Working directory: ${workspace}. Change workspace`}

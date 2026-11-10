@@ -1389,26 +1389,35 @@ export function ExplorerRowActions({
           className="size-5"
         />
       )}
-      {bytes !== null && !deleted && (
-        <span data-file-size className="text-sm text-muted-foreground">
-          {formatBytes(bytes)}
-        </span>
-      )}
-      {ctx && !deleted && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground"
-          aria-label={`Actions for ${path}`}
-          onClick={(event) => {
-            const box = event.currentTarget.getBoundingClientRect();
-            ctx.openMenu(entry, box.left, box.bottom);
-          }}
-        >
-          <MoreHorizontalIcon />
-        </Button>
-      )}
+      <span className="relative flex items-center justify-end">
+        {bytes !== null && !deleted && (
+          <span
+            data-file-size
+            className={cn(
+              "text-sm text-muted-foreground",
+              ctx &&
+                "[[data-explorer-entry]:hover_&]:opacity-0 [[data-explorer-entry]:focus-within_&]:opacity-0 [@media(hover:none)]:hidden",
+            )}
+          >
+            {formatBytes(bytes)}
+          </span>
+        )}
+        {ctx && !deleted && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="pointer-events-none absolute right-0 text-muted-foreground opacity-0 [[data-explorer-entry]:hover_&]:pointer-events-auto [[data-explorer-entry]:hover_&]:opacity-100 [[data-explorer-entry]:focus-within_&]:pointer-events-auto [[data-explorer-entry]:focus-within_&]:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:static [@media(hover:none)]:opacity-100"
+            aria-label={`Actions for ${path}`}
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              ctx.openMenu(entry, box.left, box.bottom);
+            }}
+          >
+            <MoreHorizontalIcon />
+          </Button>
+        )}
+      </span>
     </span>
   );
 }

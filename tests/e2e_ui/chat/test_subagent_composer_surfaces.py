@@ -1,4 +1,4 @@
-"""The rounded sub-agent composer masks the pink tray beneath the workspace bar."""
+"""The rounded sub-agent composer masks the pink tray beneath the composer card."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def test_subagent_composer_masks_overlap(
     )
     page.goto(f"{base_url}/c/{session_id}")
     tray = page.get_by_test_id("composer-subagent-tray")
-    bar = page.get_by_test_id("composer-workspace-controls")
+    bar = page.locator("[data-composer-card]")
     expect(tray).to_be_visible(timeout=30_000)
     expect(bar).to_be_visible()
     assert page.locator("html").evaluate("el => el.classList.contains('dark')") == dark
@@ -44,16 +44,16 @@ def test_subagent_composer_masks_overlap(
     bar_box = bar.bounding_box()
     label_box = tray.locator("span").bounding_box()
     assert tray_box is not None and bar_box is not None and label_box is not None
-    assert tray_box["x"] == pytest.approx(bar_box["x"], abs=1)
-    assert tray_box["width"] == pytest.approx(bar_box["width"], abs=1)
+    assert tray_box["x"] == pytest.approx(bar_box["x"] + 12, abs=1)
+    assert tray_box["width"] == pytest.approx(bar_box["width"] - 24, abs=1)
     overlap = tray_box["y"] + tray_box["height"] - bar_box["y"]
     radius = bar.evaluate("el => parseFloat(getComputedStyle(el).borderTopLeftRadius)")
-    assert radius > 0, "the workspace bar must keep its rounded top"
+    assert radius > 0, "the composer card must keep its rounded top"
     assert overlap >= radius, "the tray must extend behind the bar's curved corners"
     assert label_box["y"] + label_box["height"] < bar_box["y"], "the bar covers the label"
 
     # Sample inside the overlap, away from corners and labels. Changing only
-    # the tray's paint must not change any workspace-bar pixels above it.
+    # the tray's paint must not change any composer pixels above it.
     clip = {
         "x": bar_box["x"] + bar_box["width"] / 2,
         "y": bar_box["y"] + 2,
@@ -66,7 +66,7 @@ def test_subagent_composer_masks_overlap(
         over_black = page.screenshot(clip=clip, animations="disabled")
         tray.evaluate("el => el.style.background = 'white'")
         over_white = page.screenshot(clip=clip, animations="disabled")
-        assert over_black == over_white, "the tray tint bleeds through the workspace bar"
+        assert over_black == over_white, "the tray tint bleeds through the composer card"
     finally:
         tray.evaluate(
             """(el, style) => {

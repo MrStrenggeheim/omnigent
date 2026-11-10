@@ -1,4 +1,6 @@
 import { testAgent } from "@/test/agentFixtures";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "@/lib/notifications";
 import type * as SandboxModelOptionsModule from "@/hooks/useSandboxModelOptions";
 
 vi.mock("@/hooks/useSandboxModelOptions", async (importOriginal) => ({
@@ -3162,6 +3164,8 @@ describe("desktop Arclet credential preflight", () => {
 
   beforeEach(() => {
     setupLandingMocks();
+    toast.dismiss();
+    render(<Toaster />);
     vi.mocked(isElectronShell).mockReturnValue(true);
     vi.mocked(getDesktopFeatures).mockResolvedValue({
       databricksInternalFeatures: true,
@@ -3263,7 +3267,8 @@ describe("desktop Arclet credential preflight", () => {
     fireEvent.click(refresh);
     expect(refreshDbcert).toHaveBeenCalledOnce();
     expect(refreshDbcert).toHaveBeenCalledWith({ skipArcaSync: true });
-    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeDisabled();
+    expect(screen.getByText("Refreshing certificate")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh dbcert" })).toBeNull();
     expect(authenticatedFetchMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("new-chat-landing-input")).toBeEnabled();
     fireEvent.change(screen.getByTestId("new-chat-landing-input"), {
@@ -3350,7 +3355,7 @@ describe("desktop Arclet credential preflight", () => {
     renderLanding(arcletInfo);
     await start();
     await screen.findByRole("button", { name: "Refresh dbcert" });
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
     expect(screen.queryByRole("button", { name: "Refresh dbcert" })).toBeNull();
     fireEvent.click(screen.getByTestId("new-chat-landing-submit"));
     await screen.findByRole("button", { name: "Refresh dbcert" });
@@ -4074,7 +4079,7 @@ describe("NewChatLandingScreen", () => {
     expect(composer.className).not.toContain("has-[textarea:focus]:border-");
   });
 
-  it("renders the reference two-layer composer with one in-form control row", () => {
+  it("renders one composer surface with all controls in its action row", () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
     vi.stubGlobal(
       "SpeechRecognition",
@@ -4142,29 +4147,12 @@ describe("NewChatLandingScreen", () => {
       "md:pb-16",
     );
     expect(landingContent?.firstElementChild).toHaveClass("flex-1", "md:flex-none");
-    expect(composerSurface.firstElementChild).toBe(workspaceControls);
+    expect(composerSurface.firstElementChild).toBe(composer.closest("form"));
     expect(workspaceControls).toContainElement(workspace);
-    expect(workspaceControls.nextElementSibling).toBe(composer.closest("form"));
+    expect(actions).toContainElement(workspaceControls);
+    expect(composerSurface.querySelector(".composer-workspace-surface")).toBeNull();
     expect(composerSurface).toHaveClass("gap-0", "max-md:w-[calc(100%-1rem)]");
-    expect(workspaceControls).toHaveClass(
-      "mx-3",
-      "-mb-px",
-      "h-7",
-      "md:h-[37px]",
-      "min-w-0",
-      "items-center",
-      "gap-0.5",
-      "md:gap-2",
-      "rounded-t-2xl",
-      "border",
-      "border-b-0",
-      "composer-workspace-surface",
-      "px-2",
-      "py-0.5",
-      "md:px-3",
-      "md:py-1.5",
-    );
-    expect(workspace).toHaveClass("h-6", "gap-1", "rounded-md", "px-1", "text-xs", "leading-4");
+    expect(workspace).toHaveClass("h-8", "md:h-7", "gap-1", "px-1", "text-xs", "leading-4");
     expect(composer).not.toHaveClass("min-h-[105px]");
     expect(composer).toHaveClass("md:min-h-[105px]");
     expect(composer).toContainElement(actions);
@@ -4206,8 +4194,9 @@ describe("NewChatLandingScreen", () => {
     expect(permission.querySelector("span")).toHaveClass("truncate", "text-ui");
     expect(permission.querySelector("span")).not.toHaveClass("hidden");
     expect(worktree).toHaveClass(
-      "h-6",
-      "max-w-[calc(50%-0.25rem)]",
+      "h-8",
+      "md:h-7",
+      "max-w-40",
       "gap-1",
       "rounded-md",
       "bg-transparent",
@@ -4263,10 +4252,10 @@ describe("NewChatLandingScreen", () => {
       expect(rightControls).toContainElement(control);
     }
     const orderedControls = [
-      workspace,
-      worktree,
       attach,
       hostChip,
+      workspace,
+      worktree,
       permission,
       harness,
       voice,
@@ -6915,8 +6904,9 @@ describe("NewChatLandingScreen", () => {
       .querySelector("span.truncate");
     expect(workspaceLabel).toHaveClass("min-w-0", "truncate", "text-left");
     expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveClass(
-      "h-6",
-      "max-w-[calc(50%-0.25rem)]",
+      "h-8",
+      "md:h-7",
+      "max-w-40",
       "gap-1",
       "px-1",
       "text-xs",

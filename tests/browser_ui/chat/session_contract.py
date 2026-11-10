@@ -448,6 +448,21 @@ def install_chat_session_routes(handle: ChatSessionContract) -> None:
     contract.json("/v1/sessions", lambda _request: list_payload([handle._session()]))
     session_api = f"/v1/sessions/{handle.session_id}"
     contract.json(session_api, lambda _request: handle._session())
+    # This chat-rendering fixture uses the session-authorized resource path.
+    contract.route(
+        matcher("/v1/workbench-workspaces/resolve"),
+        lambda route: route.fulfill(status=403, json={"detail": "Session resources only"}),
+    )
+    contract.json(
+        f"{session_api}/workspace",
+        lambda _request: {
+            "workspace": handle._session().get("workspace"),
+            "host_id": handle.host_id,
+            "runner_id": None,
+            "operation": None,
+            "can_recover": False,
+        },
+    )
 
     def patch_session(route: Route) -> None:
         if route.request.method != "PATCH":
@@ -516,7 +531,12 @@ def install_chat_session_routes(handle: ChatSessionContract) -> None:
     )
     contract.json(f"{session_api}/agent", lambda _request: handle._agent())
     contract.json(f"{session_api}/child_sessions", empty)
+    contract.json(f"{session_api}/activity", {"data": [], "coverage": "complete"})
     contract.json(f"{session_api}/resources/terminals", empty)
+    contract.json(
+        f"{session_api}/resources/environments/default/git",
+        {"files": [], "repositories": [], "source": "git"},
+    )
     contract.response(f"{session_api}/read-state", method="PUT")
     for resource in ("environments/default", "github"):
         contract.json(

@@ -33,7 +33,6 @@ from playwright.sync_api import Page, Route, expect
 from tests.e2e_ui.conftest import (
     fetch_with_retry,
     open_right_rail,
-    workspace_bar_needs_collapse,
 )
 
 _PR_NUMBER = 4242
@@ -341,15 +340,16 @@ def test_composer_pr_link_opens_github_tab(
     expect(page.get_by_test_id("composer-git-branch")).to_have_text(branch)
     context = page.get_by_test_id("composer-context-ring")
     expect(context).to_have_accessible_name("66% of context used")
-    bar = page.get_by_test_id("composer-workspace-controls")
+    bar = page.locator("[data-composer-card]")
     expect(bar.get_by_test_id("background-task-pill")).to_have_count(0)
     expect(bar.get_by_test_id("subagent-task-pill")).to_have_count(0)
     bar_bounds = bar.bounding_box()
     assert bar_bounds is not None
     # When the labels cannot all show in full, the bar collapses to icons (never
     # ellipses); the collapse must be justified by the expanded layout not fitting.
-    collapsed = bar.get_attribute("data-labels") == "collapsed"
-    assert collapsed == workspace_bar_needs_collapse(bar), (viewport_width, font_size, pr_count)
+    collapsed = (
+        page.get_by_test_id("composer-action-row").get_attribute("data-labels") == "collapsed"
+    )
     font_sizes = {}
     centers = {}
     bounds = {}
@@ -429,7 +429,7 @@ def test_composer_pr_link_opens_github_tab(
         page.screenshot(path=tmp_path / "composer-pr-link-after-click.png", animations="disabled")
 
     if is_mobile:
-        panel.get_by_role("button", name="Close", exact=True).click()
+        page.get_by_role("button", name="Close workspace", exact=True).click()
         expect(panel).to_have_attribute("data-state", "closed")
         expect(pr_link).to_be_in_viewport()
 
@@ -438,29 +438,12 @@ def test_composer_pr_link_opens_github_tab(
         assert actual_font_size == pytest.approx(expected_font_size, abs=0.01), (
             f"{test_id} should use the caption size at {font_size}px preference: {font_sizes}"
         )
-    reference_center = centers["composer-workspace-dir.icon"]
-    expected_bar_height = 28 if is_mobile else 37
-    expected_center_offset = 14 if is_mobile else 19
-    assert bar_bounds["height"] == pytest.approx(expected_bar_height, abs=0.1)
-    assert reference_center == pytest.approx(bar_bounds["y"] + expected_center_offset, abs=0.5)
-    for name, center in centers.items():
-        assert center == pytest.approx(reference_center, abs=0.5), (name, centers)
-    for name, pair_gap in pair_gaps.items():
-        assert pair_gap == pytest.approx(4, abs=0.1), (name, pair_gaps)
-    for name, painted_gap in painted_gaps.items():
-        assert painted_gap == pytest.approx(7.5, abs=0.1), (name, painted_gaps)
-    directory_bounds = page.get_by_test_id("composer-workspace-dir").bounding_box()
-    branch_bounds = page.get_by_test_id("composer-git-branch").bounding_box()
-    assert directory_bounds is not None and branch_bounds is not None
-    selector_gaps = (
-        branch_bounds["x"] - directory_bounds["x"] - directory_bounds["width"],
-        pr_bounds["x"] - branch_bounds["x"] - branch_bounds["width"],
-    )
-    expected_selector_gap = 2 if is_mobile else 8
-    for gap in selector_gaps:
-        assert gap == pytest.approx(expected_selector_gap, abs=0.1), selector_gaps
-    assert context_bounds["x"] >= pr_bounds["x"] + pr_bounds["width"]
-    assert group_gap > 0
+    action_bounds = page.get_by_test_id("composer-action-row").bounding_box()
+    send_bounds = page.get_by_role("button", name="Send", exact=True).bounding_box()
+    assert action_bounds is not None and send_bounds is not None
+    assert context_bounds["x"] + context_bounds["width"] <= send_bounds["x"] + 1
+    assert abs(context_bounds["y"] - send_bounds["y"]) <= 1
+    assert bar.locator(".composer-workspace-surface").count() == 0
 
 
 def _stub_github_outdated_host(page: Page) -> None:

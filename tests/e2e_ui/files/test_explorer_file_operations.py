@@ -40,6 +40,7 @@ def _folder_action(page: Page, panel: Locator, name: str) -> None:
 
 
 def _open_row_actions(panel: Locator, path: str) -> None:
+    _entry(panel, path).hover()
     panel.get_by_role("button", name=f"Actions for {path}", exact=True).click()
 
 

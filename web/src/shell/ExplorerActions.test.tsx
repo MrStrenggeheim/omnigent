@@ -110,7 +110,7 @@ describe("Explorer actions", () => {
     expect(within(row).queryByRole("button", { name: /Download|Copy.*path/ })).toBeNull();
     const actions = within(row).getByRole("button", { name: "Actions for a.txt" });
     expect(actions.parentElement).not.toHaveClass("w-[104px]");
-    expect(actions).not.toHaveClass("opacity-0");
+    expect(actions).toHaveClass("absolute", "opacity-0");
     await rowMenu("a.txt");
     expect(screen.getByRole("menuitem", { name: "Move to trash…" })).toHaveAttribute(
       "data-variant",

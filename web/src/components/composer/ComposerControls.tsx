@@ -81,7 +81,7 @@ export const ComposerWorkspaceTrigger = forwardRef<
       // Icon-only while the bar is collapsed, so the label is the name.
       aria-label={label}
       className={cn(
-        "relative inline-flex h-6 min-w-10 max-w-[calc(50%-0.25rem)] cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 text-xs leading-4 font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50 md:min-w-11",
+        "relative inline-flex h-8 min-w-7 max-w-40 cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 text-xs leading-4 font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50 md:h-7",
         className,
       )}
       {...props}

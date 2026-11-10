@@ -573,7 +573,7 @@ def test_picker_rows_follow_the_row_grid(
 
 
 @pytest.mark.parametrize("surface", ["landing", "live"])
-def test_workspace_tray_aligns_with_the_card(
+def test_workspace_controls_live_in_the_card_action_row(
     page: Page,
     chat_session_contract: ChatSessionContract,
     surface: str,
@@ -586,13 +586,20 @@ def test_workspace_tray_aligns_with_the_card(
     else:
         tray = page.get_by_test_id("composer-workspace-controls")
         chip = page.get_by_test_id("composer-workspace-dir")
-    tray_box = box(tray)
-    card = box(page.locator("[data-composer-card]"))
-    input_box = box(_input(page, surface))
-    expected = input_box["x"] - card["x"]
-    assert tray_box["x"] - card["x"] == pytest.approx(12, abs=TOLERANCE)
-    assert right_inset(card, tray_box) == pytest.approx(12, abs=TOLERANCE)
-    assert box(chip)["x"] - tray_box["x"] == pytest.approx(expected, abs=TOLERANCE)
+    card = page.locator("[data-composer-card]")
+    actions = page.get_by_test_id(
+        "new-chat-landing-actions" if surface == "landing" else "composer-action-row"
+    )
+    assert card.locator(".composer-workspace-surface").count() == 0
+    assert tray.evaluate("el => !!el.closest('[data-composer-card]')")
+    assert chip.evaluate("el => !!el.closest('[data-composer-card]')")
+    send = (
+        page.get_by_test_id("new-chat-landing-submit")
+        if surface == "landing"
+        else page.get_by_role("button", name="Send", exact=True)
+    )
+    assert_same_vertical_center(box(chip), box(send))
+    assert actions.locator("[data-workspace-collapse-label]").count() > 0
 
 
 def test_queued_rows_and_nested_workspace_share_the_tray_grid(
@@ -627,14 +634,11 @@ def test_queued_rows_and_nested_workspace_share_the_tray_grid(
     for name in ("status", "label", "trailing"):
         assert columns[0][name]["x"] == pytest.approx(columns[1][name]["x"], abs=TOLERANCE)
     assert_primitive_inset(columns[0]["status"]["x"] - box(strip)["x"])
-    tray = page.get_by_test_id("composer-workspace-controls")
-    assert tray.evaluate("el => getComputedStyle(el).borderTopWidth") == "0px"
-    assert box(strip)["x"] == pytest.approx(box(tray)["x"], abs=TOLERANCE)
     card = box(page.locator("[data-composer-card]"))
-    input_box = box(composer)
-    tray_box = box(tray)
-    assert tray_box["x"] - card["x"] == pytest.approx(input_box["x"] - card["x"], abs=TOLERANCE)
-    assert right_inset(card, tray_box) == pytest.approx(tray_box["x"] - card["x"], abs=TOLERANCE)
+    assert box(strip)["x"] - card["x"] == pytest.approx(12, abs=TOLERANCE)
+    assert right_inset(card, box(strip)) == pytest.approx(12, abs=TOLERANCE)
+    assert box(strip)["y"] + box(strip)["height"] >= card["y"] - TOLERANCE
+    assert page.locator(".composer-workspace-surface").count() == 0
 
 
 @pytest.mark.parametrize(
@@ -685,7 +689,7 @@ def test_chat_width_scales_while_prose_remains_readable(
           const frame = document.querySelector('.chat-conversation-content');
           const composer = document.querySelector('[data-composer-card]');
           const workspace = document.querySelector(
-            '[data-testid="composer-workspace-controls"]').parentElement;
+            '[data-testid="composer-workspace-controls"]').closest('[data-composer-card]');
           const bubbles = [...document.querySelectorAll(
             '[data-testid="message-bubble"][data-role="assistant"]')];
           const prose = bubbles.find(b => b.textContent.includes('Responsive prose'));

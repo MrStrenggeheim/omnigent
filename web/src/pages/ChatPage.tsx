@@ -47,7 +47,6 @@ import { BackgroundTaskIndicator } from "@/components/composer/BackgroundTaskInd
 import { SubagentTaskIndicator } from "@/components/composer/SubagentTaskIndicator";
 import { ReplyDraftBlocks } from "@/components/composer/ReplyDraftBlocks";
 import {
-  ComposerWorkspaceBar,
   ComposerPermissionPicker,
   ComposerConfigTooltipRows,
 } from "@/components/composer/ComposerControls";
@@ -2273,9 +2272,9 @@ export function subAgentComposerLabel(
 }
 
 /**
- * Sub-agent shelf tucked behind the workspace bar's rounded top.
+ * Sub-agent shelf tucked behind the composer card's rounded top.
  * Bottom padding keeps the label above the overlap; opaque surfaces prevent
- * the pink tint from bleeding through the bar.
+ * the accent tint from bleeding through the card.
  */
 function SubagentComposerTray({ label }: { label: string }) {
   return (
@@ -3863,13 +3862,9 @@ function ComposerImpl(
       />
       {/* Drop cue, spanning the chat column this composer belongs to. */}
       {isDragActive && dropTarget ? <FileDropOverlay container={dropTarget} /> : null}
-      {/* The composer stack above the card: trays dock onto the inset
-          workspace bar, so they share its column wrapper and its mx-3
-          inset — a tray's negative-margin tuck only hides its square
-          bottom corners when the surface below is at least as wide,
-          otherwise page background shows and the tray floats detached. */}
+      {/* Queued messages and child context dock directly onto the composer card. */}
       <div className={cn("mx-auto", COMPOSER_COLUMN_WIDTH)}>
-        {/* Queued messages — peeks above the workspace bar like the
+        {/* Queued messages — peeks above the composer card like the
             sub-agent tray. Lists follow-ups held while the agent is busy;
             drains FIFO on idle. Scope to this conversation so a queue held
             elsewhere never leaks in. */}
@@ -3896,70 +3891,8 @@ function ComposerImpl(
           onReorder={reorderQueuedMessage}
           widthClassName="mx-3 w-auto"
         />
-        {/* Sub-agent context tray — peeks above the workspace bar; reserves
-            its own layout slot so the bar sits below it (see
-            SubagentComposerTray). Truthy (not just non-null) so an empty
-            label never peeks a nameless tray. */}
+        {/* An empty child label must not create a nameless tray. */}
         {subAgentLabel ? <SubagentComposerTray label={subAgentLabel} /> : null}
-        <ComposerWorkspaceBar
-          data-testid="composer-workspace-controls"
-          className={cn(
-            hasQueuedComposerMessages &&
-              "rounded-t-none border-t-0 border-border/50 before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-border/50 before:content-['']",
-          )}
-        >
-          <ComposerWorkspaceStatus
-            workspaceControl={
-              composerSessionId &&
-              composerSession?.hostId &&
-              composerWorkspace &&
-              isOwnerLevel(permissionLevel) ? (
-                <WorkspaceSwitchControl
-                  sessionId={composerSessionId}
-                  hostId={composerSession.hostId}
-                  workspace={composerWorkspace}
-                  disabledReason={
-                    composerSession.parentSessionId
-                      ? "Change the parent chat's workspace"
-                      : isWorking || hasPendingElicitation
-                        ? "Wait for the current turn and approvals to finish"
-                        : hasQueuedComposerMessages
-                          ? "Send or remove queued messages before changing workspace"
-                          : undefined
-                  }
-                />
-              ) : undefined
-            }
-            workspacePath={composerWorkspace ?? null}
-            worktreePath={composerGit.worktreePath}
-            isWorktree={composerGit.isWorktree}
-            branch={composerGit.branch}
-            branchState={composerGit.branchState}
-            creationBranch={composerGit.creationBranch}
-            showWorktree={composerGit.isWorktree === true}
-          />
-          <ComposerPrLink
-            state={composerGit.githubState}
-            prCount={composerGit.prCount}
-            prNumber={composerGit.prNumber}
-            prNumberPrefix={composerGit.prNumberPrefix}
-            onOpen={openComposerGithubTab}
-          />
-          <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1">
-            <div
-              data-testid="composer-task-indicators"
-              className="flex items-center gap-0 empty:hidden"
-            >
-              <BackgroundTaskIndicator />
-              <SubagentTaskIndicator conversationId={conversationId} />
-              {goal && <GoalStatusPill goal={goal} onOpen={() => setGoalDialogOpen(true)} />}
-            </div>
-            <ComposerContextRing
-              contextWindow={composerContextWindow}
-              tokensUsed={composerTokensUsed}
-            />
-          </div>
-        </ComposerWorkspaceBar>
       </div>
       <ChatComposer
         keyboard={{ submitWithModEnter, preventsKeyboardSubmit }}
@@ -4150,6 +4083,23 @@ function ComposerImpl(
           ),
           attachments: (
             <>
+              <div className="mx-3 hidden flex-wrap items-center gap-2 pb-2 has-[button,span]:flex">
+                <ComposerPrLink
+                  state={composerGit.githubState}
+                  prCount={composerGit.prCount}
+                  prNumber={composerGit.prNumber}
+                  prNumberPrefix={composerGit.prNumberPrefix}
+                  onOpen={openComposerGithubTab}
+                />
+                <div
+                  data-testid="composer-task-indicators"
+                  className="flex items-center gap-0 empty:hidden"
+                >
+                  <BackgroundTaskIndicator />
+                  <SubagentTaskIndicator conversationId={conversationId} />
+                  {goal && <GoalStatusPill goal={goal} onOpen={() => setGoalDialogOpen(true)} />}
+                </div>
+              </div>
               {/* Pending attachments — image thumbnails (click to view) + file rows. */}
               <ComposerAttachments files={files} onRemove={removeFile} />
               {/* Rejected-attachment feedback: unsupported type or too large */}
@@ -4220,6 +4170,41 @@ function ComposerImpl(
                   onReconnect={onShowReconnectHelp}
                 />
               )}
+              <div
+                data-testid="composer-workspace-controls"
+                className="flex min-w-0 items-center gap-1"
+              >
+                <ComposerWorkspaceStatus
+                  workspaceControl={
+                    composerSessionId &&
+                    composerSession?.hostId &&
+                    composerWorkspace &&
+                    isOwnerLevel(permissionLevel) ? (
+                      <WorkspaceSwitchControl
+                        sessionId={composerSessionId}
+                        hostId={composerSession.hostId}
+                        workspace={composerWorkspace}
+                        disabledReason={
+                          composerSession.parentSessionId
+                            ? "Change the parent chat's workspace"
+                            : isWorking || hasPendingElicitation
+                              ? "Wait for the current turn and approvals to finish"
+                              : hasQueuedComposerMessages
+                                ? "Send or remove queued messages before changing workspace"
+                                : undefined
+                        }
+                      />
+                    ) : undefined
+                  }
+                  workspacePath={composerWorkspace ?? null}
+                  worktreePath={composerGit.worktreePath}
+                  isWorktree={composerGit.isWorktree}
+                  branch={composerGit.branch}
+                  branchState={composerGit.branchState}
+                  creationBranch={composerGit.creationBranch}
+                  showWorktree={composerGit.isWorktree === true}
+                />
+              </div>
               {(showClaudePermissionMode || showCodexApprovalMode) && (
                 <ComposerPermissionPicker
                   label="Permission mode"
@@ -4297,6 +4282,11 @@ function ComposerImpl(
                   dirtyRef.current = true;
                   resetCursor();
                 }}
+              />
+              <ComposerContextRing
+                contextWindow={composerContextWindow}
+                tokensUsed={composerTokensUsed}
+                className="size-8 justify-center md:size-7"
               />
               <TooltipProvider>
                 <Tooltip>

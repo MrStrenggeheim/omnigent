@@ -38,7 +38,7 @@ describe("shared composer controls", () => {
     expect(screen.getByRole("button", { name: "This machine" })).toHaveClass("w-11", "md:h-7");
   });
 
-  it("lets workspace labels use half the bar instead of a fixed pixel cap", () => {
+  it("keeps directory controls compact in the shared action row", () => {
     render(
       <ComposerWorkspaceBar>
         <ComposerWorkspaceTrigger kind="directory" label="new-composer-width" />
@@ -47,7 +47,7 @@ describe("shared composer controls", () => {
     );
 
     for (const trigger of screen.getAllByRole("button")) {
-      expect(trigger).toHaveClass("min-w-10", "md:min-w-11", "px-1", "max-w-[calc(50%-0.25rem)]");
+      expect(trigger).toHaveClass("h-8", "md:h-7", "min-w-7", "px-1", "max-w-40");
       expect(trigger).not.toHaveClass("max-w-[180px]");
       expect(trigger.querySelector("span")).toHaveClass("min-w-0", "truncate");
       for (const icon of trigger.querySelectorAll("svg")) {

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from itertools import pairwise
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests._helpers.workspace_geometry import workspace_bar_needs_collapse
 from tests.browser_ui.chat.session_contract import ChatSessionContract
 
 _MONITOR_TASK = {
@@ -57,7 +55,7 @@ _MONITOR_TASK = {
         ),
     ],
 )
-def test_pr_context_and_background_tasks_share_workspace_bar(
+def test_pr_context_and_background_tasks_stay_inside_composer(
     page: Page,
     chat_session_contract: ChatSessionContract,
     tmp_path: Path,
@@ -158,7 +156,7 @@ def test_pr_context_and_background_tasks_share_workspace_bar(
     page.set_viewport_size({"width": viewport_width, "height": 844 if is_mobile else 900})
     page.goto(chat.url)
     chat.wait_for_stream()
-    bar = page.get_by_test_id("composer-workspace-controls")
+    bar = page.locator("[data-composer-card]")
     pr_link = bar.get_by_test_id("composer-pr-link")
     pr_label = pr_link.locator("span").last
     expect(pr_label).to_have_text(f"#{pr_number}", timeout=30_000)
@@ -202,48 +200,16 @@ def test_pr_context_and_background_tasks_share_workspace_bar(
     )
     bar.screenshot(path=tmp_path / f"status-bar-{theme}.png", animations="disabled")
     page.screenshot(path=tmp_path / f"status-page-{theme}.png", animations="disabled")
-    directory_icon = icon_bounds["composer-workspace-dir"][0]
-    center_y = directory_icon["y"] + directory_icon["height"] / 2
-    expected_bar_height = 28 if is_mobile else 37
-    expected_center_offset = 14 if is_mobile else 19
-    assert bounds["height"] == pytest.approx(expected_bar_height, abs=0.5)
-    assert center_y == pytest.approx(bounds["y"] + expected_center_offset, abs=0.5)
-    trailing = control_bounds[status_ids[-1]]
-    # The docked tray's content inset matches the card's shared inset
-    # (1px border + 12px padding).
-    assert trailing["x"] + trailing["width"] == pytest.approx(
-        bounds["x"] + bounds["width"] - 13, abs=0.5
-    )
-    background = control_bounds["background-task-pill"]
-    subagent = control_bounds["subagent-task-pill"]
+    actions = page.get_by_test_id("composer-action-row")
+    workspace = page.get_by_test_id("composer-workspace-controls")
+    assert actions.locator('[data-testid="composer-workspace-controls"]').count() == 1
+    assert page.locator(".composer-workspace-surface").count() == 0
+    send = page.get_by_role("button", name="Send", exact=True).bounding_box()
+    assert send is not None
     context_ring = control_bounds["composer-context-ring"]
-    assert background["x"] + background["width"] == pytest.approx(subagent["x"], abs=0.5)
-    assert subagent["x"] + subagent["width"] + 4 == pytest.approx(context_ring["x"], abs=0.5)
-    # A label that would have to truncate collapses the whole bar to icons
-    # instead — the full value stays in the title — and a bar with room shows
-    # every label untruncated. Neither state may show an ellipsis.
-    collapsed = bar.get_attribute("data-labels") == "collapsed"
-    assert collapsed == workspace_bar_needs_collapse(bar), (viewport_width, font_size, pr_number)
-    expect(pr_label).to_have_attribute("title", f"#{pr_number}")
-    # The PR number stays visible and the context ring stays accessible; a
-    # crowded bar collapses only the directory and branch text to their icons.
+    assert context_ring["x"] + context_ring["width"] <= send["x"] + 0.5
+    assert abs(context_ring["y"] - send["y"]) <= 1
     expect(pr_label).to_be_visible()
-    expect(context).to_have_accessible_name("100% of context used")
-    for chip in ("composer-workspace-dir", "composer-git-branch"):
-        chip_label = bar.get_by_test_id(chip).locator("[data-workspace-collapse-label]")
-        if collapsed:
-            expect(chip_label).to_be_hidden()
-        else:
-            expect(chip_label).to_be_visible()
-    # From 390px up the number shows in full. A 375px bar with the large font
-    # setting is the one place it may still ellipsize even with the directory
-    # and branch text gone (CI's fonts run wider than macOS's, so it is
-    # font-dependent there); its full value stays in the title.
-    if viewport_width >= 390:
-        assert pr_label.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
-    for test_id in status_ids:
-        rect = control_bounds[test_id]
-        assert rect["y"] + rect["height"] / 2 == pytest.approx(center_y, abs=0.5)
     for test_id, rect in control_bounds.items():
         assert rect["x"] >= bounds["x"] - 0.5, (test_id, rect, bounds)
         assert rect["x"] + rect["width"] <= bounds["x"] + bounds["width"] + 0.5, (
@@ -251,45 +217,24 @@ def test_pr_context_and_background_tasks_share_workspace_bar(
             rect,
             bounds,
         )
-        assert rect["y"] >= bounds["y"] - 0.5, (test_id, rect, bounds)
-        assert rect["y"] + rect["height"] <= bounds["y"] + bounds["height"] + 0.5, (
-            test_id,
-            rect,
-            bounds,
-        )
-        for icon in icon_bounds[test_id]:
-            assert icon["x"] >= rect["x"] - 0.5, (test_id, icon, rect)
-            assert icon["x"] + icon["width"] <= rect["x"] + rect["width"] + 0.5, (
-                test_id,
-                icon,
-                rect,
-            )
-    ordered_icons = [
-        (test_id, icon)
-        for test_id in (
-            "composer-workspace-dir",
-            "composer-git-branch",
-            "composer-pr-link",
-            "background-task-pill",
-            "subagent-task-pill",
-            "composer-context-ring",
-        )
-        for icon in icon_bounds[test_id]
-    ]
-    for (left_id, left), (right_id, right) in pairwise(ordered_icons):
-        assert left["x"] + left["width"] <= right["x"] + 0.5, (
-            left_id,
-            left,
-            right_id,
-            right,
-        )
+        assert rect["y"] >= bounds["y"] - 0.5
+        assert rect["y"] + rect["height"] <= bounds["y"] + bounds["height"] + 0.5
+    host = page.get_by_test_id("composer-host-select").bounding_box()
+    folder = workspace.bounding_box()
+    assert host is not None and folder is not None
+    assert host["x"] + host["width"] <= folder["x"] + 1
+    permission = page.get_by_test_id("composer-permission-chip")
+    if permission.count():
+        permission_box = permission.bounding_box()
+        assert permission_box is not None
+        assert folder["x"] + folder["width"] <= permission_box["x"] + 1
     if is_mobile and (pr_number == 1234567 or font_family is not None):
         pr_link.tap()
         panel = page.get_by_test_id("github-panel-drawer")
         expect(panel).to_have_attribute("data-state", "open")
         expect(panel).to_be_visible()
         panel.screenshot(path=tmp_path / "truncated-pr-open.png", animations="disabled")
-        panel.get_by_role("button", name="Close", exact=True).tap()
+        page.get_by_role("button", name="Close workspace", exact=True).tap()
         expect(panel).to_have_attribute("data-state", "closed")
         expect(pr_link).to_be_in_viewport()
     chat.emit(

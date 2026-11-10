@@ -512,7 +512,9 @@ describe("Composer growth layout", () => {
     render(<Composer {...composerProps()} />);
 
     const card = textarea().closest("[data-composer-card]");
-    const workspace = screen.getByTestId("composer-workspace-controls").parentElement;
+    const workspace = screen
+      .getByTestId("composer-workspace-controls")
+      .closest("[data-composer-card]");
     for (const element of [card, workspace]) {
       expect(element).toHaveClass("w-full", ...CHAT_COLUMN_WIDTH.split(" "));
       expect(element).not.toHaveClass("max-w-[720px]");
@@ -2509,7 +2511,17 @@ describe("Composer shared visible controls", () => {
     expect(screen.queryByTestId("composer-settings")).toBeNull();
     expect(trailing.firstElementChild).toContainElement(harnessPicker);
     expect(actions.children).toHaveLength(3);
-    expect(workspace).toHaveClass("mx-3", "h-7", "md:h-[37px]", "rounded-t-2xl");
+    expect(leading).toContainElement(workspace);
+    expect(card).not.toContainElement(document.querySelector(".composer-workspace-surface"));
+    expect(workspace).not.toHaveClass("border", "rounded-t-2xl");
+    const hostControl = screen.getByTestId("composer-host-select");
+    const permission = screen.getByTestId("composer-permission-chip");
+    expect(
+      hostControl.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(
+      workspace.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
     expect(textarea().closest("form")).toHaveClass(
       "px-6",
       "pb-[max(20px,env(safe-area-inset-bottom))]",
@@ -2585,7 +2597,7 @@ describe("Composer shared visible controls", () => {
     expect(screen.getByTestId("composer-pr-link")).toHaveAccessibleName("!7");
   });
 
-  it("keeps the PR to the right of the confirmed worktree status", () => {
+  it("keeps worktree and PR controls inside the composer", () => {
     setComposerGitStatus({
       branch: "feature/shared-composer",
       branchState: "branch",
@@ -2599,10 +2611,10 @@ describe("Composer shared visible controls", () => {
     renderWithTooltips(<Composer {...composerProps()} />);
     const pr = screen.getByTestId("composer-pr-link");
     const worktree = screen.getByTestId("composer-git-branch");
-    expect(worktree.compareDocumentPosition(pr) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(worktree.closest("[data-composer-card]")).toBe(pr.closest("[data-composer-card]"));
   });
 
-  it("mounts task indicators before the context ring with sub-agent navigation", () => {
+  it("preserves task navigation inside the composer and puts context beside Send", () => {
     useChatStore.setState({
       conversationId: "conv_parent",
       contextWindow: 100_000,
@@ -2635,11 +2647,10 @@ describe("Composer shared visible controls", () => {
       </MemoryRouter>,
     );
 
-    const workspace = screen.getByTestId("composer-workspace-controls");
-    const taskIndicators = within(workspace).getByTestId("composer-task-indicators");
-    const context = within(workspace).getByTestId("composer-context-ring");
-    const background = within(workspace).getByTestId("background-task-pill");
-    const subagent = within(workspace).getByTestId("subagent-task-pill");
+    const taskIndicators = screen.getByTestId("composer-task-indicators");
+    const context = screen.getByTestId("composer-context-ring");
+    const background = screen.getByTestId("background-task-pill");
+    const subagent = screen.getByTestId("subagent-task-pill");
     expect(
       background.compareDocumentPosition(subagent) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
@@ -2647,7 +2658,13 @@ describe("Composer shared visible controls", () => {
       0,
     );
     expect(taskIndicators).toHaveClass("gap-0");
-    expect(context.parentElement).toHaveClass("gap-1");
+    expect(context.closest("[data-composer-card]")).toBe(
+      textarea().closest("[data-composer-card]"),
+    );
+    expect(
+      context.compareDocumentPosition(screen.getByRole("button", { name: "Send" })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
     expect(childSessionsArgsSpy).toHaveBeenCalledWith("conv_parent");
 
     fireEvent.click(subagent);
@@ -2692,7 +2709,17 @@ describe("Composer shared visible controls", () => {
     });
     useChatStore.setState({ conversationId: "conv_worktree", gitBranch: "source-branch" });
 
-    renderWithTooltips(<Composer {...composerProps()} />);
+    render(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+        >
+          <TooltipProvider>
+            <Composer {...composerProps()} />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
 
     expect(composerGitStatusArgsSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2703,7 +2730,7 @@ describe("Composer shared visible controls", () => {
       }),
     );
     expect(screen.getByTestId("composer-workspace-dir")).toHaveAccessibleName(
-      "Working directory: /home/alice/worktrees/feature-x",
+      "Change workspace: /home/alice/worktrees/feature-x",
     );
     expect(screen.getByTestId("composer-git-branch")).toHaveTextContent("feature-x");
   });
@@ -3130,8 +3157,7 @@ describe("Composer background tasks", () => {
     });
     renderWithTooltips(<Composer {...composerProps()} />);
 
-    const workspace = screen.getByTestId("composer-workspace-controls");
-    const trigger = within(workspace).getByRole("button", {
+    const trigger = screen.getByRole("button", {
       name: "1 background task still running",
     });
     expect(trigger).toHaveTextContent("1");
@@ -5874,81 +5900,25 @@ describe("Composer sub-agent tray", () => {
     expect(screen.getByTestId("composer-workspace-controls")).not.toHaveClass("rounded-t-none");
   });
 
-  // The sub-agent tray sits directly above the workspace bar, sharing its
-  // column wrapper and inset so their edges line up.
-  it("sits directly above the workspace bar, sharing its column", () => {
+  it("docks the child tray directly onto the composer without a workspace shelf", () => {
     render(<Composer {...composerProps({ subAgentLabel: "check-account-eligibility" })} />);
-    const bar = document.querySelector('[data-testid="composer-workspace-controls"]');
-    expect(bar).not.toBeNull();
-    expect(tray()?.nextElementSibling).toBe(bar);
-    expect(tray()?.parentElement).toBe(bar?.parentElement);
+    const card = textarea().closest("[data-composer-card]");
+    expect(tray()?.parentElement?.nextElementSibling).toBe(card);
+    expect(document.querySelector(".composer-workspace-surface")).toBeNull();
   });
 
-  it("keeps the workspace bar's rounded top on a top-level session (no tray)", () => {
-    render(<Composer {...composerProps()} />);
-    const bar = document.querySelector('[data-testid="composer-workspace-controls"]');
-    expect(bar?.className).not.toContain("rounded-t-none");
-  });
-
-  it("removes the workspace bar's inner arc when the queue tray is docked above it", () => {
+  it("keeps queued messages above the composer without adding an empty control row", () => {
     setComposerState({
       conversationId: "conv_test",
       skills: [],
       queuedMessages: [{ queueId: "q_1", text: "held follow-up", conversationId: "conv_test" }],
     });
     renderWithTooltips(<Composer {...composerProps()} />);
-    expect(screen.getByTestId("composer-workspace-controls")).toHaveClass(
-      "rounded-t-none",
-      "border-t-0",
-      "border-border/50",
-      "before:inset-x-4",
-      "before:h-px",
+    const strip = screen.getByTestId("composer-queued-strip");
+    expect(strip.parentElement?.nextElementSibling).toBe(
+      textarea().closest("[data-composer-card]"),
     );
-  });
-});
-
-// The trays peeking above the composer (queued strip, sub-agent tray) dock
-// onto the inset workspace bar: a tray's negative-margin tuck only hides its
-// bottom corners behind a surface at least as wide, so the trays must share
-// the bar's column wrapper and inset. Rendered as full-column siblings of the
-// wrapper instead, page background shows under their outer edges and the tray
-// floats detached above the composer (real geometry is covered by
-// tests/e2e_ui/chat/test_queued_strip_docks_on_composer.py).
-describe("Composer trays dock onto the workspace bar", () => {
-  afterEach(() => {
-    cleanup();
-    vi.restoreAllMocks();
-    useChatStore.setState({ queuedMessages: [] });
-  });
-
-  /** The column wrapper holding the workspace bar. */
-  function workspaceBarParent(): Element | null {
-    return (
-      document.querySelector('[data-testid="composer-workspace-controls"]')?.parentElement ?? null
-    );
-  }
-
-  it("renders the queued strip inside the workspace bar's column wrapper", () => {
-    setComposerState({
-      conversationId: "conv_test",
-      skills: [],
-      queuedMessages: [{ queueId: "q_1", text: "held follow-up", conversationId: "conv_test" }],
-    });
-    // Tooltip provider for the strip's per-row steer/edit/delete buttons.
-    renderWithTooltips(<Composer {...composerProps()} />);
-    const strip = document.querySelector('[data-testid="composer-queued-strip"]');
-    expect(strip).not.toBeNull();
-    expect(workspaceBarParent()).not.toBeNull();
-    expect(strip!.parentElement).toBe(workspaceBarParent());
-  });
-
-  it("renders the sub-agent tray inside the workspace bar's column wrapper", () => {
-    setComposerState({ conversationId: "conv_test", skills: [] });
-    render(<Composer {...composerProps({ subAgentLabel: "check-account-eligibility" })} />);
-    const tray = document.querySelector('[data-testid="composer-subagent-tray"]');
-    expect(tray).not.toBeNull();
-    expect(workspaceBarParent()).not.toBeNull();
-    expect(tray!.parentElement).toBe(workspaceBarParent());
+    expect(document.querySelector(".composer-workspace-surface")).toBeNull();
   });
 });
 

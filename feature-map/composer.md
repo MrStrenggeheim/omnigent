@@ -10,6 +10,9 @@ and steers messages while the agent is busy.
 
 ## Sub-features
 
+- `single-surface-controls`: both composers place workspace selection between machine and permissions inside the input card; context usage sits between model selection and Send, with no top workspace shelf.
+- `retained-status`: worktree, PR, task and goal controls remain inside the composer; queued messages and child context dock directly onto the card.
+
 - `durable-queue`: queued follow-ups survive reload/client restart on this browser profile, preserving FIFO order, text, attachments, reply context, agent and retry/host-wait flags; storage is scoped to the authenticated user and server.
 
 - `quiet-focus`: typing leaves the composer frame neutral, without an accent border or outline; individual keyboard controls retain their focus indicators.
@@ -166,6 +169,7 @@ and steers messages while the agent is busy.
 
 ## How to get to it (user POV)
 
+- Existing or new chat: the main input card contains machine → workspace → permissions and model → context usage → Send; open workspace selection from the folder control.
 **In-session composer** (open any session):
 
 - Hover the model/effort pill to see the tooltip; click it to open configuration.
@@ -317,6 +321,9 @@ in the composer, then click the microphone beside **Ask a side question...**.
 Preconditions: a running instance (`verify-env start`, then `verify-env
 doctor`), the built web UI, and mock replies configured for any journey that
 sends a message. Run e2e tests through the instance:
+
+- Composer controls, PR/task retention and crowded phone geometry: `tests/browser_ui/chat/test_composer_acceptance.py`.
+- New/existing composer placement and direct queue docking: `tests/browser_ui/chat/test_composer_geometry_contract.py::test_workspace_controls_live_in_the_card_action_row` and `tests/browser_ui/chat/test_composer_geometry_contract.py::test_queued_rows_and_nested_workspace_share_the_tray_grid`.
 
 ```sh
 verify-env run -- python -m pytest <test> --ui-skip-build --video=on \

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export type ComposerPrState = "loading" | "ready" | "unknown";
 
 /**
- * PR chip for the composer workspace bar: the session's associated pull
+ * PR chip inside the composer: the session's associated pull
  * request(s) as a link that opens the workspace rail's Pull Requests tab.
  * Shows ``#123`` for one PR or ``N PRs`` for several. Self-nulls when there is
  * no PR or no way to open the tab (e.g. the landing window).

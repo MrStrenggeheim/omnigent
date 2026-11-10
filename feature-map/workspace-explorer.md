@@ -1,10 +1,11 @@
 # Workspace Explorer
 
-Users manage files in the independently selected workspace from the Files tree, filename search results and Changes list, using the same filesystem operations and permissions across desktop and mobile.
+Users manage files in the active chat's workspace from the Files tree, filename search results and Changes list, using the same filesystem operations and permissions across desktop and mobile.
 Git supplies change status by default; explicit captured comparisons retain the originating chat.
 
 ## Sub-features
 
+- `quiet-row-menu`: file size shows at rest; the trailing menu replaces it on hover or keyboard focus without adding reserved button width; touch devices retain a tappable menu.
 - `adaptive-viewer`: the button immediately before the open file path toggles Explorer and remembers the choice at every panel width, including phones; before the first explicit choice, desktop widths of at least 720px show it automatically.
 - `explorer-resize`: Explorer retains its resizable width (180px minimum), while narrow splits keep at least 240px for the viewer and allow horizontal overflow; toggling preserves the file editor and Explorer state.
 
@@ -27,6 +28,7 @@ Git supplies change status by default; explicit captured comparisons retain the 
 ## How to get to it (user POV)
 
 - Desktop web and desktop app: open Workspace → Files for the tree or Changes for the changed-file list; filename search uses the Files search field.
+- Point at an entry or focus it with the keyboard to reveal its menu in place of the size; touch users can tap the trailing menu directly.
 - Combined path/header: Up, current folder, comparison, New file, New folder, Refresh, Search folder contents, Collapse all folders, More file actions.
 - Files and Changes each expose their comparison dropdown in the path row; filter and dot-file toggles stay beside quick search.
 - Changes lists Git deletions for review; file comparisons use the shared [workspace diffs](workspace-diffs.md) viewer.
@@ -44,6 +46,8 @@ Git supplies change status by default; explicit captured comparisons retain the 
 ## Driving it with the repro environment
 
 Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md), use a session with a writable filesystem and an online runner or host, and use only temporary test files.
+
+- Hover/focus size replacement without row movement: `tests/e2e_ui/files/test_workbench_ownership.py::test_explorer_size_and_menu_share_space_on_hover_and_focus`.
 
 - Real SPA/server/runner file operations, binary upload, ZIP download and restore: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_manages_files_transfers_and_recovery`.
 - Delayed background refresh, shared drop overlay, idle/hover row controls and selection visibility: `tests/e2e_ui/files/test_explorer_file_operations.py::test_explorer_background_refresh_and_shared_hover_controls`.

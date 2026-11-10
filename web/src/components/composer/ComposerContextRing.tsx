@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const RING_CIRCUMFERENCE = 2 * Math.PI * 5.5;
 
 /**
- * Compact context-usage ring for the composer workspace bar.
+ * Compact context-usage ring beside the composer send control.
  *
  * Grayscale by design — a near-full context window is a neutral fact, not an
  * error, so the ring never escalates to warning/destructive colors. Self-nulls

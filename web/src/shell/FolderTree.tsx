@@ -1096,7 +1096,7 @@ function FolderTreeInner({
 
 /**
  * Renders a single file list item with icon, label, optional status badge,
- * optional file size, and a hover download button.
+ * optional file size, and a contextual menu on hover or keyboard focus.
  *
  * Used by both SearchResultRow (flat search results, full-path label with
  * rtl truncation) and TreeFileRow (tree leaf nodes, filename-only label
@@ -1114,7 +1114,7 @@ function FileRowItem({
   onFileSelect,
   conversationId,
 }: {
-  /** Canonical workspace-relative path, used for the download button and title. */
+  /** Canonical workspace-relative path, used for file actions and title. */
   path: string;
   /** Text shown in the label span — full path for search results, filename for tree. */
   displayLabel: string;

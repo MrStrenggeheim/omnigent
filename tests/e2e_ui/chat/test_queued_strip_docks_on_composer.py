@@ -38,14 +38,8 @@ def test_queued_strip_attaches_to_composer(
 ) -> None:
     """The queued/steer strip must sit ON the composer stack, not float above it.
 
-    Attached means no horizontal band of page background separates the
-    strip's painted bottom edge from the composer surface below it. Either:
-
-    - the strip's bottom edge reaches (or tucks behind) the top of the
-      composer card, as its negative bottom margin is designed to do; or
-    - some composer surface at least as wide as the strip (e.g. a
-      workspace bar spanning the full column) bridges the strip's bottom
-      edge down to the card's top.
+    The strip's painted bottom reaches the composer card directly; no empty
+    workspace shelf or band of page background separates them.
 
     Failure mode this catches: the strip's negative-margin tuck lands on a
     narrower, inset element between it and the card, so at the strip's outer
@@ -123,126 +117,11 @@ def test_queued_strip_attaches_to_composer(
         strip_bottom = strip_box["y"] + strip_box["height"]
         gap = card_box["y"] - strip_bottom
 
-        # Attached form 1: the strip's painted bottom reaches or tucks
-        # behind the composer card's top edge.
-        tucks_behind_card = gap <= _EPSILON
-
-        # Attached form 2: a composer surface at least as wide as the strip
-        # (e.g. a full-column workspace bar) bridges strip bottom -> card top,
-        # so no page background shows at the strip's outer edges.
-        bridged = False
-        bar = form.get_by_test_id("composer-workspace-controls")
-        if bar.count() > 0 and bar.first.is_visible():
-            bar_box = bar.first.bounding_box()
-            if bar_box is not None:
-                strip_list = strip.get_by_role("list", name="Queued messages")
-                strip_list_box = strip_list.bounding_box()
-                assert strip_list_box is not None, "queued message list has no bounding box"
-                bar_insets = bar.first.evaluate(
-                    """element => {
-                        const style = getComputedStyle(element);
-                        return {
-                            right:
-                                parseFloat(style.paddingRight) +
-                                parseFloat(style.borderRightWidth),
-                        };
-                    }"""
-                )
-                drag_handle_box = (
-                    strip.get_by_role("button", name="Reorder queued message")
-                    .first.locator("svg")
-                    .bounding_box()
-                )
-                workspace_icon_box = bar.first.locator(
-                    '[data-testid="composer-workspace-dir"] svg'
-                ).bounding_box()
-                assert drag_handle_box is not None, "queued drag handle has no bounding box"
-                assert workspace_icon_box is not None, "workspace icon has no bounding box"
-                assert abs(strip_box["x"] - bar_box["x"]) <= _EPSILON
-                assert abs(strip_box["width"] - bar_box["width"]) <= _EPSILON
-                strip_surface = strip.evaluate(
-                    """element => {
-                        const style = getComputedStyle(element);
-                        return [style.backgroundColor, style.backgroundImage];
-                    }"""
-                )
-                bar_surface = bar.first.evaluate(
-                    """element => {
-                        const style = getComputedStyle(element);
-                        return [style.backgroundColor, style.backgroundImage];
-                    }"""
-                )
-                bar_top_radii = bar.first.evaluate(
-                    """element => {
-                        const style = getComputedStyle(element);
-                        const divider = getComputedStyle(element, "::before");
-                        return {
-                            radii: [style.borderTopLeftRadius, style.borderTopRightRadius],
-                            dividerWidth: style.borderTopWidth,
-                            divider: {
-                                left: divider.left,
-                                right: divider.right,
-                                height: divider.height,
-                                backgroundColor: divider.backgroundColor,
-                            },
-                        };
-                    }"""
-                )
-                assert strip_surface == bar_surface, (
-                    "light-theme queued rows and workspace metadata must share "
-                    f"one surface: strip={strip_surface}, bar={bar_surface}"
-                )
-                assert bar_top_radii["radii"] == ["0px", "0px"], (
-                    "the docked queue owns the outer rounded top; the workspace bar "
-                    f"must not draw an inner arc: {bar_top_radii}"
-                )
-                assert bar_top_radii["dividerWidth"] == "0px", (
-                    "the docked workspace bar must not draw a full-width top border"
-                )
-                divider = bar_top_radii["divider"]
-                assert divider["left"] == "16px"
-                assert divider["right"] == "16px"
-                assert divider["height"] == "1px"
-                assert divider["backgroundColor"] not in {
-                    "rgba(0, 0, 0, 0)",
-                    "transparent",
-                }, (
-                    "the queue/workspace divider must be the prototype's faint 16px-inset line: "
-                    f"{divider}"
-                )
-                drag_handle_center = drag_handle_box["x"] + drag_handle_box["width"] / 2
-                workspace_icon_center = workspace_icon_box["x"] + workspace_icon_box["width"] / 2
-                assert abs(workspace_icon_center - drag_handle_center) <= _EPSILON, (
-                    "workspace icon and queued drag handles share the tray's icon "
-                    f"column: drag={drag_handle_center:.1f}, "
-                    f"workspace={workspace_icon_center:.1f}"
-                )
-                assert (
-                    abs(
-                        strip_list_box["x"]
-                        + strip_list_box["width"]
-                        - (bar_box["x"] + bar_box["width"] - bar_insets["right"])
-                    )
-                    <= _EPSILON
-                )
-                bar_bottom = bar_box["y"] + bar_box["height"]
-                covers_left = bar_box["x"] <= strip_box["x"] + _EPSILON
-                covers_right = (
-                    bar_box["x"] + bar_box["width"]
-                    >= strip_box["x"] + strip_box["width"] - _EPSILON
-                )
-                bridges_vertically = (
-                    bar_box["y"] <= strip_bottom + _EPSILON
-                    and bar_bottom >= card_box["y"] - _EPSILON
-                )
-                bridged = covers_left and covers_right and bridges_vertically
-
-        assert tucks_behind_card or bridged, (
-            "queued/steer strip floats detached above the composer: "
-            f"{gap:.1f}px of page background separates the strip's bottom edge "
-            f"(y={strip_bottom:.1f}) from the composer card's top "
-            f"(y={card_box['y']:.1f}) at the strip's outer edges, and no "
-            "composer surface as wide as the strip bridges the gap"
+        assert gap <= _EPSILON, (
+            f"Queued messages must dock directly onto the composer card; gap={gap:.1f}px"
         )
+        assert card_box["x"] <= strip_box["x"]
+        assert strip_box["x"] + strip_box["width"] <= card_box["x"] + card_box["width"]
+        assert page.locator(".composer-workspace-surface").count() == 0
     finally:
         context.close()

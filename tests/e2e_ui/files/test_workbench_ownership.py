@@ -298,6 +298,33 @@ def test_browser_manual_shell_keeps_workspace_owner_after_chat_deletion(
         assert stopped.status_code == 200, stopped.text
 
 
+def test_explorer_size_and_menu_share_space_on_hover_and_focus(
+    page: Page, ownership: Ownership
+) -> None:
+    panel = _open(page, ownership)
+    row = _entry(panel, _FILE)
+    size = row.locator("[data-file-size]")
+    actions = row.get_by_role("button", name=f"Actions for {_FILE}", exact=True)
+    page.mouse.move(0, 0)
+    expect(size).to_have_css("opacity", "1")
+    expect(actions).to_have_css("opacity", "0")
+    before = row.bounding_box()
+    row.hover()
+    expect(size).to_have_css("opacity", "0")
+    expect(actions).to_have_css("opacity", "1")
+    assert row.bounding_box() == before
+    actions.click()
+    expect(page.get_by_role("menuitem", name="Move to trash…", exact=True)).to_be_visible()
+    page.keyboard.press("Escape")
+    actions.evaluate("element => element.blur()")
+    page.mouse.move(0, 0)
+    expect(actions).to_have_css("opacity", "0")
+    actions.focus()
+    expect(actions).to_have_css("opacity", "1")
+    page.keyboard.press("Enter")
+    expect(page.get_by_role("menuitem", name="Copy", exact=True)).to_be_visible()
+
+
 def test_mobile_explorer_selection_is_explicit(page: Page, ownership: Ownership) -> None:
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{ownership.base}/c/{ownership.chats[0]}")
