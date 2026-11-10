@@ -126,6 +126,17 @@ Use `/home/agent/knowledge/infrastructure/omnigent/development-tasks.md` as the 
 Record new requests received during work immediately, including deferred discussions.
 Before completing a turn, reconcile every unchecked request with implementation and verification; report outstanding items explicitly.
 
+### Small implementation passes
+
+- Treat this thread as intake: record each request once with an ID, acceptance condition and state (queued, implementing, verifying, delivered or blocked); keep proposals separate from approved work.
+- Group related requests into the smallest independently useful pass; state its scope and next queue briefly, without requiring the owner to organize them.
+- Before delegating, identify existing components to reuse and define behavior, shared interfaces and focused checks.
+- Give each subagent a bounded task, explicit file ownership, acceptance checks and a concise handoff (files, results, risks); keep shared-file integration and delivery with the parent.
+- Run independent tasks in parallel when useful; avoid overlapping edits and duplicate checks.
+- Once a pass enters verification, queue new requests for the next pass unless they fix that pass or the owner explicitly prioritizes them.
+- Use focused tests during development, then one integrated verification and build per stable candidate; repeat affected checks after fixes, retain required hooks and activate only with authorization.
+- Before reporting completion, reconcile the backlog and record commit, checks and activation state; finish ready passes without waiting for unrelated work.
+
 ## Finishing a task
 
 When you finish a task, print instructions to the user on how to test it: the
