@@ -568,7 +568,7 @@ def test_forwarder_drops_codex_tool_item_missing_required_field(
     assert "Codex commandExecution missing command" in caplog.text
 
 
-def test_forwarder_posts_codex_image_view_tool_call() -> None:
+def test_forwarder_posts_codex_image_view_tool_call(tmp_path: Path) -> None:
     """
     A completed Codex ``imageView`` becomes a view_image tool card.
 
@@ -578,15 +578,26 @@ def test_forwarder_posts_codex_image_view_tool_call() -> None:
     datum is the path, so it is both the argument and the output (the web
     UI cannot fetch a runner-local path).
     """
+    source = tmp_path / "screenshot.png"
+    source.write_bytes(b"original image bytes")
     posted: list[dict[str, Any]] = []
+    uploads = []
+
+    def handle(request):
+        if request.url.path.endswith("/attachments"):
+            uploads.append(request)
+            assert source.read_bytes() in request.content
+            return httpx.Response(200, json={"id": "stored", "name": source.name})
+        return _capture_handler(posted)(request)
+
     asyncio.run(
         _replay_completed_item(
             {
                 "type": "imageView",
                 "id": "img_view_1",
-                "path": "/repo/screenshot.png",
+                "path": str(source),
             },
-            _capture_handler(posted),
+            handle,
         )
     )
 
@@ -598,7 +609,7 @@ def test_forwarder_posts_codex_image_view_tool_call() -> None:
                 "item_data": {
                     "agent": "codex-native-ui",
                     "name": "view_image",
-                    "arguments": '{"path": "/repo/screenshot.png"}',
+                    "arguments": json.dumps({"path": str(source)}),
                     "call_id": "img_view_1",
                 },
                 "response_id": "codex_turn_123",
@@ -611,13 +622,15 @@ def test_forwarder_posts_codex_image_view_tool_call() -> None:
                 "item_type": "function_call_output",
                 "item_data": {
                     "call_id": "img_view_1",
-                    "output": "/repo/screenshot.png",
+                    "output": str(source),
                 },
                 "response_id": "codex_turn_123",
                 "source_id": "thread_123:turn_123:img_view_1:output",
             },
         },
     ]
+
+    assert len(uploads) == 1
 
 
 def test_forwarder_posts_codex_image_generation_tool_call() -> None:
@@ -630,6 +643,14 @@ def test_forwarder_posts_codex_image_generation_tool_call() -> None:
     the argument and the status plus on-disk save path as the output.
     """
     posted: list[dict[str, Any]] = []
+    uploads = []
+
+    def handle(request):
+        if request.url.path.endswith("/attachments"):
+            uploads.append(request)
+            return httpx.Response(200, json={"id": "stored", "name": "out.png"})
+        return _capture_handler(posted)(request)
+
     asyncio.run(
         _replay_completed_item(
             {
@@ -640,7 +661,7 @@ def test_forwarder_posts_codex_image_generation_tool_call() -> None:
                 "result": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
                 "savedPath": "/repo/out.png",
             },
-            _capture_handler(posted),
+            handle,
         )
     )
 
@@ -657,6 +678,8 @@ def test_forwarder_posts_codex_image_generation_tool_call() -> None:
     output = posted[1]["data"]["item_data"]["output"]
     assert output == "status: completed\nsaved to /repo/out.png"
     assert "iVBORw0KGgo" not in output
+
+    assert len(uploads) == 1
 
 
 def test_forwarder_drops_codex_image_generation_missing_status(

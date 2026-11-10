@@ -241,6 +241,16 @@ def _strip_output_annotations(
     """
     result: list[dict[str, Any]] = []
     for block in content:
+        if block.get("type") in {"output_file", "output_image"}:
+            result.append(
+                {
+                    "type": "output_text",
+                    "text": "[Attached file: "
+                    + str(block.get("filename") or block.get("file_id") or "image")
+                    + "]",
+                }
+            )
+            continue
         if (
             isinstance(block, dict)
             and block.get("type") == "output_text"
@@ -411,7 +421,13 @@ def history_to_input_items(
             # Pass the raw provider dict through as-is. The
             # Responses API accepts its own output items
             # (e.g. web_search_call) as input items.
-            result.append(item.data.item)
+            result.append(
+                {
+                    key: value
+                    for key, value in item.data.item.items()
+                    if key != "omnigent_attachments"
+                }
+            )
 
         elif item.type == "reasoning":
             # reasoning items are not included in the LLM prompt

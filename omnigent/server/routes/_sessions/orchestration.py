@@ -9350,6 +9350,18 @@ async def _relay_runner_stream_once(
                             session_id,
                             conv_item,
                         )
+                        if evt_type == "response.output_item.done" and conv_item.stable_id:
+                            from omnigent.entities.conversation import NativeToolData
+
+                            if isinstance(conv_item.data, NativeToolData):
+                                wire = dict(conv_item.data.item)
+                                if wire.get("omnigent_attachments"):
+                                    wire.pop("result", None)
+                            else:
+                                wire = conv_item.data.model_dump(exclude_none=True, by_alias=True)
+                                wire["type"] = conv_item.type
+                            wire.update(id=conv_item.stable_id, response_id=conv_item.response_id)
+                            event["item"] = wire
 
                     # On ANY terminal event (not just completed), persist the
                     # final text segment: narration streamed before a failure /

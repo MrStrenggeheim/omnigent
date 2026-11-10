@@ -807,8 +807,23 @@ def resolve_content_references(
     result: list[ConversationItem] = []
     for item in items:
         if item.type == "message" and isinstance(item.data, MessageData):
+            content = item.data.content
+            if item.data.role == "assistant" and any(
+                block.get("type") in {"output_file", "output_image"} for block in content
+            ):
+                content = [
+                    {
+                        "type": "output_text",
+                        "text": "[Attached file: "
+                        + str(block.get("filename") or block.get("file_id") or "image")
+                        + "]",
+                    }
+                    if block.get("type") in {"output_file", "output_image"}
+                    else block
+                    for block in content
+                ]
             resolved_content = _resolve_message_content(
-                item.data.content,
+                content,
                 file_store,
                 artifact_store,
                 cache,
@@ -943,6 +958,14 @@ def _resolve_file_id_block(
             f"Referenced file '{file_id}' no longer exists — "
             f"it may have been deleted after the request was accepted"
         )
+    if (file_meta.source_metadata or {}).get("delivery") == "display":
+        return {
+            "type": "input_text",
+            "text": (
+                f"[Attached file: {file_meta.filename}; available for user preview/download. "
+                "This model input does not include its contents.]"
+            ),
+        }, None
     # Types requiring filesystem tools never reach a model as bytes (a native
     # harness reads them off disk instead), so inlining one here would send
     # a payload the provider can't interpret. Fail with an actionable error.
@@ -958,12 +981,23 @@ def _resolve_file_id_block(
     # Use cached base64 if available; otherwise fetch, encode, and cache.
     # Bytes live under blob_key (a fork copy shares the source's blob); the
     # cache stays keyed by file_id so distinct rows keep independent entries.
-    if cache is not None and file_id in cache:
+    original = bool((file_meta.source_metadata or {}).get("original"))
+    delivery_type = _resolve_content_type(file_meta.content_type, file_meta.filename)
+    delivery_source_dims = None
+    if cache is not None and file_id in cache and not original:
         encoded = cache[file_id]
     else:
         content_bytes = artifact_store.get(file_meta.blob_key or file_id)
+        if (
+            original
+            and delivery_type in _COMPRESSIBLE_IMAGE_MIMES
+            and image_needs_compression(len(content_bytes), delivery_type)
+        ):
+            content_bytes, delivery_type, delivery_source_dims = compress_image_attachment(
+                content_bytes, delivery_type
+            )
         encoded = base64.b64encode(content_bytes).decode("ascii")
-        if cache is not None:
+        if cache is not None and not original:
             cache[file_id] = encoded
 
     # Copy all fields except file_id, and any delivery the client claimed:
@@ -976,13 +1010,19 @@ def _resolve_file_id_block(
         # client-supplied and must not be able to relabel the file.
         resolved["filename"] = file_meta.filename
 
-    content_type = _resolve_content_type(file_meta.content_type, file_meta.filename)
+    content_type = delivery_type
 
     block_type = block.get("type")
     notice: dict[str, int] | None = None
     if block_type == "input_image":
         resolved["image_url"] = f"data:{content_type};base64,{encoded}"
-        notice = resize_dimensions(file_meta.source_metadata)
+        notice = (
+            resize_dimensions(
+                {"width": delivery_source_dims[0], "height": delivery_source_dims[1]}
+            )
+            if delivery_source_dims
+            else resize_dimensions(file_meta.source_metadata)
+        )
     else:
         # input_file and any future type: inline as file_data.
         # Uses a data: URI so providers (OpenAI, etc.) can parse

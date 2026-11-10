@@ -149,7 +149,12 @@ def _upload(resolved: Path, *, session_id: str | None) -> str:
 
     filename = resolved.name
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    data = resolved.read_bytes()
+    from omnigent.native.attachment_upload import read_attachment
+
+    try:
+        data = read_attachment(resolved)
+    except (OSError, ValueError) as exc:
+        return f"Error: could not attach file: {exc}"
 
     file_record = file_store.create(
         filename=filename,
@@ -159,12 +164,17 @@ def _upload(resolved: Path, *, session_id: str | None) -> str:
     )
     # Key must match the file content endpoint, which reads via
     # artifact_store.get(stored.id).
-    artifact_store.put(file_record.id, data)
+    try:
+        artifact_store.put(file_record.id, data)
+    except Exception:
+        file_store.delete(file_record.id, session_id=session_id)
+        raise
 
     return json.dumps(
         {
             "file_id": file_record.id,
             "filename": filename,
             "content_type": content_type,
+            "url": f"/v1/sessions/{session_id}/resources/files/{file_record.id}/content",
         }
     )

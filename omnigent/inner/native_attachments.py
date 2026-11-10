@@ -122,6 +122,7 @@ CAP_FILESYSTEM_ATTACHMENT_DELIVERY = "filesystem_attachment_delivery"
 DELIVERY_KEY = "delivery"
 FILESYSTEM_DELIVERY = "filesystem"
 INLINE_DELIVERY = "inline"
+DISPLAY_DELIVERY = "display"
 
 
 @dataclass(frozen=True)
@@ -170,7 +171,7 @@ def uses_filesystem_delivery(filename: str | None, metadata: object) -> bool:
     :returns: True when the harness must open the file from disk.
     """
     delivery = metadata.get(DELIVERY_KEY) if isinstance(metadata, Mapping) else None
-    if delivery in (FILESYSTEM_DELIVERY, INLINE_DELIVERY):
+    if delivery in (FILESYSTEM_DELIVERY, INLINE_DELIVERY, DISPLAY_DELIVERY):
         return delivery == FILESYSTEM_DELIVERY
     return requires_filesystem(filename)
 
@@ -781,7 +782,7 @@ async def resolve_file_id_block(
         else None
     )
     delivery = source_metadata.get(DELIVERY_KEY) if isinstance(source_metadata, Mapping) else None
-    if delivery in (FILESYSTEM_DELIVERY, INLINE_DELIVERY):
+    if delivery in (FILESYSTEM_DELIVERY, INLINE_DELIVERY, DISPLAY_DELIVERY):
         new_block[DELIVERY_KEY] = delivery
     notice: dict[str, int] | None = None
     if block.get("type") == "input_image":

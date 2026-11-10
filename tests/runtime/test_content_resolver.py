@@ -1892,3 +1892,19 @@ def test_skips_foreign_session_file() -> None:
     content = [{"type": "input_file", "file_id": "file_csv"}]
     out = extract_text_attachments(content, fs, arts, session_id="mine")  # type: ignore[arg-type]
     assert out == []
+
+
+def test_browser_output_attachments_remain_text_in_model_history(file_store, artifact_store):
+    item = _make_conversation_item(
+        [
+            {"type": "output_text", "text": "Here is the report"},
+            {"type": "output_file", "file_id": "not-a-model-input", "filename": "report.zip"},
+        ],
+        role="assistant",
+    )
+    result = resolve_content_references([item], file_store, artifact_store)
+    assert result[0].data.content == [
+        {"type": "output_text", "text": "Here is the report"},
+        {"type": "output_text", "text": "[Attached file: report.zip]"},
+    ]
+    assert item.data.content[1]["file_id"] == "not-a-model-input"

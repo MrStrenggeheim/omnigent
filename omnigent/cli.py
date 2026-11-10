@@ -14591,6 +14591,54 @@ def _run_harness_shorthand(harness: str, run_args: tuple[str, ...]) -> None:
     )
 
 
+@cli.command("attach-file")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "--session",
+    "session_id",
+    envvar="OMNIGENT_SESSION_ID",
+    required=True,
+    help="Chat receiving the attachment; defaults to the native agent's chat.",
+)
+@click.option("--server", envvar="OMNIGENT_SERVER_URL", default=None)
+def attach_file_command(path: Path, session_id: str, server: str | None) -> None:
+    """Attach a local file to a chat, preserving its original bytes."""
+    from urllib.parse import quote
+
+    import httpx
+
+    from omnigent.chat import _remote_headers
+    from omnigent.native.attachment_upload import read_attachment
+
+    configured = _load_effective_config().get("server")
+    base_url = server or configured or "http://127.0.0.1:6767"
+    try:
+        content = read_attachment(path)
+        with httpx.Client(
+            base_url=base_url,
+            headers=_remote_headers(server_url=base_url, host_id=None),
+            timeout=120,
+            trust_env=_trust_env_for(base_url),
+        ) as client:
+            response = client.post(
+                f"/v1/sessions/{quote(session_id, safe='')}/attachments",
+                files={"file": (path.name, content)},
+            )
+            response.raise_for_status()
+            resource = response.json()
+    except (OSError, ValueError, httpx.HTTPError) as exc:
+        raise click.ClickException(f"Could not attach file: {exc}") from exc
+    click.echo(
+        json.dumps(
+            {
+                "file_id": resource["id"],
+                "filename": resource["name"],
+                "url": f"/v1/sessions/{session_id}/resources/files/{resource['id']}/content",
+            }
+        )
+    )
+
+
 # Native coding-agent (TUI) subcommands (claude/codex/pi/…) live in
 # omnigent.cli_native; register them on the group here, at module bottom, so the
 # shared launch helpers their bodies close over are already defined.

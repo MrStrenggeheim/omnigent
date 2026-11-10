@@ -886,6 +886,7 @@ def _stored_file_to_resource(
         "metadata": {
             "filename": stored.filename,
             "bytes": stored.bytes,
+            "content_type": stored.content_type,
             "created_at": stored.created_at,
             "source_metadata": stored.source_metadata,
         },
@@ -8237,12 +8238,38 @@ def _extract_persistent_item_from_sse(
             data=data,
         )
 
+    if evt_type == "response.output_file.done" and isinstance(event.get("file_id"), str):
+        from omnigent.entities.conversation import MessageData
+
+        return NewConversationItem(
+            type="message",
+            response_id=response_id or uuid.uuid4().hex,
+            data=MessageData(
+                role="assistant",
+                agent="agent",
+                content=[
+                    {
+                        "type": "output_file",
+                        "file_id": event["file_id"],
+                        "filename": event.get("filename"),
+                    }
+                ],
+            ),
+        )
     if evt_type != "response.output_item.done":
         return None
     item = event.get("item")
     if not isinstance(item, dict):
         return None
     item_type = item.get("type")
+    if item_type == "image_generation_call":
+        from omnigent.entities.conversation import NativeToolData
+
+        return NewConversationItem(
+            type="native_tool",
+            response_id=response_id or uuid.uuid4().hex,
+            data=NativeToolData(item=item),
+        )
     if item_type not in ("message", "function_call", "function_call_output"):
         return None
     # Skip transient observed function_call events (status
@@ -8547,11 +8574,15 @@ async def _relay_persist(
     if conversation_store is None:
         return
     try:
-        await asyncio.to_thread(
+        persisted = await asyncio.to_thread(
             conversation_store.append,
             session_id,
             [item],
         )
+        if persisted:
+            # The live frame must address the same stored item and attachment bytes as reload.
+            item.stable_id = persisted[0].id
+            item.data = persisted[0].data
     except Exception:  # noqa: BLE001
         _logger.exception(
             "Relay persist failed for session=%s",

@@ -150,10 +150,15 @@ class HostWorkspaceResources:
         )
         return {"object": "file_write", "path": path, "bytes_written": len(data)}
 
-    async def download_file(self, path: str) -> StreamingResponse:
+    async def download_file(self, path: str, *, max_bytes: int | None = None) -> StreamingResponse:
         """Stream checked raw chunks without the JSON read cap or archive size limit."""
         begun = await self.filesystem_operation({"operation": "download_begin", "paths": [path]})
         download_id = begun["download_id"]
+        if max_bytes is not None and begun["size"] > max_bytes:
+            await self.filesystem_operation(
+                {"operation": "download_cancel", "paths": [path], "download_id": download_id}
+            )
+            raise HTTPException(413, "Attachment exceeds 50 MB; download it from Files")
 
         async def chunks():
             offset = 0

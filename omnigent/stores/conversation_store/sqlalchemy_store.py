@@ -795,6 +795,32 @@ def _remap_item_file_references(
             if isinstance(block_file_id, str) and block_file_id in file_id_map:
                 block["file_id"] = file_id_map[block_file_id]
                 changed = True
+    native = item_data.get("item")
+    if isinstance(native, dict) and isinstance(native.get("omnigent_attachments"), list):
+        changed = (
+            _remap_item_file_references(
+                {"content": native["omnigent_attachments"]}, file_id_map, fork_conversation_id
+            )
+            or changed
+        )
+    output = item_data.get("output")
+    if isinstance(output, str):
+        try:
+            record = json.loads(output)
+        except ValueError:
+            record = None
+        if (
+            isinstance(record, dict)
+            and isinstance(record.get("file_id"), str)
+            and record["file_id"] in file_id_map
+        ):
+            record["file_id"] = file_id_map[record["file_id"]]
+            if "url" in record:
+                record["url"] = (
+                    f"/v1/sessions/{fork_conversation_id}/resources/files/{record['file_id']}/content"
+                )
+            item_data["output"] = json.dumps(record)
+            changed = True
     if item_data.get("resource_type") == "file":
         resource_id = item_data.get("resource_id")
         if isinstance(resource_id, str) and resource_id in file_id_map:
@@ -2540,6 +2566,43 @@ class SqlAlchemyConversationStore(ConversationStore):
             with store-assigned IDs and timestamps.
         """
         now = now_epoch()
+        from omnigent.entities.conversation import MessageData
+        from omnigent.stores.host_store import HostStore
+
+        if any(isinstance(item.data, MessageData) for item in items):
+            conversation = self.get_conversation(conversation_id)
+            if conversation is not None:
+                host = (
+                    HostStore(self.storage_location).get_host(conversation.host_id)
+                    if conversation.host_id
+                    else None
+                )
+                scope = {
+                    "host_id": conversation.host_id,
+                    "workspace": conversation.workspace,
+                    "runner_id": conversation.runner_id,
+                    "generation": (
+                        host.sandbox_id
+                        if host.sandbox_provider
+                        else f"{host.created_at}:{host.account_generation or 'external'}"
+                    )
+                    if host
+                    else None,
+                }
+                if not conversation.workspace:
+                    scope = None
+                items = [
+                    item.model_copy(
+                        update={"data": item.data.model_copy(update={"resource_scope": scope})}
+                    )
+                    if isinstance(item.data, MessageData)
+                    else item
+                    for item in items
+                ]
+
+        from omnigent.runtime.chat_attachments import persist_generated_outputs
+
+        items = persist_generated_outputs(conversation_id, items)
 
         # Encode every item payload up front, in one batch, BEFORE opening the
         # write transaction. The transform depends only on item data, not on any

@@ -1963,10 +1963,20 @@ def register_resources_routes(
         :param file: The uploaded file (multipart form data).
         :returns: The session file resource object.
         """
-        return await _store_session_file(request, session_id, file)
+        return await _store_session_file(
+            request,
+            session_id,
+            file,
+            presentation=request.query_params.get("presentation") == "true",
+        )
 
     async def _store_session_file(
-        request: Request, session_id: str, file: UploadFile, *, initial_input: bool = False
+        request: Request,
+        session_id: str,
+        file: UploadFile,
+        *,
+        initial_input: bool = False,
+        presentation: bool = False,
     ) -> dict[str, Any]:
         conv = await _validate_session(session_id, request, LEVEL_EDIT)
         if file_store is None or artifact_store is None:
@@ -2012,7 +2022,18 @@ def register_resources_routes(
             # Drop the declared type so the file is never stored as text, even
             # when the policy leaves its extension out.
             content_type = _resolve_content_type("application/octet-stream", file.filename)
-        if filesystem_required:
+        if not filesystem_required and attachment_upload_limit(content_type) is None:
+            content_type = attachment_text_type_for_extension(file.filename) or content_type
+        presentation_filesystem = False
+        presentation_filesystem_limit = MAX_ATTACHMENT_UPLOAD_BYTES
+        if filesystem_required and presentation:
+            try:
+                await _require_filesystem_attachment_harness(conv, file.filename)
+                presentation_filesystem = True
+            except HTTPException as exc:
+                if exc.status_code != 415:
+                    raise
+        if filesystem_required and not presentation:
             if initial_input:
                 # The host does not exist yet; dispatch validates its runtime after provisioning.
                 await _require_filesystem_attachment_harness(conv, file.filename)
@@ -2027,11 +2048,22 @@ def register_resources_routes(
         # all spend the same remaining allowance.
         attachment_lock = (
             _attachment_upload_lock(session_id)
-            if filesystem_required
+            if filesystem_required or presentation
             else contextlib.nullcontext()
         )
         async with attachment_lock:
-            if filesystem_required:
+            if presentation:
+                if presentation_filesystem:
+                    try:
+                        presentation_filesystem_limit = _enforce_filesystem_attachment_policy(
+                            [file.filename], session_id=session_id, file_store=file_store
+                        )
+                    except HTTPException as exc:
+                        if exc.status_code != 413:
+                            raise
+                        presentation_filesystem = False
+                read_limit = MAX_ATTACHMENT_UPLOAD_BYTES
+            elif filesystem_required:
                 read_limit = _enforce_filesystem_attachment_policy(
                     [file.filename],
                     session_id=session_id,
@@ -2058,7 +2090,11 @@ def register_resources_routes(
             # Persist original dimensions only after a downscale.
             source_dims: tuple[int, int] | None = None
             # An image delivered as a file keeps its original bytes.
-            if content_type in _COMPRESSIBLE_IMAGE_MIMES and not filesystem_required:
+            if (
+                content_type in _COMPRESSIBLE_IMAGE_MIMES
+                and not filesystem_required
+                and not presentation
+            ):
                 # Compressible images carry the large cap and the decode, so they are
                 # the server's peak upload memory. The body is already spooled to
                 # disk by the multipart parser, so gate the in-memory read + the
@@ -2093,7 +2129,39 @@ def register_resources_routes(
             # Record the decision so delivery doesn't change if the policy does.
             if filesystem_required:
                 source_metadata = {DELIVERY_KEY: FILESYSTEM_DELIVERY}
+            if presentation:
+                if len(content) > presentation_filesystem_limit:
+                    presentation_filesystem = False
+                source_metadata = {"original": True}
+                if presentation_filesystem:
+                    source_metadata[DELIVERY_KEY] = FILESYSTEM_DELIVERY
+                elif (
+                    filesystem_required
+                    or attachment_upload_limit(content_type) is None
+                    or content_type == "image/svg+xml"
+                    or (
+                        content_type not in _COMPRESSIBLE_IMAGE_MIMES
+                        and len(content)
+                        > (attachment_upload_limit(content_type) or MAX_ATTACHMENT_UPLOAD_BYTES)
+                    )
+                ):
+                    source_metadata["delivery"] = "display"
+            import hashlib
+
+            key = request.headers.get("idempotency-key") if presentation else None
+            stable_file_id = (
+                hashlib.sha256(session_id.encode() + (key or "").encode() + content).hexdigest()[
+                    :32
+                ]
+                if key
+                else None
+            )
+            if stable_file_id:
+                existing = file_store.get(stable_file_id, session_id=session_id)
+                if existing is not None:
+                    return _stored_file_to_resource(session_id, existing)
             stored = file_store.create(
+                file_id=stable_file_id,
                 session_id=session_id,
                 filename=filename,
                 bytes=len(content),
@@ -2137,10 +2205,44 @@ def register_resources_routes(
         )
         return resource
 
+    @router.post(
+        "/sessions/{session_id}/attachments", dependencies=[Depends(require_trusted_origin)]
+    )
+    async def attach_generated_file(
+        request: Request, session_id: str, file: Annotated[UploadFile, File(...)]
+    ) -> dict[str, Any]:
+        from omnigent.entities.conversation import MessageData, NewConversationItem
+        from omnigent.server.routes._sessions.helpers import _publish_external_conversation_item
+
+        resource = await _store_session_file(request, session_id, file, presentation=True)
+        conv = await _validate_session(session_id, request, LEVEL_EDIT)
+        message = NewConversationItem(
+            type="message",
+            response_id="attachment-" + resource["id"],
+            stable_id=resource["id"],
+            data=MessageData(
+                role="assistant",
+                agent=conv.agent_id or "agent",
+                content=[
+                    {
+                        "type": "output_file",
+                        "file_id": resource["id"],
+                        "filename": resource["name"],
+                    }
+                ],
+            ),
+        )
+        persisted = await asyncio.to_thread(conversation_store.append, session_id, [message])
+        if not persisted[0].deduplicated:
+            _publish_external_conversation_item(session_id, persisted[0])
+        return resource
+
     async def _upload_initial_file(
         request: Request, session_id: str, file: UploadFile
     ) -> dict[str, Any]:
-        return await _store_session_file(request, session_id, file, initial_input=True)
+        return await _store_session_file(
+            request, session_id, file, initial_input=True, presentation=True
+        )
 
     if register_initial_file_upload is not None:
         register_initial_file_upload(_upload_initial_file)
@@ -2225,7 +2327,11 @@ def register_resources_routes(
                 },
             )
         content = await asyncio.to_thread(artifact_store.get, blob_key)
-        media_type = mimetypes.guess_type(stored.filename)[0] or "application/octet-stream"
+        media_type = (
+            stored.content_type
+            or mimetypes.guess_type(stored.filename)[0]
+            or "application/octet-stream"
+        )
         # The filename and bytes are fully user-controlled. Serving the
         # content inline lets a browser navigating directly to this URL
         # render an uploaded ``evil.html`` as ``text/html`` and execute

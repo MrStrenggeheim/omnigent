@@ -4558,6 +4558,12 @@ def create_app(
         permission_store=permission_store,
     )
     app.state.workbench_workspace_service = workbench_workspace_service
+    from omnigent.server.routes.chat_attachments import create_chat_attachments_router
+
+    app.include_router(
+        create_chat_attachments_router(workbench_workspace_service, artifact_store),
+        prefix="/v1",
+    )
     from omnigent.server.routes.session_workspace import create_session_workspace_router
     from omnigent.server.workspace_transition import WorkspaceTransitionService
 

@@ -138,7 +138,12 @@ class WorkbenchWorkspaceService:
         )
 
     async def resolve_session(
-        self, request: Request, session_id: str, *, allow_missing_root: bool = False
+        self,
+        request: Request,
+        session_id: str,
+        *,
+        allow_missing_root: bool = False,
+        captured: dict[str, Any] | None = None,
     ) -> WorkbenchWorkspace:
         user_id = require_user(request, self.auth_provider)
         await require_access(
@@ -147,6 +152,16 @@ class WorkbenchWorkspaceService:
         conv = await asyncio.to_thread(self.conversation_store.get_conversation, session_id)
         if conv is None:
             raise HTTPException(404, "Session not found")
+        if captured is not None:
+            from dataclasses import replace
+
+            conv = replace(
+                conv,
+                host_id=captured.get("host_id"),
+                workspace=captured.get("workspace"),
+                runner_id=captured.get("runner_id"),
+                workspace_transition=None,
+            )
         if conv.workspace_transition and conv.workspace_transition.get("blocked"):
             raise HTTPException(
                 409, "Workspace change in progress; finish or recover it before opening files"

@@ -316,6 +316,7 @@ class MessageData(BaseModel):
     :param subagent_return_id: Native task id of an explicitly completed child.
     """
 
+    resource_scope: dict[str, Any] | None = None
     role: Literal["user", "assistant"]
     # Heterogeneous content blocks (input_text, output_text, input_image, etc.)
     content: list[dict[str, Any]]
