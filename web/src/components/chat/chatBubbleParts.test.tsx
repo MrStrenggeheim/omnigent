@@ -85,7 +85,7 @@ it("places explicit user attachments after the message text", async () => {
   const text = screen.getByText("Review these notes.");
   const attachment = screen.getByTestId("chat-attachment");
   expect(text.compareDocumentPosition(attachment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(await screen.findByText("text/plain · 12 B")).toBeInTheDocument();
+  await waitFor(() => expect(attachment).toHaveTextContent("text/plain · 12 B"));
   expect(screen.getByRole("button", { name: "Download notes.txt" })).toBeEnabled();
 });
 

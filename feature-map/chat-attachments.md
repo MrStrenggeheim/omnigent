@@ -5,6 +5,7 @@ Generated attachments keep their original bytes; workspace references use their 
 
 ## Sub-features
 
+- `responsive-footer`: wide media cards put filename, metadata and original download on one row; narrow cards retain two rows without horizontal overflow.
 - `uploads`: the composer accepts ordinary files up to 50 MB independently of model interpretation; supported native filesystem delivery remains available within its quotas.
 - `images`: raster images and SVG render in image elements, open in the shared lightbox and download as originals.
 - `documents`: PDF uses the existing PDF viewer; Markdown uses the existing rendered preview; source code and structured text use bounded highlighted or plain text.

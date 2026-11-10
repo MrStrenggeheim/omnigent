@@ -191,18 +191,19 @@ export function ChatAttachment({
   const details = [
     reference && !storedReference ? reference : null,
     detectLang(filename) === "markdown" ? "Markdown" : mime,
-    metadata.data || content.data
-      ? formatBytes(content.data?.size ?? metadata.data!.metadata.bytes)
-      : null,
   ]
     .filter(Boolean)
     .join(" · ");
+  const size =
+    metadata.data || content.data
+      ? formatBytes(content.data?.size ?? metadata.data!.metadata.bytes)
+      : null;
   return (
     <span
       className={
         compact
           ? "not-prose inline"
-          : "not-prose my-2 flex w-[398px] max-w-full flex-col gap-2 rounded-lg border border-border bg-background p-3"
+          : "not-prose @container/attachment my-2 flex w-[640px] min-w-0 max-w-full flex-col gap-2 rounded-lg border border-border bg-background p-3"
       }
       data-testid="chat-attachment"
     >
@@ -230,12 +231,12 @@ export function ChatAttachment({
               className="size-5"
             />
           </span>
-          <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 flex-1 flex-col gap-1 @min-[30rem]/attachment:flex-row @min-[30rem]/attachment:items-center @min-[30rem]/attachment:gap-3">
             <Tooltip>
               <TooltipTrigger asChild>
                 <TooltipButton
                   type="button"
-                  className="block max-w-full truncate text-left text-sm font-semibold hover:text-link focus-visible:outline-ring"
+                  className="block max-w-full truncate text-left text-sm font-semibold hover:text-link focus-visible:outline-ring @min-[30rem]/attachment:max-w-1/2"
                   onClick={() => setOpen(true)}
                 >
                   {filename}
@@ -243,7 +244,10 @@ export function ChatAttachment({
               </TooltipTrigger>
               <TooltipContent className="break-all">{reference ?? filenameHint}</TooltipContent>
             </Tooltip>
-            <span className="mt-1 block truncate text-xs text-muted-foreground">{details}</span>
+            <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground @min-[30rem]/attachment:ml-auto @min-[30rem]/attachment:max-w-1/2">
+              <span className="truncate">{details}</span>
+              {size && <span className="shrink-0">{` · ${size}`}</span>}
+            </span>
           </span>
           <span className="flex shrink-0 items-center gap-0.5">
             <Tooltip>

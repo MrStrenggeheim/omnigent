@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ChatAttachment } from "./ChatAttachment";
@@ -98,7 +98,8 @@ it("keeps local references filename-only and fetches their captured message only
 
 it("shows a compact metadata row with working overflow preview and original download", async () => {
   mount("report.pdf", "application/pdf", "original-pdf");
-  expect(await screen.findByText("application/pdf · 12 B")).toBeInTheDocument();
+  expect(await screen.findByText("· 12 B")).toBeInTheDocument();
+  expect(screen.getByText("application/pdf")).toBeInTheDocument();
   expect(
     screen.getByTestId("chat-attachment").querySelector("svg[data-file-type]"),
   ).toHaveAttribute("data-file-type", "pdf");
@@ -109,6 +110,30 @@ it("shows a compact metadata row with working overflow preview and original down
   expect(await screen.findByText("PDF document preview")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Download report.pdf" }));
   await waitFor(() => expect(mocks.download).toHaveBeenCalledWith(expect.any(Blob), "report.pdf"));
+});
+
+it("keeps path and size beside one set of footer controls for a long reference", async () => {
+  const reference = `/original/workspace/${"nested-directory/".repeat(12)}report.txt`;
+  const content = "Original reference bytes";
+  mount("report.txt", "text/plain", content, {
+    attachment: undefined,
+    reference,
+    itemId: "source/item",
+  });
+  expect(screen.getByText(`${reference} · TXT`)).toBeInTheDocument();
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "report.txt" }));
+  await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent(content));
+  const card = screen.getByTestId("chat-attachment");
+  expect(card).toHaveTextContent(`${reference} · text/plain · ${content.length} B`);
+  await userEvent.setup().keyboard("{Escape}");
+  fireEvent.click(within(card).getByRole("button", { name: "Download report.txt" }));
+  await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+  expect(await mocks.download.mock.calls[0][0].text()).toBe(content);
+  expect(mocks.fetch).toHaveBeenCalledWith(
+    `/v1/sessions/original-chat/attachments/references/source%2Fitem?${new URLSearchParams({ path: reference })}`,
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
 });
 
 it.each([

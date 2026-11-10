@@ -50,7 +50,7 @@ def _say(ownership: Ownership, text: str):
 
 @pytest.mark.parametrize("mobile", [False, True], ids=["desktop", "phone"])
 def test_chat_attachments_preview_download_and_persist(
-    page: Page, ownership: Ownership, tmp_path: Path, mobile: bool
+    page: Page, ownership: Ownership, tmp_path: Path, mobile: bool, output_path: str
 ):
     chat = ownership.chats[0]
     source = tmp_path / "generated ü.png"
@@ -118,8 +118,32 @@ def test_chat_attachments_preview_download_and_persist(
         page.set_viewport_size({"width": 390, "height": 844})
         page.keyboard.press("ControlOrMeta+b")
         page.keyboard.press("ControlOrMeta+i")
+    else:
+        page.keyboard.press("ControlOrMeta+i")
     image = page.get_by_role("img", name="generated ü.png", exact=True)
     expect(image).to_be_visible(timeout=30000)
+    card = page.get_by_test_id("chat-attachment").filter(has=image)
+    name = card.get_by_role("button", name="generated ü.png", exact=True)
+    details = card.locator(".text-xs").first
+    bounds = card.bounding_box()
+    name_bounds = name.bounding_box()
+    details_bounds = details.bounding_box()
+    assert bounds and name_bounds and details_bounds
+    if mobile:
+        assert bounds["width"] < 480
+        assert details_bounds["y"] > name_bounds["y"]
+    else:
+        assert bounds["width"] >= 480
+        assert (
+            abs(
+                name_bounds["y"]
+                + name_bounds["height"] / 2
+                - details_bounds["y"]
+                - details_bounds["height"] / 2
+            )
+            < 1
+        )
+    page.screenshot(path=str(Path(output_path) / "attachment-footer.png"), animations="disabled")
     page.get_by_role("button", name="Zoom image: generated ü.png", exact=True).click()
     expect(page.get_by_role("dialog")).to_be_visible()
     page.keyboard.press("Escape")
