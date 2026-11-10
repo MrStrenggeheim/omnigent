@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { usePanelEscapeClose } from "./usePanelEscapeClose";
@@ -39,5 +40,47 @@ it("ignores an already consumed Escape and removes the listener when closed", ()
   expect(close).not.toHaveBeenCalled();
   view.rerender(<Panel close={close} open={false} />);
   fireEvent.keyDown(window, { key: "Escape" });
+  expect(close).not.toHaveBeenCalled();
+});
+
+function ScopedPanel({ close }: { close: () => void }) {
+  const scope = useRef<HTMLDivElement>(null);
+  usePanelEscapeClose(true, close, { scope, capture: true });
+  return (
+    <>
+      <div ref={scope}>
+        <input aria-label="Scoped query" />
+      </div>
+      <input aria-label="Outside" />
+    </>
+  );
+}
+it("closes only the owning scope before a read-only tooltip can consume Escape", () => {
+  const close = vi.fn();
+  const tooltipLayer = vi.fn((event: KeyboardEvent) => event.preventDefault());
+  document.addEventListener("keydown", tooltipLayer);
+  try {
+    const view = render(<ScopedPanel close={close} />);
+    fireEvent.keyDown(view.getByRole("textbox", { name: "Scoped query" }), { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
+    expect(tooltipLayer).not.toHaveBeenCalled();
+    fireEvent.keyDown(view.getByRole("textbox", { name: "Outside" }), { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
+    expect(tooltipLayer).toHaveBeenCalledOnce();
+  } finally {
+    document.removeEventListener("keydown", tooltipLayer);
+  }
+});
+it("leaves nested menus in a search scope to their own Escape handler", () => {
+  const close = vi.fn();
+  const view = render(
+    <>
+      <ScopedPanel close={close} />
+      <div role="menu" data-state="open">
+        <button type="button">Nested action</button>
+      </div>
+    </>,
+  );
+  fireEvent.keyDown(view.getByRole("button", { name: "Nested action" }), { key: "Escape" });
   expect(close).not.toHaveBeenCalled();
 });

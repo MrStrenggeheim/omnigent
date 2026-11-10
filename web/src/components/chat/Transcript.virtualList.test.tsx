@@ -2,6 +2,7 @@ import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Bubble } from "@/lib/renderItems";
+import { useChatStore } from "@/store/chatStore";
 import { Conversation, ConversationContent } from "@/components/ai-elements/conversation";
 import { isNativeFindShortcut, type TranscriptGeometry, VirtualBubbleList } from "./Transcript";
 
@@ -189,6 +190,38 @@ it("renders every bubble in normal flow after native find is detected", () => {
 
   expect(view.container.querySelector('[data-index="0"]')).toBeNull();
   expect(view.container.querySelectorAll('[data-testid="message-bubble"]')).toHaveLength(1);
+});
+
+it("keeps the found position when search navigation closes", () => {
+  useChatStore.setState({ conversationId: "search-close-location" });
+  const scrollEl = document.createElement("div");
+  Object.defineProperties(scrollEl, {
+    scrollTop: { configurable: true, writable: true, value: 333 },
+    clientHeight: { configurable: true, value: 500 },
+    scrollHeight: { configurable: true, value: 2000 },
+  });
+  const view = (messageId: string | null) => (
+    <Conversation>
+      <ConversationContent>
+        <VirtualBubbleList
+          bubbles={[bubble]}
+          scrollEl={scrollEl}
+          lastAssistantIndex={-1}
+          showsWorking={false}
+          sessionIdle
+          conversationId="search-close-location"
+          hasTasks={false}
+          disableVirtualization={false}
+          messageId={messageId}
+          onGeometryChange={vi.fn()}
+        />
+      </ConversationContent>
+    </Conversation>
+  );
+  const rendered = render(view("user-1"));
+  scrollEl.scrollTop = 444;
+  rendered.rerender(view(null));
+  expect(scrollEl.scrollTop).toBe(444);
 });
 
 it("keeps actions visible only on a final assistant message while idle", () => {

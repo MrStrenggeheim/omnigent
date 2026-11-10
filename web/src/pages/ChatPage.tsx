@@ -199,6 +199,7 @@ import {
   useSessionLiveness,
 } from "@/hooks/useSessionLiveness";
 import { useMessageDeepLinkChatView } from "@/hooks/useMessageDeepLink";
+import { useContextSearch } from "@/shell/ContextSearchContext";
 import { useMarkConversationSeen } from "@/hooks/useUnseenConversations";
 import { useFileDropTarget } from "@/hooks/useFileDropTarget";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
@@ -1570,6 +1571,17 @@ const MainAgentSurface = memo(function MainAgentSurfaceImpl({
   // remains below it for offline sessions.
   const showTerminal = shouldShowTerminalSurface(conversationId, terminalFirst, runnerOnline);
   useMessageDeepLinkChatView(conversationId);
+  const contextSearch = useContextSearch();
+  const searchTarget = contextSearch?.highlightTarget;
+  const appliedSearchRequest = useRef<string | null>(null);
+  useEffect(() => {
+    if (!searchTarget || searchTarget.conversationId !== conversationId) return;
+    const key = `${conversationId}:${searchTarget.requestId}:${searchTarget.itemId}:${searchTarget.range.start}`;
+    if (appliedSearchRequest.current === key) return;
+    appliedSearchRequest.current = key;
+    if (terminalFirst?.isTerminalFirst && terminalFirst.view === "terminal")
+      terminalFirst.setView("chat");
+  }, [conversationId, searchTarget, terminalFirst]);
 
   // All hook calls below must run on every render regardless of
   // `showTerminal` — Rules of Hooks. The single return at the bottom

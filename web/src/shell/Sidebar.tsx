@@ -1,3 +1,5 @@
+import { useContextSearch } from "./ContextSearchContext";
+import { ContextSearchSidebar } from "./ContextSearchSidebar";
 import { filterSessionScope } from "@/lib/sessionVisibility";
 import { useGridSessions } from "@/grid/GridSessionsContext";
 import { GridSidebar } from "@/grid/GridWorkspace";
@@ -476,10 +478,8 @@ interface SidebarProps {
    */
   dragProgress?: number | null;
   /**
-   * Open the global command palette (⌘K). The sidebar's "Search" button routes
-   * here rather than filtering inline: session search (title + chat content)
-   * lives in the palette, which the box now doubles as an entry point for.
-   * Optional (defaults to a no-op) so the sidebar renders standalone in tests.
+   * Open integrated chat Search with All chats initially selected.
+   * Optional so the sidebar can render standalone.
    */
   onOpenSearch?: () => void;
   /**
@@ -692,6 +692,7 @@ function SidebarImpl({
   onOpenSearch,
   peek,
 }: SidebarProps) {
+  const contextSearch = useContextSearch();
   const mobileViewport = useIsMobileViewport();
   const sidebarData = useSidebarData();
   const branding = useBranding();
@@ -1030,6 +1031,7 @@ function SidebarImpl({
           document.body,
         )}
       <aside
+        data-context-search-region="sidebar"
         aria-label="Conversations"
         onAnimationEnd={(event) => {
           if (event.target === event.currentTarget) setPeekInteractive(true);
@@ -1132,7 +1134,7 @@ function SidebarImpl({
             className="absolute inset-y-0 right-0 z-10 hidden w-1 cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/50 md:block"
           />
         )}
-        {inSettings ? (
+        {inSettings && !contextSearch?.open ? (
           <SettingsSidebarBody onNavClick={onNavClick} />
         ) : (
           <>
@@ -1184,138 +1186,90 @@ function SidebarImpl({
               />
             </div>
 
-            <div className="flex flex-col gap-px px-2 pt-2 pb-0" data-testid="sidebar-primary-nav">
-              {/* "New session" routes to the home composer ("/"), which now owns
+            <ContextSearchSidebar />
+            <div
+              className={cn("min-h-0 flex-1 flex-col", contextSearch?.open ? "hidden" : "flex")}
+              inert={contextSearch?.open || undefined}
+              aria-hidden={contextSearch?.open || undefined}
+            >
+              <div
+                className="flex flex-col gap-px px-2 pt-2 pb-0"
+                data-testid="sidebar-primary-nav"
+              >
+                {/* "New session" routes to the home composer ("/"), which now owns
             session creation end-to-end (host/workspace/worktree chips +
             send). Rendered as a Link so cmd/middle-click opens it in a new
             tab; onNavClick still closes the sidebar on a plain mobile tap. */}
-              <Button
-                asChild
-                className={cn(
-                  // px-2 + gap-2 puts the icon on the sidebar's left (red) column
-                  // and the label on the label (blue) column — matching section
-                  // headers and project folders. border-0 drops the Button base's
-                  // transparent 1px border so the icon lands exactly on that
-                  // column, flush with the Inbox row and folder rows.
-                  SIDEBAR_ROW,
-                  "group/new-session w-full justify-start border-0 font-normal",
-                  SIDEBAR_HOVER_HIGHLIGHT,
-                  isNewChatPage && SIDEBAR_ACTIVE_HIGHLIGHT,
-                )}
-                variant="ghost"
-                data-testid="new-chat-button"
-              >
-                {/* New session always creates a session the viewer owns, which
+                <Button
+                  asChild
+                  className={cn(
+                    // px-2 + gap-2 puts the icon on the sidebar's left (red) column
+                    // and the label on the label (blue) column — matching section
+                    // headers and project folders. border-0 drops the Button base's
+                    // transparent 1px border so the icon lands exactly on that
+                    // column, flush with the Inbox row and folder rows.
+                    SIDEBAR_ROW,
+                    "group/new-session w-full justify-start border-0 font-normal",
+                    SIDEBAR_HOVER_HIGHLIGHT,
+                    isNewChatPage && SIDEBAR_ACTIVE_HIGHLIGHT,
+                  )}
+                  variant="ghost"
+                  data-testid="new-chat-button"
+                >
+                  {/* New session always creates a session the viewer owns, which
               lands under "My sessions" — so snap the tab back there on click
               (the button stays visible on both tabs). */}
-                <Link
-                  to="/"
-                  componentId="sidebar.new_chat"
-                  aria-keyshortcuts={newSessionAriaShortcut()}
-                  onClick={(e) => {
-                    switchTab("mine");
-                    onNavClick(e);
-                  }}
-                >
-                  <MessageCirclePlusIcon
-                    className={cn(
-                      "ui-icon",
-                      isNewChatPage
-                        ? "text-[var(--sidebar-active-foreground)]"
-                        : "text-muted-foreground",
-                    )}
-                  />
-                  New session
-                  <CompactShortcutKeys
-                    keys={newSessionShortcutKeys()}
-                    className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 opacity-0 transition-opacity group-focus-visible/new-session:opacity-100 [&_kbd]:w-auto [&_kbd]:min-w-4 [&_kbd]:px-0.5 [&_kbd]:font-sans [&_kbd]:text-[10px] [@media((hover:hover)_and_(pointer:fine))]:group-hover/new-session:opacity-100"
-                  />
-                </Link>
-              </Button>
-              {/* Keep Scheduled in the primary nav group with the same row treatment as New session. */}
-              <Button
-                asChild
-                className={cn(
-                  // Same shared nav-row construct as "New session" / "Inbox" so
-                  // the active-pill, hover, insets, icon column, and text weight
-                  // all match post-refactor.
-                  SIDEBAR_ROW,
-                  "w-full justify-start border-0 font-normal",
-                  SIDEBAR_HOVER_HIGHLIGHT,
-                  isTasksPage && SIDEBAR_ACTIVE_HIGHLIGHT,
-                )}
-                variant="ghost"
-                data-testid="scheduled-tasks-nav"
-              >
-                <Link to="/tasks" onClick={onNavClick} componentId="sidebar.tasks">
-                  <ClockIcon
-                    className={cn(
-                      "ui-icon",
-                      isTasksPage
-                        ? "text-[var(--sidebar-active-foreground)]"
-                        : "text-muted-foreground",
-                    )}
-                  />
-                  Automations
-                </Link>
-              </Button>
-              <Button
-                asChild
-                variant="ghost"
-                className={cn(
-                  SIDEBAR_ROW,
-                  "w-full justify-start border-0 font-normal",
-                  SIDEBAR_HOVER_HIGHLIGHT,
-                  isInboxPage && SIDEBAR_ACTIVE_HIGHLIGHT,
-                )}
-                data-testid="inbox-button"
-              >
-                <Link to="/inbox" onClick={onNavClick} componentId="sidebar.inbox">
-                  <InboxIcon
-                    className={cn(
-                      "ui-icon",
-                      isInboxPage
-                        ? "text-[var(--sidebar-active-foreground)]"
-                        : "text-muted-foreground",
-                    )}
-                  />
-                  Inbox
-                  {inboxCount > 0 && (
-                    <span
-                      aria-label={
-                        inboxCount === 1
-                          ? "1 inbox item waiting"
-                          : `${inboxCount} inbox items waiting`
-                      }
+                  <Link
+                    to="/"
+                    componentId="sidebar.new_chat"
+                    aria-keyshortcuts={newSessionAriaShortcut()}
+                    onClick={(e) => {
+                      switchTab("mine");
+                      onNavClick(e);
+                    }}
+                  >
+                    <MessageCirclePlusIcon
                       className={cn(
-                        "ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-10 font-medium text-[var(--sidebar-active-foreground)] tabular-nums",
-                        // The active Inbox row already paints the translucent
-                        // --sidebar-active wash; repainting it on the nested
-                        // badge would double-composite to a darker fill.
-                        isInboxPage ? "bg-transparent" : "bg-[var(--sidebar-active)]",
+                        "ui-icon",
+                        isNewChatPage
+                          ? "text-[var(--sidebar-active-foreground)]"
+                          : "text-muted-foreground",
                       )}
-                    >
-                      {inboxCount}
-                    </span>
+                    />
+                    New session
+                    <CompactShortcutKeys
+                      keys={newSessionShortcutKeys()}
+                      className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 opacity-0 transition-opacity group-focus-visible/new-session:opacity-100 [&_kbd]:w-auto [&_kbd]:min-w-4 [&_kbd]:px-0.5 [&_kbd]:font-sans [&_kbd]:text-[10px] [@media((hover:hover)_and_(pointer:fine))]:group-hover/new-session:opacity-100"
+                    />
+                  </Link>
+                </Button>
+                {/* Keep Scheduled in the primary nav group with the same row treatment as New session. */}
+                <Button
+                  asChild
+                  className={cn(
+                    // Same shared nav-row construct as "New session" / "Inbox" so
+                    // the active-pill, hover, insets, icon column, and text weight
+                    // all match post-refactor.
+                    SIDEBAR_ROW,
+                    "w-full justify-start border-0 font-normal",
+                    SIDEBAR_HOVER_HIGHLIGHT,
+                    isTasksPage && SIDEBAR_ACTIVE_HIGHLIGHT,
                   )}
-                </Link>
-              </Button>
-              {canvasEnabled && (
-                <PrimaryNavLink
-                  to={canvasDestination.pathname + canvasDestination.search}
-                  label="Canvas"
-                  icon={LayoutDashboardIcon}
-                  active={isCanvasPage}
-                  onClick={onNavClick}
-                  componentId="sidebar.canvas"
-                  testId="canvas-nav"
-                />
-              )}
-              <ExtensionPrimaryNavigation
-                activePageId={activeExtensionPageId}
-                onNavigate={onNavClick}
-              />
-              {usagePageEnabled && (
+                  variant="ghost"
+                  data-testid="scheduled-tasks-nav"
+                >
+                  <Link to="/tasks" onClick={onNavClick} componentId="sidebar.tasks">
+                    <ClockIcon
+                      className={cn(
+                        "ui-icon",
+                        isTasksPage
+                          ? "text-[var(--sidebar-active-foreground)]"
+                          : "text-muted-foreground",
+                      )}
+                    />
+                    Automations
+                  </Link>
+                </Button>
                 <Button
                   asChild
                   variant="ghost"
@@ -1323,100 +1277,158 @@ function SidebarImpl({
                     SIDEBAR_ROW,
                     "w-full justify-start border-0 font-normal",
                     SIDEBAR_HOVER_HIGHLIGHT,
-                    isUsagePage && SIDEBAR_ACTIVE_HIGHLIGHT,
+                    isInboxPage && SIDEBAR_ACTIVE_HIGHLIGHT,
                   )}
-                  data-testid="usage-nav"
+                  data-testid="inbox-button"
                 >
-                  <Link to="/usage" onClick={onNavClick} componentId="sidebar.usage">
-                    <WalletIcon
+                  <Link to="/inbox" onClick={onNavClick} componentId="sidebar.inbox">
+                    <InboxIcon
                       className={cn(
                         "ui-icon",
-                        isUsagePage
+                        isInboxPage
                           ? "text-[var(--sidebar-active-foreground)]"
                           : "text-muted-foreground",
                       )}
                     />
-                    Usage
+                    Inbox
+                    {inboxCount > 0 && (
+                      <span
+                        aria-label={
+                          inboxCount === 1
+                            ? "1 inbox item waiting"
+                            : `${inboxCount} inbox items waiting`
+                        }
+                        className={cn(
+                          "ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-10 font-medium text-[var(--sidebar-active-foreground)] tabular-nums",
+                          // The active Inbox row already paints the translucent
+                          // --sidebar-active wash; repainting it on the nested
+                          // badge would double-composite to a darker fill.
+                          isInboxPage ? "bg-transparent" : "bg-[var(--sidebar-active)]",
+                        )}
+                      >
+                        {inboxCount}
+                      </span>
+                    )}
                   </Link>
                 </Button>
-              )}
-            </div>
+                {canvasEnabled && (
+                  <PrimaryNavLink
+                    to={canvasDestination.pathname + canvasDestination.search}
+                    label="Canvas"
+                    icon={LayoutDashboardIcon}
+                    active={isCanvasPage}
+                    onClick={onNavClick}
+                    componentId="sidebar.canvas"
+                    testId="canvas-nav"
+                  />
+                )}
+                <ExtensionPrimaryNavigation
+                  activePageId={activeExtensionPageId}
+                  onNavigate={onNavClick}
+                />
+                {usagePageEnabled && (
+                  <Button
+                    asChild
+                    variant="ghost"
+                    className={cn(
+                      SIDEBAR_ROW,
+                      "w-full justify-start border-0 font-normal",
+                      SIDEBAR_HOVER_HIGHLIGHT,
+                      isUsagePage && SIDEBAR_ACTIVE_HIGHLIGHT,
+                    )}
+                    data-testid="usage-nav"
+                  >
+                    <Link to="/usage" onClick={onNavClick} componentId="sidebar.usage">
+                      <WalletIcon
+                        className={cn(
+                          "ui-icon",
+                          isUsagePage
+                            ? "text-[var(--sidebar-active-foreground)]"
+                            : "text-muted-foreground",
+                        )}
+                      />
+                      Usage
+                    </Link>
+                  </Button>
+                )}
+              </div>
 
-            {/* Wrapper (not the `aside`) anchors the floating Settings button:
+              {/* Wrapper (not the `aside`) anchors the floating Settings button:
           absolute-positioning inside the aside would place it in the native
           safe-area padding, under the home indicator. */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
-              <div
-                aria-hidden="true"
-                data-testid="sidebar-scroll-divider"
-                className={cn(
-                  "pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-border",
-                  hasScrolled ? "opacity-100" : "opacity-0",
-                )}
-              />
-              <nav
-                ref={setScrollContainer}
-                onScroll={(event) => {
-                  setHasScrolled(event.currentTarget.scrollTop > 0);
-                  markScrolling();
-                }}
-                // max-md:pb-16 is the floating Settings chip's clearance: the
-                // chip is a non-scrolling sibling pinned bottom-right, so
-                // without a gutter the last row's always-visible kebab parks
-                // underneath it and can't be tapped.
-                className={cn(
-                  "relative flex-1 overflow-y-auto px-2 pt-4 pb-3 max-md:pb-16",
-                  // Reserve the gutter so toggling the thumb never reflows the list.
-                  "[scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
-                  isScrolling
-                    ? "[scrollbar-color:var(--muted-foreground)_transparent] [&::-webkit-scrollbar-thumb]:bg-muted-foreground"
-                    : "[scrollbar-color:transparent_transparent] [&::-webkit-scrollbar-thumb]:bg-transparent",
-                )}
-              >
-                <GridSidebar onNavigate={onNavClick} />
-                {sidebarData.identityReady ? (
-                  <ConversationList
-                    conversationsQuery={displayQuery}
-                    scrollContainerRef={scrollContainerRef}
-                    onRowClick={onNavClick}
-                    searchQuery=""
-                    newSessionProjectName={newSessionProjectName}
-                    activeTab={availableTab}
-                    onActiveTabChange={switchTab}
-                    multiUser={multiUser}
-                    pinnedConversationIds={pinnedConversationIds}
-                    pinnedConversations={pinnedConversations}
-                    pinReorderEnabled={pinnedFilterHonored}
-                    onTogglePinned={togglePinnedConversation}
-                    onEnterSelectionMode={enterSelectionMode}
-                    selectionMode={selectionMode}
-                    selectionScope={selectionScope}
-                    selectedIds={selectedIds}
-                    onToggleSelected={toggleSelected}
-                    onDeselectAll={deselectAll}
-                    onExitSelectionMode={exitSelectionMode}
-                    getVisibleIdsRef={getVisibleIdsRef}
-                  />
-                ) : (
-                  <p role="status" className="px-2 py-1 text-muted-foreground text-sm">
-                    Loading sessions…
-                  </p>
-                )}
-              </nav>
-              {/* Mobile: Settings floats over the bottom of the session list, with
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <div
+                  aria-hidden="true"
+                  data-testid="sidebar-scroll-divider"
+                  className={cn(
+                    "pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-border",
+                    hasScrolled ? "opacity-100" : "opacity-0",
+                  )}
+                />
+                <nav
+                  ref={setScrollContainer}
+                  onScroll={(event) => {
+                    setHasScrolled(event.currentTarget.scrollTop > 0);
+                    markScrolling();
+                  }}
+                  // max-md:pb-16 is the floating Settings chip's clearance: the
+                  // chip is a non-scrolling sibling pinned bottom-right, so
+                  // without a gutter the last row's always-visible kebab parks
+                  // underneath it and can't be tapped.
+                  className={cn(
+                    "relative flex-1 overflow-y-auto px-2 pt-4 pb-3 max-md:pb-16",
+                    // Reserve the gutter so toggling the thumb never reflows the list.
+                    "[scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
+                    isScrolling
+                      ? "[scrollbar-color:var(--muted-foreground)_transparent] [&::-webkit-scrollbar-thumb]:bg-muted-foreground"
+                      : "[scrollbar-color:transparent_transparent] [&::-webkit-scrollbar-thumb]:bg-transparent",
+                  )}
+                >
+                  <GridSidebar onNavigate={onNavClick} />
+                  {sidebarData.identityReady ? (
+                    <ConversationList
+                      conversationsQuery={displayQuery}
+                      scrollContainerRef={scrollContainerRef}
+                      onRowClick={onNavClick}
+                      searchQuery=""
+                      newSessionProjectName={newSessionProjectName}
+                      activeTab={availableTab}
+                      onActiveTabChange={switchTab}
+                      multiUser={multiUser}
+                      pinnedConversationIds={pinnedConversationIds}
+                      pinnedConversations={pinnedConversations}
+                      pinReorderEnabled={pinnedFilterHonored}
+                      onTogglePinned={togglePinnedConversation}
+                      onEnterSelectionMode={enterSelectionMode}
+                      selectionMode={selectionMode}
+                      selectionScope={selectionScope}
+                      selectedIds={selectedIds}
+                      onToggleSelected={toggleSelected}
+                      onDeselectAll={deselectAll}
+                      onExitSelectionMode={exitSelectionMode}
+                      getVisibleIdsRef={getVisibleIdsRef}
+                    />
+                  ) : (
+                    <p role="status" className="px-2 py-1 text-muted-foreground text-sm">
+                      Loading sessions…
+                    </p>
+                  )}
+                </nav>
+                {/* Mobile: Settings floats over the bottom of the session list, with
           Search floating at the top of the header row — the two icons the
           drawer keeps once the collapse toggle is gone. */}
-              <SidebarSettingsButton
-                testId="sidebar-settings-float"
-                className="absolute right-3 bottom-3 md:hidden"
-              />
-            </div>
+                <SidebarSettingsButton
+                  testId="sidebar-settings-float"
+                  className="absolute right-3 bottom-3 md:hidden"
+                />
+              </div>
 
-            {/* Native-shell server picker, pinned below the scrolling session
+              {/* Native-shell server picker, pinned below the scrolling session
           list. Self-hiding: renders nothing outside a shell with the picker
           bridge (see SidebarServerPicker), so browsers keep an unchanged
           sidebar that ends with the list. */}
-            <SidebarServerPicker />
+              <SidebarServerPicker />
+            </div>
           </>
         )}
       </aside>

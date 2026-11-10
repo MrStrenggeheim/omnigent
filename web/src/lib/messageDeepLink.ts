@@ -21,6 +21,6 @@ export function buildMessageDeepLink(messageId: string, href?: string): string {
  *
  * @param messageId - The id encoded in ``?message=``.
  */
-export function findMessageElement(messageId: string): Element | null {
-  return document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+export function findMessageElement(messageId: string, root: ParentNode = document): Element | null {
+  return root.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
 }

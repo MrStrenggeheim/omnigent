@@ -22,7 +22,7 @@ the header menu), and each place is a separate entry point.
   row pins it into that slot.
 - `rename`: from the row, the header menu, the header title, or Cmd/Ctrl+Alt+R
   on desktop; long titles are limited.
-- `search`: the sidebar's Search or ⌘K / Ctrl+K opens the command palette.
+- `search`: the sidebar's Search or ⌘K / Ctrl+K opens [integrated search](context-search.md); Ctrl/Cmd+Alt+S retains the sessions-only switcher.
   Sessions whose title matches list under **Sessions**, then sessions matching
   only in chat content under **In messages** with a snippet; each group has its
   own Show more.

@@ -6,16 +6,8 @@ import { TooltipButton } from "@/components/ui/tooltip";
 import type React from "react";
 import { defaultFilter } from "cmdk";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  CalendarClockIcon,
-  InboxIcon,
-  type LucideIcon,
-  PanelLeftIcon,
-  PanelRightIcon,
-  SettingsIcon,
-  SquarePenIcon,
-  XIcon,
-} from "lucide-react";
+import { XIcon } from "lucide-react";
+import { searchActions, filterSearchActions, type ActionCommand } from "./contextSearch/actions";
 import { useNavigate } from "@/lib/routing";
 import {
   type ConversationsPage,
@@ -40,22 +32,13 @@ import { conversationDisplayLabel, getConversationAgentType } from "./sidebarNav
 
 export interface CommandPaletteProps {
   sessionsOnly?: boolean;
+  onNavigate?: (path: string) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Flip the left (Conversations) sidebar — owned by AppShell. */
   onToggleLeftSidebar: () => void;
   /** Flip the right (Workspace) sidebar — owned by AppShell. */
   onToggleRightSidebar: () => void;
-}
-
-interface ActionCommand {
-  id: string;
-  label: string;
-  /** Mirrors the icon on the equivalent button elsewhere in the UI. */
-  icon: LucideIcon;
-  /** Extra terms the client-side filter matches against (beyond the label). */
-  keywords: string[];
-  run: () => void;
 }
 
 /** Debounce matches the sidebar search (300ms) so keystrokes don't each fetch. */
@@ -132,12 +115,14 @@ function paletteSessions(
 
 export function CommandPalette({
   sessionsOnly = false,
+  onNavigate,
   open,
   onOpenChange,
   onToggleLeftSidebar,
   onToggleRightSidebar,
 }: CommandPaletteProps) {
-  const navigate = useNavigate();
+  const navigateRoute = useNavigate();
+  const navigate = onNavigate ?? navigateRoute;
   const isMobile = useIsMobileViewport();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -159,63 +144,14 @@ export function CommandPalette({
 
   const close = (): void => onOpenChange(false);
 
-  const actions = useMemo<ActionCommand[]>(
-    () => [
-      {
-        id: "new-chat",
-        label: "New chat",
-        icon: SquarePenIcon,
-        keywords: ["compose", "start", "new session"],
-        run: () => navigate("/"),
-      },
-      {
-        id: "go-inbox",
-        label: "Go to Inbox",
-        icon: InboxIcon,
-        keywords: ["notifications", "comments", "needs response"],
-        run: () => navigate("/inbox"),
-      },
-      {
-        id: "go-tasks",
-        label: "Go to Automations",
-        icon: CalendarClockIcon,
-        keywords: ["scheduled", "recurring", "cron", "automation", "schedule"],
-        run: () => navigate("/tasks"),
-      },
-      {
-        id: "go-settings",
-        label: "Go to Settings",
-        icon: SettingsIcon,
-        keywords: ["preferences", "configuration", "account"],
-        run: () => navigate("/settings"),
-      },
-      {
-        id: "toggle-left-sidebar",
-        label: "Toggle conversations sidebar",
-        icon: PanelLeftIcon,
-        keywords: ["panel", "left", "sessions list"],
-        run: onToggleLeftSidebar,
-      },
-      {
-        id: "toggle-right-sidebar",
-        label: "Toggle workspace sidebar",
-        icon: PanelRightIcon,
-        keywords: ["panel", "right", "files", "terminal"],
-        run: onToggleRightSidebar,
-      },
-    ],
+  const actions = useMemo(
+    () => searchActions({ navigate, onToggleLeftSidebar, onToggleRightSidebar }),
     [navigate, onToggleLeftSidebar, onToggleRightSidebar],
   );
-
-  const filteredActions = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (sessionsOnly) return [];
-    if (q === "") return actions;
-    return actions.filter(
-      (a) =>
-        a.label.toLowerCase().includes(q) || a.keywords.some((k) => k.toLowerCase().includes(q)),
-    );
-  }, [actions, query, sessionsOnly]);
+  const filteredActions = useMemo(
+    () => (sessionsOnly ? [] : filterSearchActions(actions, query)),
+    [actions, query, sessionsOnly],
+  );
 
   const { data, isFetching, isError, refetch, hasNextPage, fetchNextPage, isFetchNextPageError } =
     useConversations("", false, { enabled: open });

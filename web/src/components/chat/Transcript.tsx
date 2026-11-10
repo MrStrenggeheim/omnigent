@@ -33,6 +33,8 @@ import { useSearchParams } from "@/lib/routing";
 import { MESSAGE_QUERY_PARAM } from "@/lib/messageDeepLink";
 import { useMessageDeepLink } from "@/hooks/useMessageDeepLink";
 import { useUserMessageNav } from "@/hooks/useUserMessageNav";
+import { useChatSearchHighlights } from "@/hooks/useChatSearchHighlights";
+import { useContextSearch } from "@/shell/ContextSearchContext";
 import { ChatPlanAccordion } from "@/shell/ChatPlanAccordion";
 import {
   RunnerStartingIndicator,
@@ -135,6 +137,7 @@ function TranscriptImpl({
   const mcpStartupActive = useChatStore((s) => s.mcpStartup !== null);
   const hasTasks = useChatStore((s) => s.todos.length > 0);
   const conversationId = useChatStore((s) => s.conversationId);
+  const contextSearch = useContextSearch();
 
   // Build bubbles once per blocks/activeResponse change. Per-surface reuse
   // cache so a streaming append rebuilds only the active bubble, reusing the
@@ -269,6 +272,19 @@ function TranscriptImpl({
     ready: display.conversationId === conversationId && !!scroller?.el && !!scrollToItemRef.current,
     rangeNonce: spacerMeasureNonce,
   });
+  const searchTarget = contextSearch?.highlightTarget ?? null;
+  useChatSearchHighlights({
+    conversationId: conversationId ?? null,
+    query: contextSearch?.open ? contextSearch.settledQuery : "",
+    target: searchTarget,
+    onResolved: contextSearch?.onHighlightResolved,
+    container: containerEl,
+    scrollElement: scroller?.el ?? null,
+    bubbles: display.streamBubbles,
+    ensureMessageVisible: ensureItemVisible,
+    ready: display.conversationId === conversationId && !!scroller?.el && !!scrollToItemRef.current,
+    rangeNonce: spacerMeasureNonce,
+  });
 
   // One rail tick per real user turn, paired with a preview of the reply that
   // followed. Mirrors the transcript's loaded window and grows lazily.
@@ -387,7 +403,11 @@ function TranscriptImpl({
                   conversationId={display.conversationId}
                   hasTasks={display.hasTasks}
                   disableVirtualization={disableVirtualization}
-                  messageId={messageId}
+                  messageId={
+                    searchTarget?.conversationId === conversationId
+                      ? searchTarget.itemId
+                      : messageId
+                  }
                   onGeometryChange={onGeometryChange}
                 />
                 {/* Pending elicitation cards, floated to the bottom of the chat
@@ -594,6 +614,7 @@ export function VirtualBubbleList({
   ctxRef.current = ctx;
   const storeConvId = useChatStore((s) => s.conversationId);
   const restoringRef = useRef<string | null>(null);
+  const restoredSurfaceRef = useRef<{ conversationId: string; scrollEl: HTMLElement } | null>(null);
   const latestSnapshotRef = useRef<{
     conversationId: string;
     snapshot: TranscriptViewSnapshot;
@@ -851,7 +872,15 @@ export function VirtualBubbleList({
   // Mid-scroll mode resolves the saved bubble through the virtualizer on every
   // frame, so estimate-to-measure corrections preserve its viewport position.
   useLayoutEffect(() => {
-    if (!scrollEl || !conversationId || messageId) return;
+    if (!scrollEl || !conversationId) return;
+    const previous = restoredSurfaceRef.current;
+    restoredSurfaceRef.current = { conversationId, scrollEl };
+    // Closing search/deep-link navigation keeps the location the reader found.
+    if (
+      messageId ||
+      (previous?.conversationId === conversationId && previous.scrollEl === scrollEl)
+    )
+      return;
     const c = ctxRef.current;
     const saved = transcriptViewCache.get(conversationId);
     restoringRef.current = conversationId;

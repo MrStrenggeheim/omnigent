@@ -748,15 +748,26 @@ export function useConversations(
 export function useSessionSearch(
   searchQuery: string,
   searchScope: SessionSearchScope,
-  { enabled = true, limit = 10 }: { enabled?: boolean; limit?: number } = {},
+  {
+    enabled = true,
+    limit = 10,
+    cacheIdentity,
+  }: { enabled?: boolean; limit?: number; cacheIdentity?: string } = {},
 ) {
   const queryClient = useQueryClient();
-  const queryKey = ["session-search", searchQuery, searchScope, limit];
+  const queryKey = [
+    "session-search",
+    searchQuery,
+    searchScope,
+    limit,
+    ...(cacheIdentity ? [cacheIdentity] : []),
+  ];
   const query = useInfiniteQuery({
     queryKey,
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       fetchConversationsPage({
         after: pageParam,
+        signal,
         searchQuery,
         searchScope,
         includeArchived: false,

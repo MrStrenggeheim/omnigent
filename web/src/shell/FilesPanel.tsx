@@ -567,6 +567,7 @@ export function FilesPanel({
       }}
     >
       <div
+        data-context-search-region="explorer"
         className={cn(
           "@container/filespanel overflow-hidden bg-card",
           fillHeight ? "flex h-full min-h-0 flex-col" : "flex min-h-0 flex-col",

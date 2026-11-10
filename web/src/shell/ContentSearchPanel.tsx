@@ -348,7 +348,11 @@ function ContentSearchPanelContent({
   const selectedMatches = replaceableMatches.filter((match) => selected.has(matchId(match)));
 
   return (
-    <section aria-label="Content search" className="flex min-h-0 flex-1 flex-col">
+    <section
+      aria-label="Content search"
+      data-context-search-region="explorer"
+      className="flex min-h-0 flex-1 flex-col"
+    >
       <form
         className="space-y-2 border-b border-border p-3"
         onSubmit={(event) => {

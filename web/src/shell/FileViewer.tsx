@@ -1,3 +1,4 @@
+import { getFindContext, REQUEST_FILE_FIND_EVENT } from "@/lib/findContext";
 import { FileSelectionScope } from "./FileSelectionMenu";
 import { FileContentReaderContext, type FileContentReader } from "./FileContentReader";
 import { createPortal } from "react-dom";
@@ -1172,8 +1173,15 @@ function FileViewerBody({
   useEffect(() => {
     if (!open || !isMonacoFindSurface) return;
     const handler = (e: KeyboardEvent) => {
-      if (!(hasCommandModifier(e) && !e.altKey && !e.shiftKey && e.key === "f")) return;
-      if (!viewerIsActiveSurfaceRef.current) return;
+      if (
+        e.defaultPrevented ||
+        e.isComposing ||
+        !(hasCommandModifier(e) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f")
+      )
+        return;
+      const context = getFindContext();
+      if (context ? context.region !== "file" : !viewerIsActiveSurfaceRef.current) return;
+      if (context?.target && !viewerRootRef.current?.contains(context.target)) return;
       e.preventDefault();
       e.stopPropagation();
       setSearchOpen(true);
@@ -1185,6 +1193,29 @@ function FileViewerBody({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [open, isMonacoFindSurface, setSearchOpen]);
+
+  useEffect(() => {
+    if (!open) return;
+    const find = (event: Event) => {
+      const target = (event as CustomEvent<{ target: Element | null }>).detail?.target;
+      if (target && !viewerRootRef.current?.contains(target)) return;
+      if (
+        isImage ||
+        isPdf ||
+        isVideo ||
+        isModel ||
+        isBinary ||
+        (lang === "html" && viewMode === "preview")
+      )
+        return;
+      event.preventDefault();
+      setSearchOpen(true);
+      setSearchFocusNonce((value) => value + 1);
+      requestAnimationFrame(() => searchInputRef.current?.focus());
+    };
+    window.addEventListener(REQUEST_FILE_FIND_EVENT, find);
+    return () => window.removeEventListener(REQUEST_FILE_FIND_EVENT, find);
+  }, [open, isImage, isPdf, isVideo, isModel, isBinary, lang, viewMode]);
 
   // Reset the toggle when find is closed from inside Monaco (Escape or the
   // widget's ✕) so the next Cmd+F re-opens it instead of no-opping. Shared by
@@ -2152,6 +2183,7 @@ function FileViewerBody({
       <div
         ref={setViewerRoot}
         data-testid="file-viewer"
+        data-context-search-region="file"
         data-file-viewer-embedded={mobileEmbedded || undefined}
         style={{ paddingBottom: keyboardInset || undefined }}
         className={cn(
@@ -2168,6 +2200,7 @@ function FileViewerBody({
     <aside
       ref={setViewerRoot}
       data-testid="file-viewer"
+      data-context-search-region="file"
       style={{ width: panelWidth, paddingBottom: keyboardInset || undefined }}
       className={cn(
         "flex flex-col overflow-hidden bg-card transition-[translate,border-color,border-width] duration-150 ease-out",

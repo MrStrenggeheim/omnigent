@@ -326,6 +326,7 @@ const getSessionSlimMock = vi.mocked(getSessionSlim);
 import { AppShell } from "./AppShell";
 import { useTerminalFirst } from "./TerminalFirstContext";
 import { useForkDialog } from "./ForkDialogContext";
+import { useContextSearch } from "./ContextSearchContext";
 import { useChatStore } from "@/store/chatStore";
 import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { ErrorBanner } from "@/components/blocks/StatusBlocks";
@@ -5752,6 +5753,54 @@ describe("AppShell design-mode submission", () => {
       undefined,
     );
   });
+});
+
+describe("search shortcuts", () => {
+  function SearchStateProbe() {
+    const search = useContextSearch();
+    return (
+      <div data-testid="search-state" data-open={String(search?.open)} data-scope={search?.scope}>
+        Chat text
+      </div>
+    );
+  }
+
+  it.each(["MacIntel", "Win32"])(
+    "routes K and F to integrated search and Alt+S to the session switcher on %s",
+    async (platform) => {
+      const platformSpy = vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+      onTestFinished(() => platformSpy.mockRestore());
+      mockConversations([{ id: "conv_search", permission_level: null }]);
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(sessionShellTree(client, "/c/conv_search", <SearchStateProbe />));
+      const modifier = { metaKey: platform === "MacIntel", ctrlKey: platform !== "MacIntel" };
+      const state = screen.getByTestId("search-state");
+      expect(state).toHaveAttribute("data-open", "false");
+
+      fireEvent.keyDown(state, { key: "k", code: "KeyK", ...modifier });
+      expect(state).toHaveAttribute("data-open", "true");
+      expect(state).toHaveAttribute("data-scope", "all");
+      expect(screen.getByRole("search", { name: "Find in active chat" })).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Close search" }));
+      fireEvent.pointerDown(state);
+      fireEvent.keyDown(state, { key: "f", code: "KeyF", ...modifier });
+      expect(state).toHaveAttribute("data-open", "true");
+      expect(state).toHaveAttribute("data-scope", "current");
+      expect(screen.queryByRole("dialog")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Close search" }));
+      fireEvent.keyDown(state, { key: "s", code: "KeyS", altKey: true, ...modifier });
+      expect(await screen.findByTestId("command-palette-input")).toHaveAttribute(
+        "placeholder",
+        "Search sessions by name…",
+      );
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(state).toHaveAttribute("data-open", "false");
+      expect(screen.queryByRole("search", { name: "Find in active chat" })).toBeNull();
+    },
+  );
 });
 
 describe("new-session browser shortcut", () => {

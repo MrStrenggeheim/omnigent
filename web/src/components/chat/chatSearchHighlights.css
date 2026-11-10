@@ -1,0 +1,8 @@
+::highlight(chat-search) {
+  background-color: color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+::highlight(chat-search-active) {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}

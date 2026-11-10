@@ -30,4 +30,13 @@ describe("findMessageElement", () => {
     expect(findMessageElement("m1")?.textContent).toBe("hi");
     expect(findMessageElement("missing")).toBeNull();
   });
+
+  it("scopes duplicate message identities to the owning transcript", () => {
+    document.body.innerHTML =
+      '<aside><div data-message-id="same">other chat</div></aside><main><div data-message-id="same">active chat</div></main>';
+    expect(findMessageElement("same", document.querySelector("main")!)?.textContent).toBe(
+      "active chat",
+    );
+    expect(findMessageElement("missing", document.querySelector("main")!)).toBeNull();
+  });
 });

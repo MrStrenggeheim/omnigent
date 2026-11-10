@@ -1,3 +1,4 @@
+import { getFindContext } from "@/lib/findContext";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { previewSourceMarkers, renderedMarkdownSelection } from "./markdownPreviewSelection";
 import { FileSelectionMenu, FileSelectionScope } from "./FileSelectionMenu";
@@ -741,15 +742,29 @@ function CodeViewerContent({
   }, [searchQuery, currentMatchIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isMarkdownEditor = viewMode === "editor" && lang === "markdown" && !markdownSourceFallback;
+  const canUseTextSearch =
+    !isHtmlPreview &&
+    !isVideoFile(path, fileQuery.data?.content_type) &&
+    !isBinaryPath(path) &&
+    fileQuery.data?.encoding !== "base64" &&
+    !(
+      fileQuery.data &&
+      (isImageFile(path, fileQuery.data.content_type) ||
+        isPdfFile(path, fileQuery.data.content_type) ||
+        isModelFile(path, fileQuery.data.content_type))
+    );
 
   // Markdown editor mode has its own find bar (MarkdownSearchBar), driven by the
   // shared `searchOpen` toggle. Cmd+F opens it and Escape closes it; the bar
   // also handles Escape while its input is focused, but this covers the case
   // where focus is in the editor body.
   useEffect(() => {
-    if (!panelOpen || !isMarkdownEditor) return;
+    if (!panelOpen || !isMarkdownEditor || !canUseTextSearch) return;
     const handler = (e: KeyboardEvent) => {
-      if (hasCommandModifier(e) && e.key === "f") {
+      if (hasCommandModifier(e) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+        if (e.defaultPrevented || e.isComposing) return;
+        const context = getFindContext();
+        if (context && context.region !== "file") return;
         e.preventDefault();
         setSearchOpen(true);
         setTimeout(() => searchInputRef.current?.focus(), 0);
@@ -760,15 +775,18 @@ function CodeViewerContent({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [panelOpen, isMarkdownEditor, searchOpen, setSearchOpen, searchInputRef]);
+  }, [panelOpen, isMarkdownEditor, canUseTextSearch, searchOpen, setSearchOpen, searchInputRef]);
 
   // Open search on Cmd+F / Ctrl+F in the Shiki source view.
   useEffect(() => {
     // Skip in Monaco mode (Monaco owns Cmd+F) and markdown editor mode (handled
     // above with its own find bar).
-    if (!panelOpen || isMarkdownEditor || showMonaco) return;
+    if (!panelOpen || isMarkdownEditor || showMonaco || !canUseTextSearch) return;
     const handler = (e: KeyboardEvent) => {
-      if (hasCommandModifier(e) && e.key === "f") {
+      if (hasCommandModifier(e) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+        if (e.defaultPrevented || e.isComposing) return;
+        const context = getFindContext();
+        if (context && context.region !== "file") return;
         e.preventDefault();
         setSearchOpen(true);
         setTimeout(() => searchInputRef.current?.focus(), 0);
@@ -794,7 +812,15 @@ function CodeViewerContent({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [panelOpen, isMarkdownEditor, showMonaco, searchOpen, setSearchOpen, searchInputRef]);
+  }, [
+    panelOpen,
+    isMarkdownEditor,
+    showMonaco,
+    canUseTextSearch,
+    searchOpen,
+    setSearchOpen,
+    searchInputRef,
+  ]);
 
   // In Monaco mode the custom search bar isn't rendered; the editor mirrors its
   // native find widget to `searchOpen` (open when set, close when cleared). This

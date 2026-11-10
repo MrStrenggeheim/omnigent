@@ -568,7 +568,7 @@ function PlainTextFallback({ text }: { text: string }) {
   const truncated = text.length > MAX_PLAINTEXT_DISPLAY_LENGTH;
   const shown = truncated ? text.slice(0, MAX_PLAINTEXT_DISPLAY_LENGTH) : text;
   return (
-    <div className="whitespace-pre-wrap break-all font-mono text-sm">
+    <div data-chat-plain-text className="whitespace-pre-wrap break-all font-mono text-sm">
       {shown}
       {truncated && (
         <span className="text-muted-foreground">
