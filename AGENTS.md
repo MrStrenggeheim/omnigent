@@ -3,6 +3,11 @@
 Guidance for AI agents (Claude Code, Copilot, Cursor, etc.) working in this
 repository. See `CONTRIBUTING.md` for the full contributor workflow.
 
+## Personal instructions
+
+The user-wide agreement is `/home/agent/.agents/AGENTS.md`.
+Codex and Claude user instruction files link to that canonical source.
+
 ## Local customizations
 
 This checkout maintains local changes on top of official release tags. Read
