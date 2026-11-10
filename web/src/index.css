@@ -1233,7 +1233,9 @@ html[data-electron-mac] .breadcrumb-folder {
    * the shell) keep default document scrolling. */
   html:has(.app-shell),
   body:has(.app-shell) {
+    /* hidden still permits focus/scrollIntoView to shift the whole shell. */
     overflow: hidden;
+    overflow: clip !important;
   }
   html {
     /* Font family for the whole inherited UI. Can't `@apply font-sans`: Tailwind

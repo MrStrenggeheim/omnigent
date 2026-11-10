@@ -10,6 +10,7 @@ Buttons across chat, composers, workspaces and settings share one tooltip style 
 - `menus`: guidance stays closed while its menu is open and during the return-focus handoff.
 - `keyboard`: focus reveals the same guidance without changing button, menu or selection behavior.
 - `disabled`: existing disabled-action explanations remain available with accessible labels.
+- `disclosures`: expandable controls share Expand/Collapse guidance without overriding their actual open state.
 
 ## How to get to it (user POV)
 

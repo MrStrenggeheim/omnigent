@@ -708,7 +708,7 @@ describe("Explorer shared comparisons", () => {
     expect(screen.getByText("live.ts")).toHaveClass("text-orange-500", "dark:text-orange-400");
     fireEvent.click(screen.getByRole("button", { name: "Switch view" }));
     expect(screen.getByRole("button", { name: "Diff comparison" })).toHaveTextContent("Chat");
-    expect(screen.getByTitle("Added")).toHaveTextContent("A");
+    expect(document.querySelector('[data-file-status="created"]')).toHaveTextContent("A");
     fireEvent.keyDown(screen.getByRole("button", { name: "Diff comparison" }), { key: "Enter" });
     fireEvent.click(screen.getByRole("menuitem", { name: /^Git/ }));
     expect(getWorkspaceComparison({ workspaceId, view: "changes" }).source).toBe("git");

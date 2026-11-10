@@ -1,3 +1,4 @@
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./collapsible";
 import { createRef } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -320,4 +321,26 @@ describe("canonical button tooltips", () => {
       "true",
     );
   });
+});
+
+it("gives disclosure buttons canonical state-aware guidance without changing expansion", async () => {
+  const user = userEvent.setup();
+  render(
+    <TooltipProvider delayDuration={0}>
+      <Collapsible>
+        <CollapsibleTrigger>Tool details</CollapsibleTrigger>
+        <CollapsibleContent>Command output</CollapsibleContent>
+      </Collapsible>
+    </TooltipProvider>,
+  );
+  const trigger = screen.getByRole("button", { name: "Tool details" });
+  await user.hover(trigger);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Expand details");
+  await user.click(trigger);
+  expect(screen.getByText("Command output")).toBeVisible();
+  await user.unhover(trigger);
+  await user.hover(trigger);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Collapse details");
+  await user.keyboard(" ");
+  expect(screen.queryByText("Command output")).not.toBeInTheDocument();
 });

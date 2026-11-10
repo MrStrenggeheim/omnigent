@@ -253,7 +253,9 @@ describe("ToolCard shell terminal panel", () => {
       state: "output-available",
     });
     const trigger = container.querySelector<HTMLElement>('[data-slot="collapsible-trigger"]')!;
-    expect(trigger).toHaveAttribute("title", "pnpm install");
+    expect(trigger).not.toHaveAttribute("title");
+    fireEvent.focus(trigger);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("pnpm install");
     expect(trigger.textContent).toBe("pnpm install");
 
     expand(container);
