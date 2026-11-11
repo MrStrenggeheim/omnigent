@@ -10,17 +10,17 @@ Conversation and tool views share resizable, dockable panes while keeping their 
 - `hierarchy`: durable branches preserve their captured fork boundary independently from delegated-agent parentage.
 - `communication`: structured attribution distinguishes agent messages from human input and separates acceptance from consumption.
 - `references`: whole chats, completed answers, selected messages and quotes enter drafts with stable source snapshots.
-- `activity`: shared compact rows, retained shell history and a conditional composer dock expose actual activity and attention.
+- `activity`: retained shell history and the dedicated Activity view expose actual activity; the composer dock is disabled.
 - `navigation`: global commands, contextual find, explicit conversation sources and mobile view switching retain existing workflows.
-- `appearance`: violet defaults, a local logo and shared list-density preferences preserve explicit user choices.
+- `appearance`: shared content surfaces, violet tab focus, consistent switches and list density follow `design-system/omnigent/MASTER.md`.
 - `migration`: existing conversation, file and shell references remain accessible without starting or stopping resources.
 
 ## How to get to it (user POV)
 
 - Use Open in the application bar to add Explorer, Changes, Search, a shell, Activity or Automations.
-- Drag a tab to a pane edge to split, or use its actions menu to move, pin or close it.
+- Drag a tab to a pane edge to split; use its own close button to close it, or the pane menu to move/pin views.
 - Use Layout → Save layout for this chat; pin an Explorer in another chat and return to see both arrangements.
-- Expand a conversation in navigation to revisit its subchats; use the conversation menu to branch or inspect it.
+- Expand conversations with children to revisit subchats; hover a row for actions, and use its spinner to identify running work.
 - Use New subchat in the composer Add menu or `/side` to open a durable child with an unsent draft.
 - Type `@` in a composer, or select text and choose Use in chat…, to inspect and insert captured context.
 - Use the application search field or Ctrl/Cmd+K for commands; Ctrl/Cmd+F searches the last interacted region.
@@ -48,6 +48,8 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 ## Gotchas
 
 - Closing a view preserves its conversation, shell or schedule; explicit Stop/Delete retains its existing permission and confirmation checks.
+- Tab/container headers and view headers remain separate even with one tab; pane focus uses tab fill, never an enclosing accent frame.
+- Conversation hover cards and per-row loading/empty-child labels are removed; hierarchy metadata preloads without transcript downloads.
 - Global pins preserve visibility and placement, never change the selected machine or follow another chat automatically.
 - Shared-chat file access can retain its session-authorized route; a chat grant does not grant general host access.
 - Unknown delivery or process state is not successful consumption or a confirmed exit.
