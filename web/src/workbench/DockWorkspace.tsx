@@ -29,13 +29,6 @@ import {
 import { MoreHorizontal, Pin, X } from "lucide-react";
 import { TooltipButton } from "@/components/ui/tooltip";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -206,9 +199,6 @@ function DockSurface(props: DockWorkspaceProps) {
   const select = (id: string) => onLayoutChange((current) => selectDockView(current, id));
   const allViews = new Map(retainedViews.map((view) => [view.id, view]));
   for (const view of layout.views) allViews.set(view.id, view);
-  const focusedViewId = layout.panes.find(
-    (pane) => pane.id === layout.focusedPaneId,
-  )?.selectedViewId;
 
   return (
     <DndContext
@@ -226,26 +216,6 @@ function DockSurface(props: DockWorkspaceProps) {
         className={`dock-workspace ${props.className ?? ""}`}
         data-compact={compact}
       >
-        {compact && layout.views.length > 0 && (
-          <div className="dock-mobile-navigation">
-            <span>Open views</span>
-            <Select value={focusedViewId ?? ""} onValueChange={select}>
-              <SelectTrigger aria-label="Open views">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {layout.panes.flatMap((pane) =>
-                  pane.viewIds.map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {allViews.get(id)?.title ?? id}
-                      {pinnedViewIds.includes(id) ? " · Pinned" : ""}
-                    </SelectItem>
-                  )),
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
         {error && (
           <div role="alert" className="dock-error">
             {error}
@@ -258,6 +228,7 @@ function DockSurface(props: DockWorkspaceProps) {
           {geometry.panes.map((rect) => {
             const pane = layout.panes.find((item) => item.id === rect.key)!;
             const focused = pane.id === layout.focusedPaneId;
+            if (compact && !focused) return null;
             return (
               <DockPaneChrome
                 key={pane.id}
@@ -265,7 +236,8 @@ function DockSurface(props: DockWorkspaceProps) {
                 pane={pane}
                 layout={layout}
                 style={rectStyle(compact ? fullRect : rect)}
-                hidden={compact}
+                hidden={compact && !focused}
+                compact={compact}
                 focused={focused}
                 dragging={dragging}
                 pinnedViewIds={pinnedViewIds}
@@ -292,7 +264,7 @@ function DockSurface(props: DockWorkspaceProps) {
                   view={view}
                   visible={visible}
                   focused={visible && focused}
-                  style={rectStyle(compact ? fullRect : rect, !compact)}
+                  style={rectStyle(compact ? fullRect : rect, true)}
                   onFocus={() => {
                     if (pane) focus(pane.id);
                   }}
@@ -385,6 +357,7 @@ function DockPaneChrome({
   layout,
   style,
   hidden,
+  compact,
   focused,
   dragging,
   pinnedViewIds,
@@ -401,6 +374,7 @@ function DockPaneChrome({
   layout: DockLayout;
   style: CSSProperties;
   hidden: boolean;
+  compact: boolean;
   focused: boolean;
   dragging: boolean;
   pinnedViewIds: readonly string[];
@@ -413,6 +387,9 @@ function DockPaneChrome({
   onUnpinView: DockWorkspaceProps["onUnpinView"];
 }) {
   const selected = layout.views.find((view) => view.id === pane.selectedViewId)!;
+  const tabs = (compact ? layout.panes : [pane]).flatMap((owner) =>
+    owner.viewIds.map((id, index) => ({ id, index, owner })),
+  );
   return (
     <section
       className="dock-pane"
@@ -426,14 +403,15 @@ function DockPaneChrome({
       <div className="dock-pane-header">
         <div role="tablist" aria-label={`Views in ${pane.id}`} className="dock-tabs">
           <SortableContext
-            items={pane.viewIds.map((id) => `view:${id}`)}
+            items={tabs.map(({ id }) => `view:${id}`)}
             strategy={horizontalListSortingStrategy}
           >
-            {pane.viewIds.map((id, tabIndex) => (
+            {tabs.map(({ id, index: tabIndex, owner }) => (
               <DockTab
                 key={id}
                 view={layout.views.find((view) => view.id === id)!}
-                pane={pane}
+                pane={owner}
+                selected={pane.selectedViewId === id}
                 index={tabIndex}
                 prefix={prefix}
                 pinned={pinnedViewIds.includes(id)}
@@ -443,11 +421,13 @@ function DockPaneChrome({
                 onStep={(step, reorder) => {
                   if (reorder)
                     onLayoutChange((current) =>
-                      moveDockView(current, id, { paneId: pane.id, index: tabIndex + step }),
+                      moveDockView(current, id, { paneId: owner.id, index: tabIndex + step }),
                     );
                   else {
                     const target =
-                      pane.viewIds[(tabIndex + step + pane.viewIds.length) % pane.viewIds.length];
+                      tabs[
+                        (tabs.findIndex((tab) => tab.id === id) + step + tabs.length) % tabs.length
+                      ].id;
                     onSelect(target);
                     document.getElementById(`${prefix}-tab-${target}`)?.focus();
                   }
@@ -493,6 +473,7 @@ function DockTab({
   view,
   pane,
   index,
+  selected,
   prefix,
   pinned,
   onSelect,
@@ -503,6 +484,7 @@ function DockTab({
   view: DockView;
   pane: DockPane;
   index: number;
+  selected: boolean;
   prefix: string;
   pinned: boolean;
   onSelect: () => void;
@@ -515,18 +497,25 @@ function DockTab({
     id: `view:${view.id}`,
     data: { type: "dock-tab", viewId: view.id, paneId: pane.id, index },
   });
+  const tabRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (selected) tabRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [selected]);
   return (
     <div className="dock-tab-group">
       <button
         type="button"
-        ref={setNodeRef}
+        ref={(node) => {
+          tabRef.current = node;
+          setNodeRef(node);
+        }}
         {...attributes}
         {...listeners}
         role="tab"
         id={`${prefix}-tab-${view.id}`}
         aria-controls={`${prefix}-view-${view.id}`}
-        aria-selected={pane.selectedViewId === view.id}
-        tabIndex={pane.selectedViewId === view.id ? 0 : -1}
+        aria-selected={selected}
+        tabIndex={selected ? 0 : -1}
         className="dock-tab"
         data-dragging={isDragging}
         onClick={onSelect}

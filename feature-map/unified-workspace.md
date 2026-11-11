@@ -35,7 +35,7 @@ Conversation and tool views share resizable, dockable panes while keeping their 
 
 Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md), build the checkout and use an isolated environment or the sealed browser-contract lane.
 
-- Compact composer, 36px headers, mobile Open views-only navigation and single safe-area inset: `tests/browser_ui/chat/test_workspace_selection_design.py::test_mobile_composer_compacts_workspace_and_keeps_only_open_views`.
+- Compact composer, mobile tabs, density-aware headers/sidebar padding and single safe-area inset: `tests/browser_ui/chat/test_workspace_selection_design.py::test_mobile_composer_keeps_tabs_and_follows_appearance_density`.
 - Approved palette, root confirmation, Settings and Activity sources: `tests/browser_ui/chat/test_workspace_selection_design.py`.
 - Combined picker and controlled chat switching: `web/src/shell/WorkspaceSelectionDialog.test.tsx` and `web/src/components/composer/WorkspaceSwitchControl.test.tsx`.
 - Host/Chat Activity and temporary Settings navigation: `web/src/workbench/ActivityView.test.tsx` and `web/src/hooks/useSettingsNavigationVisibility.test.tsx`.
@@ -55,8 +55,8 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 ## Gotchas
 
 - Closing a view preserves its conversation, shell or schedule; explicit Stop/Delete retains its existing permission and confirmation checks.
-- Workspace header rows are 36px tall.
-- Desktop tab/container headers and view headers remain separate even with one tab; mobile exposes only Open views selection.
+- Workspace header rows are 36px tall, or 32px in Compact appearance; sidebar padding follows the same density setting.
+- Desktop tab/container headers and view headers remain separate even with one tab; mobile reuses scrolling tabs across all panes.
 - Type icons live in desktop tabs, and close controls have accessible names without tooltips.
 - Narrow composer workspace labels collapse while the full location stays accessible; the mobile bottom safe area is reserved once.
 - Neutral hairlines separate viewports; pane focus uses tab fill, never an enclosing accent frame.

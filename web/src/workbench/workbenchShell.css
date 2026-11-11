@@ -1,5 +1,5 @@
 .unified-workbench {
-  --workbench-header-height: 36px;
+  --workbench-header-height: var(--density-header-height, 36px);
   padding-bottom: var(--omnigent-safe-bottom, 0px);
 }
 
@@ -84,8 +84,8 @@ html[data-electron-mac] .unified-workbench .sidebar-header-row {
 }
 
 .unified-workbench :is(.workbench-app-bar, .workspace-control-header) [data-header-action-button] {
-  width: 32px;
-  height: 32px;
+  width: calc(var(--workbench-header-height) - 4px);
+  height: calc(var(--workbench-header-height) - 4px);
 }
 
 .unified-workbench

@@ -32,7 +32,7 @@ def _close_navigation(page: Page) -> None:
     expect(page.get_by_role("button", name="Open navigation", exact=True)).to_be_visible()
 
 
-def test_mobile_composer_compacts_workspace_and_keeps_only_open_views(
+def test_mobile_composer_keeps_tabs_and_follows_appearance_density(
     page: Page,
     workspace_journey: WorkspaceJourney,
     browser_contract: BrowserContract,
@@ -52,14 +52,14 @@ def test_mobile_composer_compacts_workspace_and_keeps_only_open_views(
     expect(selector).to_be_visible()
     expect(selector.locator(".workspace-selector-details")).to_be_hidden()
     expect(selector).to_have_attribute("aria-label", "Change workspace: /workspace")
-    expect(page.get_by_role("combobox", name="Open views", exact=True)).to_be_visible()
-    expect(page.get_by_role("tablist", name="Views in main")).to_be_hidden()
+    expect(page.get_by_role("combobox", name="Open views", exact=True)).to_have_count(0)
+    expect(page.get_by_role("tablist", name="Views in main")).to_be_visible()
 
     geometry = chat.evaluate("""element => {
       const form = element.querySelector('.chat-composer-form');
       const card = form.querySelector('[data-composer-card]');
       const appbar = document.querySelector('.workbench-app-bar');
-      const navigation = document.querySelector('.dock-mobile-navigation');
+      const navigation = document.querySelector('.dock-pane:not([hidden]) .dock-pane-header');
       const header = element.querySelector('.workspace-control-header');
       return {
         appbar: appbar.getBoundingClientRect().height,
@@ -76,7 +76,21 @@ def test_mobile_composer_compacts_workspace_and_keeps_only_open_views(
         "gutter": 8,
         "belowForm": 0,
     }, geometry
-    _capture(page, output_path, "mobile-compact-composer")
+    page.evaluate("document.documentElement.dataset.listDensity = 'compact'")
+    for row in (
+        ".workbench-app-bar",
+        ".dock-pane:not([hidden]) .dock-pane-header",
+        ".workspace-control-header",
+    ):
+        assert page.locator(row).first.evaluate("el => el.getBoundingClientRect().height") == 32
+    page.get_by_role("button", name="Open navigation", exact=True).click()
+    entry = page.locator(".conversations-sidebar .sidebar-row").first
+    expect(entry).to_have_css("padding-top", "2px")
+    page.evaluate("document.documentElement.dataset.listDensity = 'comfortable'")
+    expect(entry).to_have_css("padding-top", "6px")
+    page.get_by_test_id("sidebar-scrim").click(position={"x": 385, "y": 500})
+    expect(page.get_by_role("button", name="Open navigation", exact=True)).to_be_visible()
+    _capture(page, output_path, "mobile-tabs-composer")
 
     selector.click()
     expect(page.get_by_role("dialog", name="Select workspace", exact=True)).to_be_visible()

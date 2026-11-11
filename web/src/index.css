@@ -382,9 +382,9 @@
   line-height: var(--text-ui--line-height);
 }
 
-/* Home-sidebar rows use a fixed 20px line box so their shared 4px block padding
- * produces a natural 28px row without scaling layout geometry. */
+/* Sidebar typography stays stable while Appearance controls row spacing. */
 .sidebar-row {
+  padding-block: var(--list-row-padding-block);
   line-height: 20px;
 }
 

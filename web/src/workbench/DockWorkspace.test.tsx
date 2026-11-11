@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DockWorkspace, type DockWorkspaceProps } from "./DockWorkspace";
@@ -164,19 +172,18 @@ describe("DockWorkspace resource mounts", () => {
       );
     }
     render(<Workspace />);
-    const navigation = screen.getByRole("combobox", { name: "Open views" });
+    expect(screen.queryByRole("combobox", { name: "Open views" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getAllByRole("tablist")).toHaveLength(1);
     expect(screen.getByTestId("c")).toHaveAttribute("data-visible", "true");
-    await user.click(navigation);
-    expect(screen.getAllByRole("option")).toHaveLength(3);
-    await user.click(screen.getByRole("option", { name: "b" }));
+    await user.click(screen.getByRole("tab", { name: "b" }));
     expect(screen.getByTestId("c")).toHaveAttribute("data-visible", "false");
     expect(screen.getByTestId("b")).toHaveAttribute("data-visible", "true");
-    expect(screen.getByRole("tab", { name: "b", hidden: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    for (const list of screen.getAllByRole("tablist", { hidden: true }))
-      expect(list).not.toBeVisible();
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "c" })).toHaveAttribute("aria-selected", "false");
+    await user.click(screen.getByRole("tab", { name: "c" }));
+    expect(screen.getByTestId("c")).toHaveAttribute("data-visible", "true");
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "false");
     expect(document.querySelectorAll('.dock-pane[data-focused="true"]')).toHaveLength(1);
     expect(screen.queryByRole("separator", { name: "Resize panes" })).not.toBeInTheDocument();
   });
@@ -199,7 +206,11 @@ describe("DockWorkspace resource mounts", () => {
     const resource = screen.getByLabelText("Resource a");
     fireEvent.keyDown(screen.getByRole("tab", { name: "a" }), { key: "ArrowRight", altKey: true });
     expect(current.panes[0].viewIds).toEqual(["b", "a"]);
-    await user.click(screen.getByRole("button", { name: "Actions for a" }));
+    await user.click(
+      within(screen.getByRole("tab", { name: "a" }).closest("section")!).getByRole("button", {
+        name: "Pane actions",
+      }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Split right" }));
     expect(current.panes).toHaveLength(2);
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize panes" }), {
@@ -207,7 +218,11 @@ describe("DockWorkspace resource mounts", () => {
     });
     expect(current.tree).toMatchObject({ ratio: 0.55 });
     expect(screen.getByLabelText("Resource a")).toBe(resource);
-    await user.click(screen.getByRole("button", { name: "Actions for a" }));
+    await user.click(
+      within(screen.getByRole("tab", { name: "a" }).closest("section")!).getByRole("button", {
+        name: "Pane actions",
+      }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Move to b" }));
     expect(current.panes).toHaveLength(1);
     expect(screen.getByLabelText("Resource a")).toBe(resource);
