@@ -280,6 +280,9 @@ def test_unified_chat_draft_layout_and_global_commands(
     chat.seed_transcript(2)
     chat.contract.json(f"/v1/sessions/{chat.session_id}/peer-messages", list_payload([]))
     chat.contract.json(f"/v1/sessions/{chat.session_id}/branches", list_payload([]))
+    chat.contract.json(
+        f"/v1/sessions/{chat.session_id}/resources/environments/default/search", list_payload([])
+    )
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(chat.url)
     expect(page.get_by_role("banner", name="Application")).to_be_visible()
