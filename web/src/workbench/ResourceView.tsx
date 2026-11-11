@@ -1,5 +1,5 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { MapPinIcon } from "lucide-react";
+import { MapPinIcon, ArrowUpIcon } from "lucide-react";
 import {
   useCallback,
   useContext,
@@ -13,7 +13,13 @@ import { useHosts } from "@/hooks/useHosts";
 import { useSession } from "@/hooks/useSession";
 import { authenticatedFetch } from "@/lib/identity";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
-import { ResourceViewIdContext, usePanelFolder, useResourceViewState } from "@/lib/panelFolder";
+import {
+  ResourceViewIdContext,
+  usePanelFolder,
+  useResourceViewState,
+  panelFolderKey,
+  setPanelFolder,
+} from "@/lib/panelFolder";
 import { WorkbenchWorkspaceProvider, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { joinBrowseLocation } from "@/lib/workspacePaths";
 import {
@@ -23,18 +29,14 @@ import {
 } from "@/lib/workspaceComparison";
 import { getExplorerGitScope, setExplorerGitScope } from "@/lib/explorerGitScope";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { TooltipButton } from "@/components/ui/tooltip";
 import { FilesPanel } from "@/shell/FilesPanel";
 import { ContentSearchPanel } from "@/shell/ContentSearchPanel";
 import { FileViewer } from "@/shell/FileViewer";
 import { PullRequestPanel } from "@/shell/PullRequestPanel";
-import { WorkspacePickerDialog } from "@/shell/WorkspacePickerDialog";
+import { WorkspaceSelectionDialog } from "@/shell/WorkspaceSelectionDialog";
+import { WorkspaceSelector } from "@/shell/WorkspaceSelector";
+import { parentOf } from "@/shell/WorkspacePicker";
 import {
   FileViewerContext,
   type FileNavigationGuard,
@@ -66,7 +68,7 @@ export interface ResourceViewProps {
   position?: FilePosition;
   comparisonScope?: "files" | "changes";
   onOpenFile: (path: string, options: ResourceOpenFileOptions) => void;
-  onWorkspaceChange?: (workspace: WorkbenchWorkspace) => void;
+  onWorkspaceChange?: (workspace: WorkbenchWorkspace) => boolean | void | Promise<boolean | void>;
   registerNavigationGuard?: (guard: FileNavigationGuard) => () => void;
   onClose?: () => void;
 }
@@ -122,7 +124,7 @@ function ResourceViewBody({
   const folder = usePanelFolder(owner, root, viewId);
   const [showHidden, setShowHidden] = useResourceViewState(owner, viewId, "hidden", false);
   const [sort, setSort] = useResourceViewState<ChangedSort>(owner, viewId, "sort", "alpha");
-  const [pickerHost, setPickerHost] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const guardRef = useRef<FileNavigationGuard | undefined>(undefined);
@@ -200,7 +202,7 @@ function ResourceViewBody({
   );
 
   async function changeLocation(hostId: string, nextRoot: string) {
-    if (!workspace || !onWorkspaceChange) return;
+    if (!workspace || !onWorkspaceChange) return false;
     setBusy(true);
     setError(null);
     try {
@@ -213,59 +215,61 @@ function ResourceViewBody({
       const next = (await response.json()) as WorkbenchWorkspace;
       if (!next?.id || typeof next.root !== "string" || !Array.isArray(next.capabilities))
         throw new Error("The server returned an invalid workspace identity.");
-      if (mounted.current) {
-        const apply = () => onWorkspaceChange({ ...next, chatSessionId: null });
-        if (registerNavigationGuard) apply();
-        else guardTransition(apply);
-      }
+      if (!mounted.current) return false;
+      const capturedNext = { ...next, chatSessionId: null };
+      const apply = async () => {
+        const accepted = await onWorkspaceChange(capturedNext);
+        if (accepted === false) return false;
+        setPanelFolder(panelFolderKey(next.id, viewId)!, null);
+        return true;
+      };
+      if (registerNavigationGuard) return await apply();
+      const guard = guardRef.current;
+      if (!guard) return await apply();
+      const accepted = await new Promise<boolean>((resolve) => {
+        guard(
+          "",
+          { workspaceId: next.id },
+          () => resolve(true),
+          () => resolve(false),
+        );
+      });
+      return accepted ? await apply() : false;
     } catch (failure) {
       if (mounted.current) setError(failure instanceof Error ? failure.message : String(failure));
+      throw failure;
     } finally {
       if (mounted.current) setBusy(false);
     }
   }
+
   const selectedHost = hosts.data?.find((host) => host.host_id === workspace?.host_id);
-  const currentHost = workspace?.host_id ?? `target:${workspace?.id ?? conversationId}`;
-  const missingHost = !selectedHost;
   const unavailable = workspace?.available === false || selectedHost?.status === "offline";
+  const selectedPath = workspace ? joinBrowseLocation(workspace.root, folder) : (root ?? "");
+  const parentPath = parentOf(selectedPath);
   const locationControls = workspace ? (
     <div className="flex min-w-0 items-center gap-1">
-      <Select
-        value={currentHost}
+      <TooltipButton
+        type="button"
+        aria-label="Up one folder"
+        disabled={busy || !onWorkspaceChange || !workspace.host_id || !parentPath}
+        className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40"
+        onClick={() => {
+          if (workspace.host_id && parentPath)
+            void changeLocation(workspace.host_id, parentPath).catch((failure) => {
+              if (mounted.current)
+                setError(failure instanceof Error ? failure.message : String(failure));
+            });
+        }}
+      >
+        <ArrowUpIcon className="size-3.5" />
+      </TooltipButton>
+      <WorkspaceSelector
+        hostLabel={selectedHost?.name ?? workspace.host_id ?? workspace.target_kind}
+        path={selectedPath}
         disabled={busy || !onWorkspaceChange}
-        onValueChange={setPickerHost}
-      >
-        <SelectTrigger aria-label="Machine" className="h-7 min-w-0 max-w-36 text-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {missingHost && (
-            <SelectItem value={currentHost}>
-              {workspace.host_id ?? workspace.target_kind} (unavailable)
-            </SelectItem>
-          )}
-          {hosts.data?.map((host) => (
-            <SelectItem
-              key={host.host_id}
-              value={host.host_id}
-              disabled={host.status === "offline"}
-            >
-              {host.name}
-              {host.status === "offline" ? " (offline)" : ""}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button
-        variant="ghost"
-        className="min-w-0 truncate font-mono text-xs"
-        aria-label="Select folder"
-        title={joinBrowseLocation(workspace.root, folder)}
-        disabled={busy || !onWorkspaceChange || !workspace.host_id}
-        onClick={() => setPickerHost(workspace.host_id)}
-      >
-        {joinBrowseLocation(workspace.root, folder)}
-      </Button>
+        onClick={() => setPickerOpen(true)}
+      />
     </div>
   ) : null;
   const previewLocationControls = locationControls ? (
@@ -285,7 +289,7 @@ function ResourceViewBody({
       <div className="flex h-full min-h-0 flex-col" data-resource-view={viewId}>
         {hosts.error && (
           <p role="alert" className="px-2 text-xs text-destructive">
-            Could not load machines: {hosts.error.message}
+            Could not load hosts: {hosts.error.message}
           </p>
         )}
         {error && (
@@ -377,21 +381,18 @@ function ResourceViewBody({
               </p>
             ))}
         </div>
-        {pickerHost && workspace && (
-          <WorkspacePickerDialog
-            open
-            hostId={pickerHost}
-            initialPath={
-              pickerHost === workspace.host_id
-                ? joinBrowseLocation(workspace.root, folder)
-                : undefined
-            }
-            title="Select folder"
-            description="Choose the folder for this view."
-            onOpenChange={(open) => {
-              if (!open) setPickerHost(null);
+        {workspace && (
+          <WorkspaceSelectionDialog
+            open={pickerOpen}
+            hostId={workspace.host_id}
+            hostLabel={selectedHost?.name ?? workspace.host_id ?? workspace.target_kind}
+            initialPath={selectedPath}
+            onOpenChange={setPickerOpen}
+            busy={busy}
+            onConfirm={({ hostId, path: nextRoot }) => {
+              if (!hostId) throw new Error("Select an available host for this workspace.");
+              return changeLocation(hostId, nextRoot);
             }}
-            onConfirm={(nextRoot) => void changeLocation(pickerHost, nextRoot)}
           />
         )}
       </div>

@@ -83,16 +83,32 @@ function renderTree(initial = "root") {
     </QueryClientProvider>,
   );
 }
-it("expands four levels lazily, navigates exact chats, and retains menus and expansion on remount", async () => {
+it("preserves the running spinner on a chat open elsewhere", async () => {
+  vi.mocked(useConversations).mockReturnValue(
+    conversationPage([{ ...rows[0], status: "running" }]),
+  );
+  renderTree("two");
+  const spinner = await screen.findByRole("img", { name: "Session running" });
+  expect(spinner.querySelector("svg")).not.toBeNull();
+  expect(spinner.closest("[data-sidebar-session-id]")).toHaveAttribute(
+    "data-open-elsewhere",
+    "true",
+  );
+  expect(screen.queryByLabelText("Open elsewhere")).toBeNull();
+});
+it("preloads hierarchy, expands four levels, and retains navigation, menus and expansion on remount", async () => {
   const mounted = renderTree();
   await waitFor(() =>
     expect(screen.getByRole("link", { name: "root" })).toHaveAttribute("aria-current", "page"),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Expand subchats of root" })).toBeInTheDocument(),
   );
   expect(
     vi
       .mocked(authenticatedFetch)
       .mock.calls.filter(([url]) => String(url).startsWith("/v1/sessions?")),
-  ).toHaveLength(0);
+  ).toHaveLength(1);
   for (const id of ["root", "one", "two", "three"]) {
     // Each expansion reveals the next branch.
     // oxlint-disable-next-line no-await-in-loop
@@ -105,7 +121,8 @@ it("expands four levels lazily, navigates exact chats, and retains menus and exp
     expect(screen.getByRole("link", { name: "four" })).toHaveAttribute("aria-current", "page"),
   );
   expect(screen.getByRole("link", { name: /two/ })).not.toHaveAttribute("aria-current");
-  expect(screen.getAllByLabelText("Open elsewhere")).toHaveLength(2);
+  expect(screen.queryByLabelText("Open elsewhere")).not.toBeInTheDocument();
+  expect(document.querySelectorAll('[data-open-elsewhere="true"]')).toHaveLength(2);
   const row = leaf.closest("[data-sidebar-session-id]")!;
   fireEvent.contextMenu(within(row as HTMLElement).getByRole("link"));
   expect(await screen.findByRole("menuitem", { name: /Rename/ })).toBeInTheDocument();
@@ -116,6 +133,9 @@ it("expands four levels lazily, navigates exact chats, and retains menus and exp
   expect(screen.getByRole("button", { name: "Collapse subchats of one" })).toHaveAttribute(
     "aria-expanded",
     "true",
+  );
+  expect(screen.getByRole("button", { name: "Collapse subchats of one" })).toHaveClass(
+    "transition-none",
   );
 });
 it("never renders inaccessible ancestor titles and keeps an authorized orphan usable", async () => {

@@ -79,11 +79,14 @@ export function TerminalInventoryView({
   active,
   onOpenTerminal,
   onNewTerminal,
+  embedded = false,
 }: {
   workspace: WorkbenchWorkspace;
   active: boolean;
   onOpenTerminal: (terminalId: string) => void;
   onNewTerminal: () => void;
+  /** Host Activity supplies the view header; retain this inventory's root and actions. */
+  embedded?: boolean;
 }) {
   // The legacy live-tab hook excludes exited/stopped rows; this cache retains them.
   const inventory = useQuery({
@@ -114,8 +117,13 @@ export function TerminalInventoryView({
     inventory.data?.available === true &&
     !inventory.error;
   return (
-    <section aria-label="Shell inventory" className="flex h-full min-h-0 flex-col">
-      <header className="workspace-control-header flex shrink-0 items-center gap-2 border-b px-3">
+    <section
+      aria-label={`Shell inventory${embedded ? ` · ${workspace.root}` : ""}`}
+      className={`flex min-h-0 flex-col bg-[var(--workspace-content)] ${embedded ? "" : "h-full"}`}
+    >
+      <header
+        className={`flex shrink-0 items-center gap-2 border-b px-3 ${embedded ? "min-h-10 py-1" : "workspace-control-header"}`}
+      >
         <span className="min-w-0 flex-1 truncate text-sm">Shells · {workspace.root}</span>
         <TooltipButton
           type="button"

@@ -25,8 +25,17 @@ import {
   UsersIcon,
   VectorSquareIcon,
 } from "lucide-react";
-import { Link, useLocation } from "@/lib/routing";
+import { Link, useLocation, useNavigate } from "@/lib/routing";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useServerInfo } from "@/lib/CapabilitiesContext";
 import { customAgentsSettingsEnabled, isSingleUserMode } from "@/lib/capabilities";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
@@ -238,15 +247,8 @@ export function useTrackSettingsReturn(): void {
   }, [inSettings, pathname, search]);
 }
 
-/**
- * Settings nav rendered inside the sidebar card, replacing the conversation
- * list on /settings. Its Back row matches the navigation rows below it.
- */
-export function SettingsSidebarBody({
-  onNavClick,
-}: {
-  onNavClick: (e: React.MouseEvent<HTMLAnchorElement>) => void;
-}) {
+/** Use the same capabilities and identity gates for both navigation surfaces. */
+function useSettingsNavGroups(): SettingsNavGroup[] {
   const info = useServerInfo();
   // Account section shows whenever there's a login session (accounts OR OIDC).
   const hasAuthSession = info !== "loading" && info.login_url !== null;
@@ -257,8 +259,7 @@ export function SettingsSidebarBody({
   const integrationsEnabled =
     info !== "loading" && (info.enabled_connections ?? []).some((provider) => provider !== "mcp");
   const mcpEnabled = info !== "loading" && (info.enabled_connections ?? []).includes("mcp");
-  const { section } = useSettingsRoute();
-  const groups = settingsNavGroups(
+  return settingsNavGroups(
     hasAuthSession,
     isElectronShell(),
     isAdmin,
@@ -267,6 +268,45 @@ export function SettingsSidebarBody({
     customAgentsSettingsEnabled(info),
     mcpEnabled,
   );
+}
+
+/** Mobile navigation remains in the content header even with the drawer closed. */
+export function SettingsSectionChooser() {
+  const groups = useSettingsNavGroups();
+  const { section } = useSettingsRoute();
+  const navigate = useNavigate();
+  return (
+    <Select value={section} onValueChange={(value) => navigate(`/settings/${value}`)}>
+      <SelectTrigger aria-label="Settings section" className="h-11 w-full">
+        <SelectValue placeholder="Choose a section" />
+      </SelectTrigger>
+      <SelectContent position="popper">
+        {groups.map((group) => (
+          <SelectGroup key={group.title}>
+            <SelectLabel>{group.title}</SelectLabel>
+            {group.items
+              .filter((item) => !item.hideOnMobile)
+              .map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  <item.icon className="size-4" aria-hidden />
+                  {item.label}
+                </SelectItem>
+              ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Settings sections in the shell's existing sidebar. */
+export function SettingsSidebarBody({
+  onNavClick,
+}: {
+  onNavClick: (e: React.MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  const { section } = useSettingsRoute();
+  const groups = useSettingsNavGroups();
 
   return (
     <>
@@ -283,13 +323,8 @@ export function SettingsSidebarBody({
             "w-fit justify-start border-0 font-normal text-muted-foreground",
           )}
         >
-          {/* Returns to wherever the user was before entering settings (the
-          conversation they were viewing, or home) — see settingsReturnPath.
-          No onNavClick here: on mobile the sidebar is a full-screen overlay.
-          Leaving /settings swaps the sidebar back to the conversation list —
-          but we keep the overlay OPEN so mobile lands on that list rather than
-          closing onto the content behind it. On desktop onNavClick is a no-op
-          (persistent card), so dropping it changes nothing there. */}
+          {/* Return to the previous conversation or home; the shell restores
+          the sidebar state captured when Settings opened. */}
           <Link to={settingsReturnPath} componentId="settings.back_to_omnigent">
             <ArrowLeftIcon className="ui-icon" />
             Back

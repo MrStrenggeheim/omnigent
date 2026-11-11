@@ -184,11 +184,17 @@ export function useDockLayout({
       const updated = { ...view, ...patch, id };
       const replacing = !sameDockResource(view, updated);
       if (replacing && guard.current && !(await guard.current(view))) return false;
-      if (!alive.current || current.current !== captured) return false;
+      const latest = current.current;
+      if (!alive.current || latest.generation !== captured.generation) return false;
+      const latestView = retainedDockViews(latest.state).find((item) => item.id === id);
+      // Focus/resizing can change while the dirty-resource decision is pending.
+      // Only an actual replacement of the captured resource invalidates it.
+      if (!latestView || !sameDockResource(view, latestView)) return false;
+      const accepted = { ...latestView, ...patch, id };
       const replace = (layout: DockLayout): DockLayout => {
         const next = {
           ...layout,
-          views: layout.views.map((item) => (item.id === id ? updated : item)),
+          views: layout.views.map((item) => (item.id === id ? accepted : item)),
         };
         if (!parseDockLayout(next)) throw new Error("Invalid dock view update");
         return next;

@@ -24,10 +24,8 @@ import { MAIN_CANVAS_ID } from "@/canvas/canvasLayout";
 import { CANVAS_QUERY_PARAM, canvasLocation } from "@/canvas/canvasNavigation";
 import {
   ComposerWorkspaceTrigger,
-  ComposerHostTrigger,
   ComposerPermissionPicker,
   ComposerConfigTooltipRows,
-  ComposerMenuTooltip,
 } from "@/components/composer/ComposerControls";
 import { ComposerAddMenu } from "@/components/composer/ComposerAddMenu";
 import {
@@ -68,9 +66,6 @@ import {
   ChevronsUpDownIcon,
   GitBranchIcon,
   LockIcon,
-  FolderGit2Icon,
-  FolderIcon,
-  FolderOpenIcon,
   PlusIcon,
   ShuffleIcon,
   WandSparklesIcon,
@@ -165,8 +160,8 @@ import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useModelPickerHotkey } from "@/hooks/useModelPickerHotkey";
 import { CliCommandBlock, renderTextWithInlineCode } from "./CliCommandBlock";
 import { isHostAbsolutePath, isNavigablePath } from "./WorkspacePicker";
-import { WorkspacePickerDialog } from "./WorkspacePickerDialog";
-import { RecentWorkspaceList } from "./RecentWorkspaceList";
+import { WorkspaceSelectionDialog } from "./WorkspaceSelectionDialog";
+import { WorkspaceSelector } from "./WorkspaceSelector";
 import {
   WORKTREE_RADIO_SELECTOR_INPUT_CLASS,
   WORKTREE_RADIO_SELECTOR_ROW_CLASS,
@@ -2528,7 +2523,7 @@ export function NewChatLandingScreen() {
   // Applied (or given up) once, after the first prefill; later resets use the usual defaults.
   const onboardingHostSettled = useRef(false);
   const [connectingThisMachine, setConnectingThisMachine] = useState(false);
-  const [hostMenuOpen, setHostMenuOpen] = useState(false);
+  const [, setHostMenuOpen] = useState(false);
   // Error surfaced when "Run on this machine" fails (sign-in needed, enrollment
   // declined, server unreachable). Rendered in the composer body with a retry,
   // so the failure isn't silently swallowed and the user isn't stranded on the
@@ -2714,7 +2709,6 @@ export function NewChatLandingScreen() {
     if (mode === "on") _setPickedModel("");
   }, []);
   // Controls the working-directory popover so picking a directory closes it.
-  const [workspacePopoverOpen, setWorkspacePopoverOpen] = useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [workspacePickerInitialPath, setWorkspacePickerInitialPath] = useState<string | undefined>(
     undefined,
@@ -4669,8 +4663,6 @@ export function NewChatLandingScreen() {
   }, [info, smartRoutingEnabled, pickedHarness]);
   const workspaceTrimmed = workspace.trim();
   const workspaceValid = isValidWorkspace(workspace);
-  const isCloudHost =
-    sandboxSelected || (selectedHost?.name?.toLowerCase().includes("cloud") ?? false);
 
   // Only register loaded owned sessions on the selected host with a workspace
   // for live directory-conflict checks.
@@ -5276,29 +5268,6 @@ export function NewChatLandingScreen() {
       : sandboxSelected
         ? selectedSandboxLabel
         : (selectedHostDisplayName ?? "No host selected");
-  const hostTooltipRows =
-    connectingThisMachine || connectingArca
-      ? [
-          {
-            label: "Host",
-            value: connectingArca ? "Arca" : localMachineLabel(navigator.userAgent),
-          },
-          { label: "Status", value: "Connecting…" },
-        ]
-      : sandboxSelected
-        ? [
-            { label: "Host", value: selectedSandboxLabel },
-            { label: "Status", value: "Starts when you send" },
-          ]
-        : selectedHostDisplayName !== null
-          ? [
-              { label: "Host", value: selectedHostDisplayName },
-              {
-                label: "Status",
-                value: selectedHost?.status === "online" ? "Connected" : "Disconnected",
-              },
-            ]
-          : [{ label: "Host", value: "None" }];
   const worktreeControlAvailable =
     !sandboxSelected &&
     workspaceIsGit &&
@@ -6253,7 +6222,10 @@ export function NewChatLandingScreen() {
         key={host.host_id}
         onSelect={() => {
           if (reconnect) pendingConnectRef.current = true;
-          else selectHost(host.host_id);
+          else {
+            selectHost(host.host_id);
+            setWorkspacePickerOpen(false);
+          }
         }}
         disabled={reconnect ? connectingThisMachine : host.status !== "online"}
         data-testid={
@@ -6296,43 +6268,204 @@ export function NewChatLandingScreen() {
     />
   ) : null;
 
-  // The two compact triggers preserve the existing directory and worktree
-  // actions while exposing their distinct state truthfully.
-  const workspaceChip = (
-    <ComposerWorkspaceTrigger
-      kind="directory"
-      label={noExecutionTargetSelected ? "No host selected" : visibleWorktreeHeader.repositoryLabel}
-      iconOnly={noExecutionTargetSelected}
-      icon={
-        workspaceIsGit ? (
-          <FolderGit2Icon
-            className="size-3.5 shrink-0"
-            data-testid="new-chat-landing-workspace-icon-git"
-          />
-        ) : (
-          <FolderIcon
-            className="size-3.5 shrink-0"
-            data-testid="new-chat-landing-workspace-icon-folder"
-          />
-        )
-      }
-      aria-label={
-        noExecutionTargetSelected
-          ? "Working directory: No host selected"
-          : `Working directory: ${visibleWorkspace || "Not selected"}`
-      }
-      title={
-        workspacePopoverOpen
-          ? undefined
-          : noExecutionTargetSelected
-            ? "No host selected"
-            : visibleWorkspace || "Working directory not selected"
-      }
-      disabled={noExecutionTargetSelected || workspaceLoading}
-      aria-busy={workspaceLoading || undefined}
-      className={noExecutionTargetSelected || workspaceLoading ? "disabled:opacity-100" : undefined}
-      data-testid="new-chat-landing-workspace-chip"
-    />
+  const workspaceHostActions = (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        setHostMenuOpen(open);
+        if (!open) setOfflineHostLimit(0);
+        // Run a requested "connect this machine" only once the menu
+        // has closed.
+        if (!open && pendingConnectRef.current) {
+          pendingConnectRef.current = false;
+          void connectThisMachine();
+        }
+        if (!open && pendingArcaConnectRef.current) {
+          pendingArcaConnectRef.current = false;
+          void connectArca();
+        }
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          className="mt-3 min-h-11 w-full justify-start text-xs text-muted-foreground"
+          data-testid="new-chat-landing-host-chip"
+        >
+          <PlusIcon className="size-4" /> More host options
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        sideOffset={6}
+        className="composer-host-menu min-w-[220px] max-w-[min(360px,calc(100vw-24px))]"
+        data-testid="new-chat-landing-host-menu"
+      >
+        {hasCloudOptions && (
+          <div className="px-2 py-1 text-xs leading-[18px] text-muted-foreground/75">Cloud</div>
+        )}
+        {/* Server-provisioned sandbox — only advertised when
+                    /v1/info reports managed_sandboxes_enabled. Pinned
+                    first, above the connected-host list. */}
+        {(managedSandboxesEnabled || showDisabledSandboxWithDocs) &&
+          (managedSandboxesEnabled ? (
+            sandboxProviderRows.map((provider, index) => (
+              <DropdownMenuItem
+                key={provider ?? "default"}
+                onSelect={() => {
+                  selectSandbox(provider);
+                  setWorkspacePickerOpen(false);
+                }}
+                // First row keeps the original testid; later
+                // rows get a scoped one.
+                data-testid={
+                  index === 0
+                    ? "new-chat-landing-sandbox-option"
+                    : `new-chat-landing-sandbox-option-${provider}`
+                }
+                data-active={sandboxSelected && sandboxProvider === provider ? "true" : undefined}
+                className="text-sm data-[active=true]:bg-muted dark:data-[active=true]:bg-muted/50"
+              >
+                <span className="flex items-center gap-1">
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    <MonitorCloudIcon className="size-3.5 text-muted-foreground" />
+                  </span>
+                  <span className="text-sm">{sandboxOptionLabel(provider)}</span>
+                </span>
+              </DropdownMenuItem>
+            ))
+          ) : (
+            <DropdownMenuItem
+              aria-disabled="true"
+              onSelect={(e) => e.preventDefault()}
+              className="flex items-center justify-between px-2 py-1.5 text-sm text-muted-foreground opacity-60"
+              data-testid="new-chat-landing-sandbox-option-disabled"
+            >
+              <span className="flex items-center gap-1">
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  <MonitorCloudIcon className="size-3.5 text-muted-foreground" />
+                </span>
+                <span className="text-sm">New Sandbox</span>
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <TooltipButton
+                    type="button"
+                    className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground/80 hover:text-foreground"
+                    aria-label="Why New Sandbox is unavailable"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+                    }}
+                  >
+                    <CircleHelpIcon className="size-3.5" />
+                  </TooltipButton>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-64">{newSandboxTooltipContent}</TooltipContent>
+              </Tooltip>
+            </DropdownMenuItem>
+          ))}
+        {cloudHosts.map(renderHostMenuItem)}
+        {showArcaOption && (
+          <DropdownMenuItem
+            onSelect={() => {
+              pendingArcaConnectRef.current = true;
+            }}
+            disabled={connectingArca}
+            data-testid="new-chat-landing-run-on-arca"
+          >
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              <MonitorCloudIcon className="size-3.5 text-muted-foreground" />
+            </span>
+            <span>{connectingArca ? "Connecting to Arca…" : "Run on Arca"}</span>
+          </DropdownMenuItem>
+        )}
+        {hasCloudOptions && <DropdownMenuSeparator />}
+        <div className="px-2 py-1 text-xs leading-[18px] text-muted-foreground/75">My machines</div>
+        {localHosts.length === 0 && !showConnectThisMachine && myMachinesEmptyText && (
+          <div className="px-2 py-1.5 text-sm text-muted-foreground">{myMachinesEmptyText}</div>
+        )}
+        {localHosts.map(renderHostMenuItem)}
+        {/* Desktop shell, no active host and machine not listed:
+                    show the disconnected local-machine state inline. */}
+        {showConnectThisMachine && (
+          <DropdownMenuItem
+            onSelect={() => {
+              pendingConnectRef.current = true;
+            }}
+            disabled={connectingThisMachine}
+            data-testid="new-chat-landing-run-on-this-machine"
+            className="group gap-1 text-sm"
+          >
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              <span
+                aria-hidden
+                className="size-2 rounded-full border-[1.5px] border-muted-foreground"
+              />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {localMachineLabel(navigator.userAgent)}
+            </span>
+            <span
+              className="inline-flex h-6 shrink-0 items-center rounded-md px-2 text-xs font-medium text-muted-foreground group-hover:text-foreground"
+              data-testid="new-chat-landing-use-this-machine"
+            >
+              {connectingThisMachine ? <ConnectingText /> : "Use this machine"}
+            </span>
+          </DropdownMenuItem>
+        )}
+        {otherOfflineHosts.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              aria-expanded={offlineHostLimit > 0}
+              onSelect={(event) => {
+                event.preventDefault();
+                setOfflineHostLimit((limit) => (limit > 0 ? 0 : 5));
+              }}
+              className="text-muted-foreground"
+            >
+              {offlineHostLimit > 0 ? (
+                <ChevronDownIcon className="size-4" />
+              ) : (
+                <ChevronRightIcon className="size-4" />
+              )}
+              Offline hosts ({otherOfflineHosts.length})
+            </DropdownMenuItem>
+            {offlineHostLimit > 0 && (
+              <>
+                <div role="group" aria-label="Offline hosts" className="max-h-48 overflow-y-auto">
+                  {otherOfflineHosts.slice(0, offlineHostLimit).map(renderHostMenuItem)}
+                </div>
+                {offlineHostLimit < otherOfflineHosts.length && (
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setOfflineHostLimit((limit) => limit + 5);
+                    }}
+                    className="text-muted-foreground"
+                  >
+                    Show more ({otherOfflineHosts.length - offlineHostLimit} remaining)
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+          </>
+        )}
+        <DropdownMenuSeparator />
+        {/* Persistent escape hatch: open the connect-a-host
+                    instructions. Present even with zero hosts so a fresh user
+                    is never stuck. */}
+        <DropdownMenuItem
+          onSelect={() => setConnectOpen(true)}
+          data-testid="new-chat-landing-connect-host"
+          className="composer-host-connect text-muted-foreground"
+        >
+          <PlusIcon className="size-4" />
+          Connect new host
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   return (
@@ -6569,241 +6702,18 @@ export function NewChatLandingScreen() {
                         }}
                       />
                     </div>
-                    {/* Host chip */}
-                    <DropdownMenu
-                      onOpenChange={(open) => {
-                        setHostMenuOpen(open);
-                        if (!open) setOfflineHostLimit(0);
-                        // Run a requested "connect this machine" only once the menu
-                        // has closed.
-                        if (!open && pendingConnectRef.current) {
-                          pendingConnectRef.current = false;
-                          void connectThisMachine();
-                        }
-                        if (!open && pendingArcaConnectRef.current) {
-                          pendingArcaConnectRef.current = false;
-                          void connectArca();
-                        }
+                    <WorkspaceSelector
+                      hostLabel={hostLabel}
+                      path={sandboxSelected ? "Managed workspace" : visibleWorkspace}
+                      disabled={creating || workspaceLoading}
+                      data-testid="new-chat-landing-workspace-chip"
+                      onClick={() => {
+                        setWorkspacePickerInitialPath(
+                          isNavigablePath(workspaceTrimmed) ? workspaceTrimmed : undefined,
+                        );
+                        setWorkspacePickerOpen(true);
                       }}
-                    >
-                      <ComposerMenuTooltip
-                        menuOpen={hostMenuOpen}
-                        content={<ComposerConfigTooltipRows rows={hostTooltipRows} />}
-                        variant="session-info"
-                        testId="new-chat-landing-host-tooltip"
-                        className="shrink-0"
-                        // Two short rows: size to the text, wrapping at the pill's width.
-                        contentClassName="w-max max-w-64"
-                      >
-                        <DropdownMenuTrigger asChild>
-                          <ComposerHostTrigger
-                            label={
-                              sandboxSelected
-                                ? `Host: ${hostLabel}`
-                                : `Host: ${hostLabel}, ${selectedHost?.status === "online" ? "Online" : "Offline"}`
-                            }
-                            status={
-                              sandboxSelected ? undefined : (selectedHost?.status ?? "offline")
-                            }
-                            cloud={isCloudHost}
-                            className={cn(
-                              connectingThisMachine &&
-                                "w-auto gap-1 pr-2 after:animate-pulse after:text-xs after:font-normal after:content-['Connecting…']",
-                            )}
-                            testIdPrefix="new-chat-landing"
-                            data-testid="new-chat-landing-host-chip"
-                          />
-                        </DropdownMenuTrigger>
-                      </ComposerMenuTooltip>
-                      <DropdownMenuContent
-                        align="start"
-                        sideOffset={6}
-                        className="composer-host-menu min-w-[220px] max-w-[min(360px,calc(100vw-24px))]"
-                        data-testid="new-chat-landing-host-menu"
-                      >
-                        {hasCloudOptions && (
-                          <div className="px-2 py-1 text-xs leading-[18px] text-muted-foreground/75">
-                            Cloud
-                          </div>
-                        )}
-                        {/* Server-provisioned sandbox — only advertised when
-                    /v1/info reports managed_sandboxes_enabled. Pinned
-                    first, above the connected-host list. */}
-                        {(managedSandboxesEnabled || showDisabledSandboxWithDocs) &&
-                          (managedSandboxesEnabled ? (
-                            sandboxProviderRows.map((provider, index) => (
-                              <DropdownMenuItem
-                                key={provider ?? "default"}
-                                onSelect={() => selectSandbox(provider)}
-                                // First row keeps the original testid; later
-                                // rows get a scoped one.
-                                data-testid={
-                                  index === 0
-                                    ? "new-chat-landing-sandbox-option"
-                                    : `new-chat-landing-sandbox-option-${provider}`
-                                }
-                                data-active={
-                                  sandboxSelected && sandboxProvider === provider
-                                    ? "true"
-                                    : undefined
-                                }
-                                className="text-sm data-[active=true]:bg-muted dark:data-[active=true]:bg-muted/50"
-                              >
-                                <span className="flex items-center gap-1">
-                                  <span className="flex size-4 shrink-0 items-center justify-center">
-                                    <MonitorCloudIcon className="size-3.5 text-muted-foreground" />
-                                  </span>
-                                  <span className="text-sm">{sandboxOptionLabel(provider)}</span>
-                                </span>
-                              </DropdownMenuItem>
-                            ))
-                          ) : (
-                            <DropdownMenuItem
-                              aria-disabled="true"
-                              onSelect={(e) => e.preventDefault()}
-                              className="flex items-center justify-between px-2 py-1.5 text-sm text-muted-foreground opacity-60"
-                              data-testid="new-chat-landing-sandbox-option-disabled"
-                            >
-                              <span className="flex items-center gap-1">
-                                <span className="flex size-4 shrink-0 items-center justify-center">
-                                  <MonitorCloudIcon className="size-3.5 text-muted-foreground" />
-                                </span>
-                                <span className="text-sm">New Sandbox</span>
-                              </span>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <TooltipButton
-                                    type="button"
-                                    className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground/80 hover:text-foreground"
-                                    aria-label="Why New Sandbox is unavailable"
-                                    onClick={(e) => e.stopPropagation()}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-                                    }}
-                                  >
-                                    <CircleHelpIcon className="size-3.5" />
-                                  </TooltipButton>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-64">
-                                  {newSandboxTooltipContent}
-                                </TooltipContent>
-                              </Tooltip>
-                            </DropdownMenuItem>
-                          ))}
-                        {cloudHosts.map(renderHostMenuItem)}
-                        {showArcaOption && (
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              pendingArcaConnectRef.current = true;
-                            }}
-                            disabled={connectingArca}
-                            data-testid="new-chat-landing-run-on-arca"
-                          >
-                            <span className="flex size-4 shrink-0 items-center justify-center">
-                              <MonitorCloudIcon className="size-3.5 text-muted-foreground" />
-                            </span>
-                            <span>{connectingArca ? "Connecting to Arca…" : "Run on Arca"}</span>
-                          </DropdownMenuItem>
-                        )}
-                        {hasCloudOptions && <DropdownMenuSeparator />}
-                        <div className="px-2 py-1 text-xs leading-[18px] text-muted-foreground/75">
-                          My machines
-                        </div>
-                        {localHosts.length === 0 &&
-                          !showConnectThisMachine &&
-                          myMachinesEmptyText && (
-                            <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                              {myMachinesEmptyText}
-                            </div>
-                          )}
-                        {localHosts.map(renderHostMenuItem)}
-                        {/* Desktop shell, no active host and machine not listed:
-                    show the disconnected local-machine state inline. */}
-                        {showConnectThisMachine && (
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              pendingConnectRef.current = true;
-                            }}
-                            disabled={connectingThisMachine}
-                            data-testid="new-chat-landing-run-on-this-machine"
-                            className="group gap-1 text-sm"
-                          >
-                            <span className="flex size-4 shrink-0 items-center justify-center">
-                              <span
-                                aria-hidden
-                                className="size-2 rounded-full border-[1.5px] border-muted-foreground"
-                              />
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-sm">
-                              {localMachineLabel(navigator.userAgent)}
-                            </span>
-                            <span
-                              className="inline-flex h-6 shrink-0 items-center rounded-md px-2 text-xs font-medium text-muted-foreground group-hover:text-foreground"
-                              data-testid="new-chat-landing-use-this-machine"
-                            >
-                              {connectingThisMachine ? <ConnectingText /> : "Use this machine"}
-                            </span>
-                          </DropdownMenuItem>
-                        )}
-                        {otherOfflineHosts.length > 0 && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              aria-expanded={offlineHostLimit > 0}
-                              onSelect={(event) => {
-                                event.preventDefault();
-                                setOfflineHostLimit((limit) => (limit > 0 ? 0 : 5));
-                              }}
-                              className="text-muted-foreground"
-                            >
-                              {offlineHostLimit > 0 ? (
-                                <ChevronDownIcon className="size-4" />
-                              ) : (
-                                <ChevronRightIcon className="size-4" />
-                              )}
-                              Offline hosts ({otherOfflineHosts.length})
-                            </DropdownMenuItem>
-                            {offlineHostLimit > 0 && (
-                              <>
-                                <div
-                                  role="group"
-                                  aria-label="Offline hosts"
-                                  className="max-h-48 overflow-y-auto"
-                                >
-                                  {otherOfflineHosts
-                                    .slice(0, offlineHostLimit)
-                                    .map(renderHostMenuItem)}
-                                </div>
-                                {offlineHostLimit < otherOfflineHosts.length && (
-                                  <DropdownMenuItem
-                                    onSelect={(event) => {
-                                      event.preventDefault();
-                                      setOfflineHostLimit((limit) => limit + 5);
-                                    }}
-                                    className="text-muted-foreground"
-                                  >
-                                    Show more ({otherOfflineHosts.length - offlineHostLimit}{" "}
-                                    remaining)
-                                  </DropdownMenuItem>
-                                )}
-                              </>
-                            )}
-                          </>
-                        )}
-                        <DropdownMenuSeparator />
-                        {/* Persistent escape hatch: open the connect-a-host
-                    instructions. Present even with zero hosts so a fresh user
-                    is never stuck. */}
-                        <DropdownMenuItem
-                          onSelect={() => setConnectOpen(true)}
-                          data-testid="new-chat-landing-connect-host"
-                          className="composer-host-connect text-muted-foreground"
-                        >
-                          <PlusIcon className="size-4" />
-                          Connect new host
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    />
 
                     {sandboxSelected && (
                       <div
@@ -7046,65 +6956,6 @@ export function NewChatLandingScreen() {
                             className="h-6 md:h-6"
                           />
                         )}
-                        <Popover open={workspacePopoverOpen} onOpenChange={setWorkspacePopoverOpen}>
-                          {(!workspaceLoading || cachedWorkspace !== null) && (
-                            <PopoverTrigger asChild>{workspaceChip}</PopoverTrigger>
-                          )}
-                          <PopoverContent
-                            align="start"
-                            sideOffset={4}
-                            className="w-[31rem] max-w-[calc(100vw-2rem)] gap-1 p-1.5"
-                          >
-                            {recent.length > 0 && (
-                              <>
-                                <div className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                                  Recents
-                                </div>
-                                <RecentWorkspaceList
-                                  hostId={selectedHostId}
-                                  paths={recent}
-                                  selectedPath={workspaceTrimmed}
-                                  onSelect={(path) => {
-                                    workspaceFromConfigRef.current = false;
-                                    setWorkspace(path);
-                                    addRecent(path);
-                                    setWorkspacePopoverOpen(false);
-                                  }}
-                                  onBrowse={(path) => {
-                                    setWorkspacePopoverOpen(false);
-                                    setWorkspacePickerInitialPath(
-                                      isNavigablePath(path) ? path : undefined,
-                                    );
-                                    setWorkspacePickerOpen(true);
-                                  }}
-                                />
-                                <div className="my-1 h-px bg-border" />
-                              </>
-                            )}
-                            <MenuItem asChild density="compact">
-                              <TooltipButton
-                                type="button"
-                                className="w-full text-left"
-                                onClick={() => {
-                                  setWorkspacePopoverOpen(false);
-                                  setWorkspacePickerInitialPath(
-                                    isNavigablePath(workspaceTrimmed)
-                                      ? workspaceTrimmed
-                                      : undefined,
-                                  );
-                                  setWorkspacePickerOpen(true);
-                                }}
-                                data-testid="new-chat-landing-workspace-open-folder"
-                              >
-                                <FolderOpenIcon
-                                  className="size-4 shrink-0 text-muted-foreground"
-                                  data-testid="new-chat-landing-workspace-open-folder-icon"
-                                />
-                                Open folder
-                              </TooltipButton>
-                            </MenuItem>
-                          </PopoverContent>
-                        </Popover>
                         {/* Worktree selection stays a separate real action from the directory picker. */}
                         {(!workspaceLoading || cachedWorkspace !== null) &&
                           (noExecutionTargetSelected || workspaceIsGit) && (
@@ -7504,16 +7355,27 @@ export function NewChatLandingScreen() {
               }}
             />
           </form>
-          <WorkspacePickerDialog
+          <WorkspaceSelectionDialog
             open={workspacePickerOpen}
             onOpenChange={setWorkspacePickerOpen}
             hostId={selectedHostId}
             initialPath={workspacePickerInitialPath}
-            description="Choose a folder for the new session."
-            onConfirm={(path) => {
+            description="Choose a host and folder for the new session."
+            hosts={allHosts}
+            hostLabel={hostLabel}
+            hostActions={workspaceHostActions}
+            pathUnavailableReason={
+              sandboxSelected
+                ? "The workspace is created when the cloud runner starts. Choose repositories in the composer."
+                : undefined
+            }
+            onConfirm={({ hostId, path }) => {
+              if (!hostId) return false;
+              selectHost(hostId);
+              seededHostRef.current = hostId;
               workspaceFromConfigRef.current = false;
               setWorkspace(path);
-              addRecent(path);
+              return true;
             }}
             occupancyForPath={
               !shouldCreateWorktree

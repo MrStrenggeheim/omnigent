@@ -1,0 +1,20 @@
+/* Import after the shell and dock styles; chrome geometry stays with their owners. */
+.unified-workbench .dock-workspace,
+.unified-workbench .dock-view-slot {
+  background: var(--workspace-content);
+}
+
+.unified-workbench .dock-view-slot {
+  --background: var(--workspace-content);
+  --card: var(--workspace-content);
+  --card-solid: var(--workspace-content);
+}
+
+/* Content roots and headers are opaque, without the legacy card or chat gradients. */
+.unified-workbench .dock-view-slot :is(.bg-card, .chat-header, .side-chat-backdrop) {
+  background: var(--workspace-content);
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}

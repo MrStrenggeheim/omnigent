@@ -8,10 +8,41 @@ import { toast } from "@/lib/notifications";
 import { FileViewerContext } from "@/shell/FileViewerContext";
 import { WorkspaceSwitchControl } from "./WorkspaceSwitchControl";
 
-const state = vi.hoisted(() => ({ fetch: vi.fn(), gate: vi.fn(), currentChat: "chat-a" }));
+const state = vi.hoisted(() => ({
+  fetch: vi.fn(),
+  gate: vi.fn(),
+  currentChat: "chat-a",
+  hostReason: undefined as string | undefined,
+}));
 vi.mock("@/lib/identity", async (original) => ({
   ...(await original<typeof IdentityModule>()),
   authenticatedFetch: state.fetch,
+}));
+vi.mock("@/hooks/useSessionActionRestrictions", () => ({
+  useSessionActionRestrictions: () => ({ switchHostDisabledReason: state.hostReason }),
+}));
+vi.mock("@/shell/SwitchHostDialog", () => ({
+  SwitchHostDialog: ({
+    initialHostId,
+    initialPath,
+    onOpenChange,
+  }: {
+    initialHostId: string;
+    initialPath: string;
+    onOpenChange: (open: boolean) => void;
+  }) => (
+    <section
+      role="dialog"
+      aria-label="Host move confirmation"
+      data-testid="mock-host-move"
+      data-host={initialHostId}
+      data-path={initialPath}
+    >
+      <button type="button" onClick={() => onOpenChange(false)}>
+        Cancel move
+      </button>
+    </section>
+  ),
 }));
 vi.mock("@/store/chatStore", () => ({
   useChatStore: {
@@ -41,7 +72,7 @@ const completed = {
 function Location() {
   return <span data-testid="location">{useLocation().search}</span>;
 }
-function createFileContext(guard?: (apply: () => void) => void) {
+function createFileContext(guard?: (apply: () => void, cancel?: () => void) => void) {
   return {
     openFile: vi.fn(),
     beforeWorkspaceChange: guard,
@@ -52,7 +83,10 @@ function createFileContext(guard?: (apply: () => void) => void) {
     workspaceHome: "/work",
   };
 }
-function mount({ reason, guard }: { reason?: string; guard?: (apply: () => void) => void } = {}) {
+function mount({
+  reason,
+  guard,
+}: { reason?: string; guard?: (apply: () => void, cancel?: () => void) => void } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -81,6 +115,7 @@ beforeEach(() => {
   state.fetch.mockReset();
   state.gate.mockReset();
   state.currentChat = "chat-a";
+  state.hostReason = undefined;
   localStorage.clear();
   toast.dismiss();
   state.fetch.mockImplementation(async (url, options) => {
@@ -90,6 +125,15 @@ beforeEach(() => {
           ...initial,
           validated_workspace: JSON.parse(options.body).workspace,
           unchanged: false,
+        }),
+      );
+    if (String(url) === "/v1/hosts")
+      return new Response(
+        JSON.stringify({
+          hosts: [
+            { host_id: "host", name: "Current host", status: "online" },
+            { host_id: "other", name: "Other host", status: "online" },
+          ],
         }),
       );
     if (String(url).endsWith("/workspace"))
@@ -113,7 +157,7 @@ afterEach(() => {
 async function choose() {
   fireEvent.click(screen.getByRole("button", { name: "Change workspace: /work/a" }));
   fireEvent.change(await screen.findByDisplayValue("/work/a"), { target: { value: "/work/b" } });
-  fireEvent.click(screen.getByRole("button", { name: /^Change workspace$/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Use workspace" }));
 }
 
 it("switches the real captured chat binding and refreshes its workspace context", async () => {
@@ -171,15 +215,16 @@ it("does not let an active turn or queued messages start a switch", () => {
 });
 
 it("retains the selected folder and displays a failed preflight without clearing the draft URL", async () => {
-  state.fetch.mockImplementation(
-    async (_url, options) =>
-      new Response(
-        JSON.stringify(
-          options?.method === "POST" ? { detail: "Folder is outside the agent boundary" } : initial,
-        ),
-        { status: options?.method === "POST" ? 400 : 200 },
+  state.fetch.mockImplementation(async (url, options) => {
+    if (String(url) === "/v1/hosts") return new Response(JSON.stringify({ hosts: [] }));
+    if (!String(url).endsWith("/workspace")) return new Response(JSON.stringify({ data: [] }));
+    return new Response(
+      JSON.stringify(
+        options?.method === "POST" ? { detail: "Folder is outside the agent boundary" } : initial,
       ),
-  );
+      { status: options?.method === "POST" ? 400 : 200 },
+    );
+  });
   mount();
   await choose();
   expect(await screen.findByRole("alert")).toHaveTextContent("outside the agent boundary");
@@ -189,12 +234,13 @@ it("retains the selected folder and displays a failed preflight without clearing
 });
 
 it("handles a canonical same-folder no-op without leaving sending paused", async () => {
-  state.fetch.mockImplementation(
-    async (_url, options) =>
-      new Response(
-        JSON.stringify(options?.method === "POST" ? { ...initial, unchanged: true } : initial),
-      ),
-  );
+  const normalFetch = state.fetch.getMockImplementation()!;
+  state.fetch.mockImplementation(async (url, options) => {
+    if (!String(url).endsWith("/workspace")) return normalFetch(url, options);
+    return new Response(
+      JSON.stringify(options?.method === "POST" ? { ...initial, unchanged: true } : initial),
+    );
+  });
   mount();
   await choose();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -205,7 +251,9 @@ it("handles a canonical same-folder no-op without leaving sending paused", async
 
 it("keeps a pending switch on its original chat when the composer is reused after navigation", async () => {
   let finish!: (response: Response) => void;
-  state.fetch.mockImplementation(async (_url, options) => {
+  const normalFetch = state.fetch.getMockImplementation()!;
+  state.fetch.mockImplementation(async (url, options) => {
+    if (!String(url).endsWith("/workspace")) return normalFetch(url, options);
     if (options?.method === "POST" && JSON.parse(options.body).validate_only)
       return new Response(
         JSON.stringify({ ...initial, validated_workspace: "/work/b", unchanged: false }),
@@ -243,7 +291,12 @@ it("refreshes chat and panel context when a restored pending operation completes
     ...initial,
     operation: { ...completed.operation, phase: "connecting", blocked: true },
   };
-  state.fetch.mockResolvedValue(new Response(JSON.stringify(pending)));
+  const normalFetch = state.fetch.getMockImplementation()!;
+  state.fetch.mockImplementation(async (url, options) =>
+    String(url).endsWith("/workspace")
+      ? new Response(JSON.stringify(pending))
+      : normalFetch(url, options),
+  );
   const { client } = mount();
   await waitFor(() => expect(state.gate).toHaveBeenCalledWith("chat-a", true));
   const refresh = vi.spyOn(client, "invalidateQueries");
@@ -257,17 +310,20 @@ it("refreshes chat and panel context when a restored pending operation completes
 
 it("cancels directory validation without later starting a hidden workspace change", async () => {
   let finish!: (response: Response) => void;
-  state.fetch.mockImplementation(async (_url, options) =>
-    options?.method === "POST"
-      ? new Promise((resolve) => {
-          finish = resolve;
-        })
-      : new Response(JSON.stringify(initial)),
+  const normalFetch = state.fetch.getMockImplementation()!;
+  state.fetch.mockImplementation(async (url, options) =>
+    !String(url).endsWith("/workspace")
+      ? normalFetch(url, options)
+      : options?.method === "POST"
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : new Response(JSON.stringify(initial)),
   );
   mount();
   await choose();
   await waitFor(() => expect(finish).toBeTypeOf("function"));
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await act(async () =>
     finish(
       new Response(
@@ -300,4 +356,41 @@ it("unpauses sending after reconnect confirms a lost request never started a tra
     await client.refetchQueries({ queryKey: ["session-workspace", "chat-a"] });
   });
   await waitFor(() => expect(state.gate).toHaveBeenLastCalledWith("chat-a", false));
+});
+
+it("keeps the combined picker and selected path when the dirty-file guard is cancelled", async () => {
+  mount({ guard: (_apply, cancel) => cancel?.() });
+  await choose();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Use workspace" })).toBeEnabled());
+  expect(screen.getByRole("dialog")).toBeVisible();
+  expect(screen.getByDisplayValue("/work/b")).toBeVisible();
+  expect(
+    state.fetch.mock.calls.some(
+      ([, options]) => options?.method === "POST" && !JSON.parse(options.body).validate_only,
+    ),
+  ).toBe(false);
+});
+
+it("hands a different host and selected path to the existing move confirmation without applying a same-host switch", async () => {
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "Change workspace: /work/a" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Other host/ }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Current folder path" }), {
+    target: { value: "/other/path" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Use workspace" }));
+  const confirmation = await screen.findByTestId("mock-host-move");
+  expect(confirmation).toHaveAttribute("data-host", "other");
+  expect(confirmation).toHaveAttribute("data-path", "/other/path");
+  expect(state.fetch.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+  fireEvent.click(screen.getByText("Cancel move"));
+  expect(screen.getByDisplayValue("/other/path")).toBeVisible();
+});
+
+it("keeps session capability restrictions on host switching", async () => {
+  state.hostReason = "This agent cannot move between hosts";
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "Change workspace: /work/a" }));
+  await screen.findByText("This agent cannot move between hosts");
+  expect(screen.queryByRole("button", { name: /Other host/ })).toBeNull();
 });

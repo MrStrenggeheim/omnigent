@@ -2,7 +2,7 @@
   border-right: 1px solid var(--border);
 }
 .unified-workbench .workbench-app-bar {
-  z-index: 60;
+  z-index: 20;
 }
 .unified-workbench .conversations-sidebar {
   top: 48px;
@@ -66,4 +66,40 @@ html[data-electron-mac] .unified-workbench .sidebar-header-row {
   box-shadow: none;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+}
+
+.unified-workbench .workbench-app-bar {
+  background: var(--workspace-appbar);
+}
+.unified-workbench .conversations-sidebar {
+  --sidebar: var(--workspace-chrome);
+  --sidebar-active: var(--workspace-selected);
+  --sidebar-active-foreground: var(--foreground);
+  --muted: var(--workspace-hover-on-chrome);
+  background-image: none;
+  box-shadow: none;
+  border-right: 1px solid var(--border);
+}
+.unified-workbench .dock-view-slot .workspace-control-header {
+  background: var(--workspace-content);
+}
+
+/* The global application bar is in normal flow, unlike legacy routed headers. */
+.unified-workbench .workbench-routed-page {
+  --omnigent-header-height: 0px;
+  --omnigent-inset-top: 0px;
+  --background: var(--workspace-content);
+  background: var(--workspace-content);
+}
+.unified-workbench .settings-page-title {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  display: block;
+  height: auto;
+  overflow: visible;
+  font-size: 1.5rem;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
 }

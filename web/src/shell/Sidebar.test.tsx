@@ -952,7 +952,7 @@ describe("Sidebar session list", () => {
     );
   });
 
-  it("renders Search, Settings, and Collapse as compact header actions", () => {
+  it("renders compact Search and Settings actions without a duplicate collapse control", () => {
     mockConversations(THREE_TYPE_CONVERSATIONS);
     renderSidebar();
 
@@ -971,9 +971,7 @@ describe("Sidebar session list", () => {
     expect(settings).toHaveClass("size-6", "rounded-[8px]");
     expect(settings.querySelector("svg")).toHaveClass("size-4");
     expect(settings.querySelector("svg")).not.toHaveClass("ui-icon");
-    const collapse = within(headerActions).getByRole("button", { name: "Close sidebar" });
-    expect(collapse).toHaveAttribute("data-size", "icon-xs");
-    expect(collapse).toHaveClass("size-6", "rounded-[var(--radius-md)]");
+    expect(within(headerActions).queryByRole("button", { name: "Close sidebar" })).toBeNull();
     expect(within(headerActions).queryByTestId("inbox-button")).toBeNull();
   });
 

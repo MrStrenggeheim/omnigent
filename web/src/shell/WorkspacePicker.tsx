@@ -10,7 +10,7 @@ import {
   RefreshCwIcon,
   SearchIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -354,7 +354,15 @@ function PickerIconButton({
   );
 }
 
+export interface WorkspacePickerHandle {
+  confirm: () => void;
+  navigate: (path: string) => void;
+}
+
 interface WorkspacePickerProps {
+  embedded?: boolean;
+  onPathChange?: (path: string) => void;
+  selectionRef?: Ref<WorkspacePickerHandle>;
   /** Host to browse, or ``null`` to render an empty state. */
   hostId: string | null;
   /**
@@ -432,13 +440,16 @@ export function WorkspacePicker({
   initialPath,
   occupancyForPath,
   workspacePath,
+  embedded = false,
+  onPathChange,
+  selectionRef,
 }: WorkspacePickerProps) {
   // "" means home — the server forwards ~ to list_dir. initialPath
   // seeds the start dir (read once at mount).
   const [path, setPath] = useState<string>(initialPath ?? "");
   // The editable path value; diverges from `path` while typing and
   // snaps back on commit (Enter / blur).
-  const [pathInput, setPathInput] = useState<string>("");
+  const [pathInput, setPathInput] = useState<string>(initialPath ?? "");
   const [pathEditing, setPathEditing] = useState(false);
   const pathInputRef = useRef<HTMLInputElement>(null);
   // The reference design separates file filtering from path navigation.
@@ -459,6 +470,8 @@ export function WorkspacePicker({
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [selectedWorktreePath, setSelectedWorktreePath] = useState<string | null>(null);
+  const [pathError, setPathError] = useState<string | null>(null);
+  const confirmAfterNavigation = useRef(false);
   const createDir = useCreateHostDirectory();
   const hasCommitActions = onSelect !== undefined || onClose !== undefined;
 
@@ -470,6 +483,8 @@ export function WorkspacePicker({
   useEffect(() => {
     if (prevHostId.current === hostId) return;
     prevHostId.current = hostId;
+    confirmAfterNavigation.current = false;
+    setPathError(null);
     setPath("");
     setPathInput("");
     setSearchInput("");
@@ -587,6 +602,12 @@ export function WorkspacePicker({
     }
   }, [currentAbsolute]);
 
+  const onPathChangeRef = useRef(onPathChange);
+  onPathChangeRef.current = onPathChange;
+  useEffect(() => {
+    onPathChangeRef.current?.(pathInput);
+  }, [pathInput]);
+
   const parent = parentOf(currentAbsolute);
 
   // Live filter from the path-bar text (shell-style: type a fragment to
@@ -642,6 +663,7 @@ export function WorkspacePicker({
   })();
 
   function navigateTo(next: string) {
+    setPathError(null);
     // A click/commit supersedes any in-progress typing; let the
     // mirror effect refill the bar from the new listing.
     userEditedRef.current = false;
@@ -667,11 +689,26 @@ export function WorkspacePicker({
   }
 
   function handleSelect() {
-    if (currentAbsolute === "" || currentAbsolute === null || navigationPending || error) {
+    const typed = resolveWorkspacePath(pathInput, resolvedHome);
+    if (userEditedRef.current && typed === null) {
+      setPathError("Enter an absolute path or a path starting with ~.");
       return;
     }
+    if (typed && typed !== currentAbsolute) {
+      confirmAfterNavigation.current = true;
+      navigateTo(typed);
+      return;
+    }
+    if (!isHostAbsolutePath(currentAbsolute) || navigationPending || error) return;
     onSelect?.(selectedWorktreePath ?? currentAbsolute);
   }
+
+  useImperativeHandle(selectionRef, () => ({ confirm: handleSelect, navigate: navigateTo }));
+  useEffect(() => {
+    if (!confirmAfterNavigation.current || navigationPending) return;
+    confirmAfterNavigation.current = false;
+    if (!error && isHostAbsolutePath(currentAbsolute)) onSelect?.(currentAbsolute);
+  }, [currentAbsolute, navigationPending, error, onSelect]);
 
   // Nothing re-polls the host while the picker stays open, so a folder or
   // worktree created outside Omnigent (e.g. `git worktree add` in a terminal)
@@ -729,11 +766,19 @@ export function WorkspacePicker({
 
   return (
     <div
-      className="flex h-[min(600px,calc(100dvh-4rem))] max-h-full min-h-0 w-[min(800px,calc(100vw-2rem))] flex-col justify-self-center overflow-hidden rounded-[20px] border border-border bg-background shadow-xl"
+      className={
+        embedded
+          ? "flex min-h-64 min-w-0 flex-1 flex-col bg-[var(--workspace-content)]"
+          : "flex h-[min(600px,calc(100dvh-4rem))] max-h-full min-h-0 w-[min(800px,calc(100vw-2rem))] flex-col justify-self-center overflow-hidden rounded-[20px] border border-border bg-background shadow-xl"
+      }
       data-testid="workspace-picker"
     >
       <div
-        className="flex h-12 min-h-12 shrink-0 items-center gap-1 border-b px-3 py-0"
+        className={
+          embedded
+            ? "flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-input px-1 focus-within:ring-2 focus-within:ring-ring"
+            : "flex h-12 min-h-12 shrink-0 items-center gap-1 border-b px-3 py-0"
+        }
         data-testid="workspace-picker-header"
       >
         <PickerIconButton
@@ -753,7 +798,7 @@ export function WorkspacePicker({
           />
         )}
         <div className="min-w-0 flex-1" data-testid="workspace-picker-breadcrumbs">
-          {!pathEditing && (
+          {!embedded && !pathEditing && (
             <div
               className={cn(
                 "flex min-w-0 items-center gap-px overflow-hidden text-base font-medium",
@@ -806,7 +851,8 @@ export function WorkspacePicker({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                commitPathInput();
+                if (embedded) handleSelect();
+                else commitPathInput();
                 setPathEditing(false);
               } else if (e.key === "Escape") {
                 e.preventDefault();
@@ -817,7 +863,7 @@ export function WorkspacePicker({
               }
             }}
             onBlur={() => {
-              commitPathInput();
+              if (!embedded) commitPathInput();
               setPathEditing(false);
             }}
             placeholder="~"
@@ -825,9 +871,9 @@ export function WorkspacePicker({
             autoCapitalize="off"
             autoCorrect="off"
             aria-label="Current folder path"
-            tabIndex={pathEditing ? 0 : -1}
-            className={`min-w-0 w-full rounded-md bg-muted/60 px-2 py-1 text-base font-medium text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:ring-2 focus:ring-ring ${
-              pathEditing ? "block" : "sr-only"
+            tabIndex={embedded || pathEditing ? 0 : -1}
+            className={`${embedded ? "min-w-0 w-full bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground" : "min-w-0 w-full rounded-md bg-muted/60 px-2 py-1 text-base font-medium text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"} ${
+              embedded || pathEditing ? "block" : "sr-only"
             }`}
             data-testid="workspace-picker-path-input"
           />
@@ -859,7 +905,7 @@ export function WorkspacePicker({
             disabled={hostId === null || navigationPending || isFetching || worktreesFetching}
             testId="workspace-picker-refresh"
           />
-          {onClose && (
+          {onClose && !embedded && (
             <PickerIconButton
               label="Close"
               icon={<XIcon className={showGitDialog ? "size-4" : "size-5"} />}
@@ -869,18 +915,28 @@ export function WorkspacePicker({
           )}
         </div>
       </div>
+      {pathError && (
+        <p role="alert" className="py-2 text-sm text-destructive">
+          {pathError}
+        </p>
+      )}
       <div
         className={cn(
           showWorktreePanel
             ? "grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1.05fr)_minmax(16rem,0.95fr)]"
             : "flex min-h-0 flex-1 flex-col",
           showGitDialog && "md:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]",
+          embedded && "max-h-[min(25rem,45dvh)]",
         )}
         data-testid="workspace-picker-body"
       >
         <div className="flex min-h-0 min-w-0 flex-col">
           <div
-            className="flex min-h-12 shrink-0 items-center gap-2 border-b-0 px-2 py-2"
+            className={
+              embedded
+                ? "sr-only"
+                : "flex min-h-12 shrink-0 items-center gap-2 border-b-0 px-2 py-2"
+            }
             data-testid="workspace-picker-search-row"
           >
             <div
@@ -894,6 +950,7 @@ export function WorkspacePicker({
               />
               <input
                 type="search"
+                tabIndex={embedded ? -1 : undefined}
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -1029,7 +1086,7 @@ export function WorkspacePicker({
                   key={entry.path}
                   entry={entry}
                   onOpen={navigateTo}
-                  variant="compact"
+                  variant={embedded ? "default" : "compact"}
                 />
               ))}
             {!navigationPending && data?.truncated && (
@@ -1131,7 +1188,7 @@ export function WorkspacePicker({
           </aside>
         )}
       </div>
-      {hasCommitActions && (
+      {hasCommitActions && !embedded && (
         <div
           className="flex min-h-16 shrink-0 items-center justify-end gap-2 border-t px-5 py-2"
           data-testid="workspace-picker-footer"

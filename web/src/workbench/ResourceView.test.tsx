@@ -9,27 +9,42 @@ import { FileViewerContext, type FileNavigationGuard } from "@/shell/FileViewerC
 import { useWorkbenchWorkspace, type WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { useWriteFileContent } from "@/hooks/useWriteFileContent";
 import { authenticatedFetch } from "@/lib/identity";
+import { panelFolderKey, readPanelFolder, setPanelFolder } from "@/lib/panelFolder";
+import type { WorkspaceSelectionDialogProps } from "@/shell/WorkspaceSelectionDialog";
 
 const state = vi.hoisted(() => ({
   openContentSearch: undefined as ((path: string, replace?: boolean) => void) | undefined,
   prompts: 0,
   accept: undefined as (() => void) | undefined,
   guard: undefined as FileNavigationGuard | undefined,
+  confirmation: undefined as boolean | void,
+  confirmError: undefined as unknown,
 }));
 vi.mock("@/hooks/useHosts", () => ({
-  useHosts: () => ({ data: [{ host_id: "host-a", name: "Machine A", status: "online" }] }),
+  useHosts: () => ({ data: [{ host_id: "host-a", name: "Host A", status: "online" }] }),
 }));
 vi.mock("@/hooks/useSession", () => ({ useSession: () => ({ session: null }) }));
 vi.mock("@/lib/identity", () => ({
   authenticatedFetch: vi.fn(),
   getCurrentUserId: () => "resource-test",
 }));
-vi.mock("@/shell/WorkspacePickerDialog", () => ({
-  WorkspacePickerDialog: ({ onConfirm }: { onConfirm: (path: string) => void }) => (
-    <button type="button" onClick={() => onConfirm("/new")}>
-      Choose new folder
-    </button>
-  ),
+vi.mock("@/shell/WorkspaceSelectionDialog", () => ({
+  WorkspaceSelectionDialog: ({ open, busy, hostId, onConfirm }: WorkspaceSelectionDialogProps) =>
+    open && (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          try {
+            state.confirmation = await onConfirm({ hostId, path: "/new" });
+          } catch (failure) {
+            state.confirmError = failure;
+          }
+        }}
+      >
+        Choose new folder
+      </button>
+    ),
 }));
 vi.mock("@/shell/FilesPanel", () => ({
   FilesPanel: ({
@@ -91,6 +106,12 @@ afterEach(() => {
   state.prompts = 0;
   state.accept = undefined;
   state.guard = undefined;
+  state.confirmation = undefined;
+  state.confirmError = undefined;
+  setPanelFolder(panelFolderKey(original.id, "explorer")!, null);
+  setPanelFolder(panelFolderKey(next.id, "explorer")!, null);
+  setPanelFolder(panelFolderKey(original.id, "editor")!, null);
+  setPanelFolder(panelFolderKey(next.id, "editor")!, null);
 });
 const original: WorkbenchWorkspace = {
   id: "original",
@@ -114,85 +135,168 @@ function wrapper({ children }: { children: React.ReactNode }) {
     </QueryClientProvider>
   );
 }
-it("opens files with the captured workspace and defaults to filename order", () => {
-  const open = vi.fn();
-  render(<ResourceView viewId="explorer" kind="files" workspace={original} onOpenFile={open} />, {
-    wrapper,
-  });
-  fireEvent.click(screen.getByText("Open alpha"));
-  expect(open).toHaveBeenCalledWith(
-    "file.txt",
-    expect.objectContaining({
-      workspace: original,
-      workspaceId: "original",
-      sourceViewId: "explorer",
-    }),
-  );
-});
-it("guards a location switch and close while a started save retains its captured target", async () => {
-  let finishSave!: (response: Response) => void;
-  vi.mocked(authenticatedFetch).mockImplementation((url, options) => {
-    if (options?.method === "PUT")
-      return new Promise((resolve) => {
-        finishSave = resolve;
-      });
-    expect(url).toBe("/v1/workbench-workspaces");
-    expect(JSON.parse(String(options?.body))).toEqual({ host_id: "host-a", root: "/new" });
-    return Promise.resolve(new Response(JSON.stringify(next)));
-  });
-  const changed = vi.fn();
-  function Harness() {
-    const [workspace, setWorkspace] = useState(original);
-    return (
-      <ResourceView
-        viewId="editor"
-        kind="preview"
-        workspace={workspace}
-        path="file.txt"
-        onOpenFile={vi.fn()}
-        onWorkspaceChange={(value) => {
-          state.guard!("", { workspaceId: value.id }, () => {
-            changed(value);
-            setWorkspace(value);
-          });
-        }}
-        registerNavigationGuard={(guard) => {
-          state.guard = guard;
-          return () => {
-            state.guard = undefined;
-          };
-        }}
-      />
+it.each([
+  { entry: "picker", failure: "false" },
+  { entry: "picker", failure: "throw" },
+  { entry: "up", failure: "false" },
+  { entry: "up", failure: "throw" },
+])(
+  "preserves captured files and browse state when $entry application returns $failure",
+  async ({ entry, failure }) => {
+    const open = vi.fn();
+    let finish!: (value: boolean) => void;
+    let reject!: (error: Error) => void;
+    const changed = vi.fn(
+      () =>
+        new Promise<boolean>((resolve, rejectChange) => {
+          finish = resolve;
+          reject = rejectChange;
+        }),
     );
-  }
-  render(<Harness />, { wrapper });
-  fireEvent.click(screen.getByText("Save original no recipient"));
-  await waitFor(() => expect(finishSave).toBeDefined());
-  fireEvent.click(screen.getByRole("button", { name: "Location" }));
-  fireEvent.click(screen.getByRole("button", { name: "Select folder" }));
-  fireEvent.click(screen.getByText("Choose new folder"));
-  await waitFor(() => expect(state.accept).toBeDefined());
-  expect(changed).not.toHaveBeenCalled();
-  expect(state.prompts).toBe(1);
-  expect(screen.getByText("Save original no recipient")).toBeInTheDocument();
-  act(() => state.accept!());
-  expect(screen.getByText("Save next no recipient")).toBeInTheDocument();
-  expect(state.prompts).toBe(1);
-  await act(async () => finishSave(new Response("{}")));
-  const writes = vi
-    .mocked(authenticatedFetch)
-    .mock.calls.filter(([, options]) => options?.method === "PUT");
-  expect(writes).toHaveLength(1);
-  expect(writes[0][0]).toBe(
-    "/v1/workbench-workspaces/original/resources/environments/default/filesystem/file.txt",
-  );
-  const close = vi.fn();
-  act(() => state.guard!("", undefined, close));
-  expect(close).not.toHaveBeenCalled();
-  act(() => state.accept!());
-  expect(close).toHaveBeenCalledOnce();
-});
-it("retains an unavailable target instead of selecting an online machine", () => {
+    const target = { ...next, root: entry === "up" ? "/old" : "/new" };
+    vi.mocked(authenticatedFetch).mockResolvedValue(new Response(JSON.stringify(target)));
+    setPanelFolder(panelFolderKey(original.id, "explorer")!, "nested");
+    setPanelFolder(panelFolderKey(next.id, "explorer")!, "retained");
+    render(
+      <ResourceView
+        viewId="explorer"
+        kind="files"
+        workspace={original}
+        onOpenFile={open}
+        onWorkspaceChange={changed}
+      />,
+      {
+        wrapper,
+      },
+    );
+    fireEvent.click(screen.getByText("Open alpha"));
+    expect(open).toHaveBeenCalledWith(
+      "file.txt",
+      expect.objectContaining({
+        workspace: original,
+        workspaceId: "original",
+        sourceViewId: "explorer",
+      }),
+    );
+    if (entry === "picker") {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Select workspace: Host A / /old/nested" }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Choose new folder" }));
+    } else fireEvent.click(screen.getByRole("button", { name: "Up one folder" }));
+    await waitFor(() => expect(changed).toHaveBeenCalledWith({ ...target, chatSessionId: null }));
+    expect(authenticatedFetch).toHaveBeenCalledWith(
+      "/v1/workbench-workspaces",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ host_id: "host-a", root: target.root }),
+      }),
+    );
+    expect(screen.getByRole("button", { name: /Select workspace: Host A/ })).toBeDisabled();
+    expect(state.confirmation).toBeUndefined();
+    expect(readPanelFolder(panelFolderKey(next.id, "explorer"))).toBe("retained");
+    await act(async () => {
+      if (failure === "throw") reject(new Error("Workspace apply failed"));
+      else finish(false);
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Select workspace: Host A/ })).toBeEnabled(),
+    );
+    expect(readPanelFolder(panelFolderKey(original.id, "explorer"))).toBe("nested");
+    expect(readPanelFolder(panelFolderKey(next.id, "explorer"))).toBe("retained");
+    if (failure === "throw") {
+      expect(screen.getByRole("alert")).toHaveTextContent("Workspace apply failed");
+      if (entry === "picker")
+        expect(state.confirmError).toEqual(new Error("Workspace apply failed"));
+    } else if (entry === "picker") expect(state.confirmation).toBe(false);
+    fireEvent.click(screen.getByText("Open alpha"));
+    expect(open).toHaveBeenLastCalledWith(
+      "file.txt",
+      expect.objectContaining({ workspace: original }),
+    );
+  },
+);
+it.each(["picker", "up"])(
+  "guards a %s location switch and close while a started save retains its captured target",
+  async (entry) => {
+    const target = { ...next, root: entry === "up" ? "/old" : "/new" };
+    setPanelFolder(panelFolderKey(original.id, "editor")!, "nested");
+    setPanelFolder(panelFolderKey(next.id, "editor")!, "retained");
+    let finishSave!: (response: Response) => void;
+    vi.mocked(authenticatedFetch).mockImplementation((url, options) => {
+      if (options?.method === "PUT")
+        return new Promise((resolve) => {
+          finishSave = resolve;
+        });
+      expect(url).toBe("/v1/workbench-workspaces");
+      expect(JSON.parse(String(options?.body))).toEqual({ host_id: "host-a", root: target.root });
+      return Promise.resolve(new Response(JSON.stringify(target)));
+    });
+    const changed = vi.fn();
+    function Harness() {
+      const [workspace, setWorkspace] = useState(original);
+      return (
+        <ResourceView
+          viewId="editor"
+          kind="preview"
+          workspace={workspace}
+          path="file.txt"
+          onOpenFile={vi.fn()}
+          onWorkspaceChange={(value) =>
+            new Promise<boolean>((resolve) => {
+              state.guard!("", { workspaceId: value.id }, () => {
+                changed(value);
+                setWorkspace(value);
+                resolve(true);
+              });
+            })
+          }
+          registerNavigationGuard={(guard) => {
+            state.guard = guard;
+            return () => {
+              state.guard = undefined;
+            };
+          }}
+        />
+      );
+    }
+    render(<Harness />, { wrapper });
+    fireEvent.click(screen.getByText("Save original no recipient"));
+    await waitFor(() => expect(finishSave).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Location" }));
+    if (entry === "picker") {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Select workspace: Host A / /old/nested" }),
+      );
+      fireEvent.click(screen.getByText("Choose new folder"));
+    } else fireEvent.click(screen.getByRole("button", { name: "Up one folder" }));
+    await waitFor(() => expect(state.accept).toBeDefined());
+    expect(changed).not.toHaveBeenCalled();
+    expect(state.prompts).toBe(1);
+    expect(screen.getByText("Save original no recipient")).toBeInTheDocument();
+    expect(readPanelFolder(panelFolderKey(next.id, "editor"))).toBe("retained");
+    expect(state.confirmation).toBeUndefined();
+    await act(async () => state.accept!());
+    expect(screen.getByText("Save next no recipient")).toBeInTheDocument();
+    expect(readPanelFolder(panelFolderKey(next.id, "editor"))).toBeNull();
+    if (entry === "picker") expect(state.confirmation).toBe(true);
+    expect(state.prompts).toBe(1);
+    await act(async () => finishSave(new Response("{}")));
+    const writes = vi
+      .mocked(authenticatedFetch)
+      .mock.calls.filter(([, options]) => options?.method === "PUT");
+    expect(writes).toHaveLength(1);
+    expect(writes[0][0]).toBe(
+      "/v1/workbench-workspaces/original/resources/environments/default/filesystem/file.txt",
+    );
+    const close = vi.fn();
+    act(() => state.guard!("", undefined, close));
+    expect(close).not.toHaveBeenCalled();
+    act(() => state.accept!());
+    expect(close).toHaveBeenCalledOnce();
+  },
+);
+it("retains an unavailable target instead of selecting an online host", () => {
   const open = vi.fn();
   render(
     <ResourceView
@@ -233,7 +337,8 @@ it("uses only the captured shared session when no independent workspace was auth
     />,
     { wrapper },
   );
-  expect(screen.queryByRole("combobox", { name: "Machine" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Select workspace:/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Up one folder" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Save legacy shared-owner"));
   await waitFor(() =>
     expect(authenticatedFetch).toHaveBeenCalledWith(

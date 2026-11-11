@@ -102,18 +102,24 @@ function SupportedSwitchHostDialog({
   onOpenChange,
   sessionId,
   currentHostId,
+  initialHostId,
+  initialPath,
+  onSwitched,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
   currentHostId: string | null;
+  initialHostId?: string;
+  initialPath?: string;
+  onSwitched?: () => void;
 }) {
   const queryClient = useQueryClient();
   const { data: hosts } = useHosts({ enabled: open });
   const markRunnerLaunched = useChatStore((s) => s.markRunnerLaunched);
 
-  const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
-  const [workspace, setWorkspace] = useState("");
+  const [selectedHostId, setSelectedHostId] = useState<string | null>(initialHostId ?? null);
+  const [workspace, setWorkspace] = useState(initialPath ?? "");
   const [browsing, setBrowsing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -163,7 +169,7 @@ function SupportedSwitchHostDialog({
 
   // A path is meaningless on a machine it didn't come from, so clear the
   // field whenever the target changes and let the default below refill it.
-  const prevHostId = useRef<string | null>(null);
+  const prevHostId = useRef<string | null>(initialHostId ?? null);
   const userEditedRef = useRef(false);
   useEffect(() => {
     if (prevHostId.current === selectedHostId) return;
@@ -237,6 +243,7 @@ function SupportedSwitchHostDialog({
       // and keeping the dialog on screen for two round trips leaves it
       // sitting in "Switching…" long after the move has landed.
       handleOpenChange(false);
+      onSwitched?.();
       void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
       void queryClient.invalidateQueries({ queryKey: ["session-agent", sessionId] });
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });

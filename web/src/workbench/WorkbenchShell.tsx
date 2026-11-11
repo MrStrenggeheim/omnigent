@@ -1,3 +1,5 @@
+import { useSettingsNavigationVisibility } from "@/hooks/useSettingsNavigationVisibility";
+import { useSettingsRoute } from "@/shell/settingsNav";
 import { parseWorkbenchFileLink, resolveWorkbenchFileLink } from "./fileLinks";
 import { WorkbenchBindings } from "./WorkbenchBindings";
 import { createWorkbenchResourceShortcuts } from "./resourceShortcuts";
@@ -28,6 +30,7 @@ import {
   MessageSquareIcon,
   SearchIcon,
   TerminalIcon,
+  HatGlassesIcon,
 } from "lucide-react";
 import { Outlet, useLocation, useNavigate, useParams } from "@/lib/routing";
 import { getOmnigentServerIdentity } from "@/lib/host";
@@ -61,7 +64,6 @@ import { searchActions, type ActionCommand } from "@/shell/contextSearch/actions
 import type { FileNavigationGuard, FilePosition, OpenFileOptions } from "@/shell/FileViewerContext";
 import { NotificationLayoutProvider } from "@/components/NotificationCenter";
 import { Toaster } from "@/components/ui/sonner";
-import { ChatActivityPanel } from "@/shell/ChatActivityPanel";
 import { BrowserPane } from "@/components/BrowserPane/BrowserPane";
 import { ExecutionLogsPanel } from "@/shell/ExecutionLogsPanel";
 import { TasksPage } from "@/pages/TasksPage";
@@ -72,14 +74,21 @@ import {
 } from "./WorkbenchContext";
 import { WorkbenchAppBar, type WorkbenchOpenAction } from "./WorkbenchAppBar";
 import { ConversationView } from "./ConversationView";
-import { TerminalInventoryView } from "./TerminalInventoryView";
+import { ActivityView, type ActivitySource } from "./ActivityView";
 import { TerminalResourceView } from "./TerminalResourceView";
 import { ResourceView, inheritResourceViewState } from "./ResourceView";
 import { DockWorkspace, type DockViewVisibility } from "./DockWorkspace";
 import { useDockLayout } from "./useDockLayout";
-import { createDockLayout, addDockView, dockPaneForView, type DockView } from "./dockLayout";
+import {
+  sameDockResource,
+  createDockLayout,
+  addDockView,
+  dockPaneForView,
+  type DockView,
+} from "./dockLayout";
 import { OpenLocationDialog } from "./OpenLocationDialog";
 import "./workbenchShell.css";
+import "./workbenchSurfaces.css";
 import {
   ContextReferenceNavigationContext,
   createQuoteSubchat,
@@ -90,9 +99,8 @@ const VIEW_TYPES: { kind: WorkbenchViewKind; label: string; icon: typeof FolderI
   { kind: "files", label: "Explorer", icon: FolderIcon },
   { kind: "changes", label: "Changes", icon: GitCompareIcon },
   { kind: "search", label: "Search and replace", icon: SearchIcon },
-  { kind: "shells", label: "Existing shells", icon: TerminalIcon },
   { kind: "terminal", label: "Manual terminal", icon: TerminalIcon },
-  { kind: "agent-terminal", label: "Agent terminal", icon: TerminalIcon },
+  { kind: "agent-terminal", label: "Agent CLI", icon: HatGlassesIcon },
   { kind: "activity", label: "Activity", icon: ActivityIcon },
   { kind: "pr", label: "Pull requests", icon: GitPullRequestIcon },
   { kind: "automations", label: "Automations", icon: CalendarClockIcon },
@@ -142,6 +150,42 @@ function viewWorkspace(view?: DockView): WorkbenchWorkspace | undefined {
   return value as WorkbenchWorkspace;
 }
 
+function activitySource(
+  resource: Record<string, unknown>,
+  workspace?: WorkbenchWorkspace,
+  conversationId?: string,
+  legacyShells = false,
+): ActivitySource | undefined {
+  const value = resource.source;
+  if (value && typeof value === "object") {
+    if (
+      "kind" in value &&
+      value.kind === "chat" &&
+      "conversationId" in value &&
+      typeof value.conversationId === "string"
+    )
+      return { kind: "chat", conversationId: value.conversationId };
+    if (
+      "kind" in value &&
+      value.kind === "host" &&
+      "hostId" in value &&
+      typeof value.hostId === "string"
+    )
+      return {
+        kind: "host",
+        hostId: value.hostId,
+        ...(workspace?.host_id === value.hostId ? { workspace } : {}),
+      };
+  }
+  if (legacyShells && workspace?.host_id)
+    return { kind: "host", hostId: workspace.host_id, workspace };
+  return conversationId
+    ? { kind: "chat", conversationId }
+    : workspace?.host_id
+      ? { kind: "host", hostId: workspace.host_id, workspace }
+      : undefined;
+}
+
 export function WorkbenchShell({ active = true }: { active?: boolean }) {
   const viewer = useViewerId();
   const ready = useIdentityReady();
@@ -167,6 +211,8 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
   const location = useLocation();
   const queryClient = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(() => !isMobileViewport());
+  const { inSettings } = useSettingsRoute();
+  useSettingsNavigationVisibility({ inSettings, sidebarOpen, setSidebarOpen, enabled: active });
   const [sidebarDragProgress, setSidebarDragProgress] = useState<number | null>(null);
   const handleSidebarDrag = useCallback<Parameters<typeof onNativeSidebarDrag>[0]>(
     (phase, progress) => {
@@ -274,6 +320,31 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
       if (title && title !== view.title) void dockRef.current.updateView(view.id, { title });
     }
   }, [titles]);
+  useEffect(() => {
+    for (const view of dock.retainedViews) {
+      if (view.kind === "shells") {
+        const workspace = viewWorkspace(view);
+        const source = activitySource(
+          view.resource,
+          workspace,
+          typeof view.resource.conversationId === "string"
+            ? view.resource.conversationId
+            : undefined,
+          true,
+        );
+        void dock.updateView(view.id, {
+          kind: "activity",
+          title: "Activity",
+          resource: JSON.parse(JSON.stringify({ ...view.resource, source })) as Record<
+            string,
+            unknown
+          >,
+        });
+      } else if (view.kind === "agent-terminal" && view.title === "Agent terminal") {
+        void dock.updateView(view.id, { title: "Agent CLI" });
+      }
+    }
+  }, [dock]);
   const showDock =
     active &&
     (!!conversationId || new URLSearchParams(location.search).get("view") === "workbench");
@@ -420,6 +491,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
             (view) =>
               view.kind === resource.kind &&
               view.resource.conversationId === resource.conversationId &&
+              JSON.stringify(view.resource.source) === JSON.stringify(resource.source) &&
               (viewWorkspace(view)?.id ?? view.resource.workspaceId) ===
                 (resource.workspace?.id ?? resource.workspaceId) &&
               view.resource.path === resource.path &&
@@ -569,6 +641,14 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
     (kind: WorkbenchViewKind) =>
       openView({
         kind,
+        source:
+          kind === "activity"
+            ? selectedWorkspace?.host_id
+              ? { kind: "host", hostId: selectedWorkspace.host_id, workspace: selectedWorkspace }
+              : resourceConversationId
+                ? { kind: "chat", conversationId: resourceConversationId }
+                : undefined
+            : undefined,
         workspace: selectedWorkspace,
         conversationId: resourceConversationId,
         path: folderOwner
@@ -672,8 +752,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
       label: entry.label,
       icon: entry.icon,
       disabled:
-        ["activity", "agent-terminal", "browser", "logs"].includes(entry.kind) &&
-        !resourceConversationId,
+        ["agent-terminal", "browser", "logs"].includes(entry.kind) && !resourceConversationId,
       run: () => openFocused(entry.kind),
     })),
   ];
@@ -745,6 +824,19 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
       if (!set.size) guards.current.delete(viewId);
     };
   }, []);
+  const updateResource = async (view: DockView, patch: Record<string, unknown>) => {
+    const current = dockRef.current.retainedViews.find((entry) => entry.id === view.id);
+    if (!current || !sameDockResource(current, view))
+      throw new Error(
+        "This view changed while the selection was open. Reopen the selector and try again.",
+      );
+    return dockRef.current.updateView(view.id, {
+      resource: JSON.parse(JSON.stringify({ ...current.resource, ...patch })) as Record<
+        string,
+        unknown
+      >,
+    });
+  };
   const renderView = (view: DockView, visibility: DockViewVisibility) => {
     const resource = view.resource;
     const sessionId =
@@ -817,26 +909,11 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
               sourceViewId: options.sourceViewId,
             })
           }
-          onWorkspaceChange={(next) => {
-            void dockRef.current.updateView(view.id, {
-              resource: { ...resource, workspace: next },
-            });
-          }}
+          onWorkspaceChange={(next) => updateResource(view, { workspace: next })}
           registerNavigationGuard={(guard) => registerGuard(view.id, guard)}
           onClose={() => {
             void closeView(view.id);
           }}
-        />
-      );
-    else if (view.kind === "shells" && workspace)
-      content = (
-        <TerminalInventoryView
-          workspace={workspace}
-          active={showDock && visibility.visible}
-          onOpenTerminal={(terminalId) =>
-            openView({ kind: "terminal", workspace, terminalId, terminalOwner: "workspace" })
-          }
-          onNewTerminal={() => openView({ kind: "terminal", workspace, path })}
         />
       );
     else if (view.kind === "terminal" && typeof resource.terminalId === "string")
@@ -856,21 +933,25 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
           active={showDock && visibility.visible && visibility.focused}
         />
       );
-    else if (view.kind === "activity" && sessionId)
+    else if (view.kind === "activity" || view.kind === "shells")
       content = (
-        <ChatActivityPanel
-          conversationId={sessionId}
-          rootSessionId={sessionId}
-          sourceControl={
-            <ConversationSourcePicker
-              conversationId={sessionId}
-              label="Activity"
-              onChange={(id) => {
-                void dockRef.current.updateView(view.id, {
-                  resource: { ...resource, conversationId: id },
-                });
-              }}
-            />
+        <ActivityView
+          active={showDock && visibility.visible}
+          source={activitySource(resource, workspace, sessionId, view.kind === "shells")}
+          onSourceChange={async (source) => {
+            const accepted = await updateResource(view, {
+              source,
+              ...(source.kind === "chat"
+                ? { conversationId: source.conversationId, workspace: undefined }
+                : { conversationId: undefined, workspace: source.workspace }),
+            });
+            if (!accepted)
+              throw new Error(
+                "The Activity source changed before this selection could be applied. Please retry.",
+              );
+          }}
+          onNewTerminal={(target) =>
+            openView({ kind: "terminal", workspace: target, terminalOwner: "workspace" })
           }
           onOpenTerminal={(target) => {
             const launch = async () => {
@@ -1069,7 +1150,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
                     )}
                   </div>
                   {active && !showDock && (
-                    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+                    <div className="workbench-routed-page flex min-h-0 flex-1 flex-col overflow-auto">
                       <Outlet />
                     </div>
                   )}

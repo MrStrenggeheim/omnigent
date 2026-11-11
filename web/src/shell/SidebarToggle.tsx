@@ -60,7 +60,11 @@ export function SidebarToggle({
   expanded: boolean;
 }) {
   return (
-    <HeaderActionButton aria-expanded={expanded} className={className} {...props}>
+    <HeaderActionButton
+      aria-expanded={expanded}
+      className={cn("[&>[data-header-action-surface]]:bg-transparent!", className)}
+      {...props}
+    >
       <SidebarPanelIcon side={side} expanded={expanded} />
     </HeaderActionButton>
   );

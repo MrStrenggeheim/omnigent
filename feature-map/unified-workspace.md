@@ -17,21 +17,27 @@ Conversation and tool views share resizable, dockable panes while keeping their 
 
 ## How to get to it (user POV)
 
-- Use Open in the application bar to add Explorer, Changes, Search, a shell, Activity or Automations.
+- Use + Open in the application bar to add Explorer, Changes, Search, a manual terminal, Agent CLI, Activity or Automations.
 - Drag a tab to a pane edge to split; use its own close button to close it, or the pane menu to move/pin views.
 - Use Layout → Save layout for this chat; pin an Explorer in another chat and return to see both arrangements.
 - Expand conversations with children to revisit subchats; hover a row for actions, and use its spinner to identify running work.
 - Use New subchat in the composer Add menu or `/side` to open a durable child with an unsent draft.
 - Type `@` in a composer, or select text and choose Use in chat…, to inspect and insert captured context.
 - Use the application search field or Ctrl/Cmd+K for commands; Ctrl/Cmd+F searches the last interacted region.
-- Open Existing shells to reattach or inspect retained output; Stop shell is separate from closing its view.
-- Use the Activity source control or a Preview's Comments control to choose its conversation explicitly.
+- Open Activity and choose a Host to reattach independent shells or inspect retained output; choose a Chat for its agents, messages and shell use.
+- Use the grouped Host/Chat source picker in Activity or a Preview's Comments control to choose its owner explicitly.
+- Use the combined workspace selector in the composer or resource-view toolbar; Host and Path are both directly reachable in its modal.
+- Use Up before the Explorer workspace path to make its parent folder the root.
+- Opening Settings temporarily reveals desktop navigation; its mobile section chooser stays reachable when navigation is closed.
 - Open Settings → Appearance to change the accent or list density.
 
 ## Driving it with the repro environment
 
 Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md), build the checkout and use an isolated environment or the sealed browser-contract lane.
 
+- Approved palette, root confirmation, Settings and Activity sources: `tests/browser_ui/chat/test_workspace_selection_design.py`.
+- Combined picker and controlled chat switching: `web/src/shell/WorkspaceSelectionDialog.test.tsx` and `web/src/components/composer/WorkspaceSwitchControl.test.tsx`.
+- Host/Chat Activity and temporary Settings navigation: `web/src/workbench/ActivityView.test.tsx` and `web/src/hooks/useSettingsNavigationVisibility.test.tsx`.
 - Integrated desktop/mobile shell, drafts, layout controls and commands: `tests/browser_ui/chat/test_unified_workspace.py`.
 - Pane movement, retained editor nodes, resizing, scope changes and A/B/A pins: `web/src/workbench/DockWorkspace.test.tsx` and `web/src/workbench/dockLayout.test.ts`.
 - Independent file targets and captured writes: `web/src/workbench/ResourceView.test.tsx`.
@@ -48,7 +54,12 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 ## Gotchas
 
 - Closing a view preserves its conversation, shell or schedule; explicit Stop/Delete retains its existing permission and confirmation checks.
-- Tab/container headers and view headers remain separate even with one tab; pane focus uses tab fill, never an enclosing accent frame.
+- Tab/container headers and view headers remain separate even with one tab; type icons live in tabs and close controls have accessible names without tooltips.
+- Neutral hairlines separate viewports; pane focus uses tab fill, never an enclosing accent frame.
+- App bar is medium-light accent, sidebar/tab bars pale accent, focused tab medium-light, and view headers/content neutral; primary controls use white foregrounds.
+- Tab/disclosure hover feedback changes instantly, and selected entries retain their selected appearance.
+- Shell inventory is integrated into Activity; legacy saved inventory views restore there without stopping their processes.
+- Chat workspace changes retain execution confirmation/recovery; browsing-view root changes only retarget that view.
 - Conversation hover cards and per-row loading/empty-child labels are removed; hierarchy metadata preloads without transcript downloads.
 - Global pins preserve visibility and placement, never change the selected machine or follow another chat automatically.
 - Shared-chat file access can retain its session-authorized route; a chat grant does not grant general host access.

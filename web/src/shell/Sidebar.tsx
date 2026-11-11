@@ -68,7 +68,6 @@ import {
   MessageCircleDashedIcon,
   MessageCirclePlusIcon,
   Maximize2Icon,
-  ExternalLinkIcon,
   Minimize2Icon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -292,6 +291,7 @@ import { SessionActionMenuItem } from "@/components/SessionActionMenuItem";
 import { useSessionActionRestrictions } from "@/hooks/useSessionActionRestrictions";
 import {
   SIDEBAR_ROW,
+  SIDEBAR_HEADING,
   SIDEBAR_HOVER_HIGHLIGHT,
   SIDEBAR_ACTIVE_HIGHLIGHT,
   SIDEBAR_GRID_MEMBER_HIGHLIGHT,
@@ -1021,7 +1021,8 @@ function SidebarImpl({
           style={dragging ? { opacity: dragProgress, transition: "none" } : undefined}
         />
       )}
-      {mobileViewport &&
+      {!workbench &&
+        mobileViewport &&
         effectiveOpen &&
         !inSettings &&
         createPortal(
@@ -1171,11 +1172,9 @@ function SidebarImpl({
                 className="sidebar-brand rounded-none transition-opacity duration-200 ease-[var(--ease-otto)] hover:opacity-70"
               >
                 {workbench ? (
-                  <span className="text-sm font-medium">Conversations</span>
+                  <span className={SIDEBAR_HEADING}>Conversations</span>
                 ) : branding.app_name ? (
-                  <span className="text-[15px] font-semibold tracking-tight">
-                    {branding.app_name}
-                  </span>
+                  <span className={cn(SIDEBAR_HEADING, "tracking-tight")}>{branding.app_name}</span>
                 ) : (
                   <img
                     src={omnigentWordmark}
@@ -1191,6 +1190,7 @@ function SidebarImpl({
             else this is the only copy. */}
               <SidebarHeaderActions
                 compact={workbench}
+                showToggle={false}
                 expanded={!peek}
                 // onOpen is optional (the sidebar renders standalone in tests), so
                 // fall back to a no-op rather than widening the child's contract.
@@ -3264,7 +3264,7 @@ function projectMarkerState(
 }
 
 // The shared collapsible header used by every sidebar section and section
-// group, so they all align and animate identically (icon · title ·
+// group, so they all align identically (icon · title ·
 // hover-chevron · collapsed marker).
 function SectionHeader({
   headerDrag,
@@ -3360,7 +3360,7 @@ function SectionHeader({
           ? cn(
               SIDEBAR_ROW,
               "density-row",
-              "group flex w-full items-center border-0 text-left text-foreground transition-colors",
+              "group flex w-full items-center border-0 text-left text-foreground transition-none",
               SIDEBAR_HOVER_HIGHLIGHT,
               contextMenu && SIDEBAR_OPEN_MENU_HIGHLIGHT,
               active && SIDEBAR_ACTIVE_HIGHLIGHT,
@@ -3368,7 +3368,10 @@ function SectionHeader({
                 !showsMarker &&
                 "pr-8 [@media((hover:hover)_and_(pointer:fine))]:pr-14 [@media((hover:hover)_and_(pointer:fine))]:md:pr-2 [@media((hover:hover)_and_(pointer:fine))]:md:group-hover/header:pr-14 [@media((hover:hover)_and_(pointer:fine))]:md:group-has-[[data-header-controls]:focus-within]/header:pr-14 [@media((hover:hover)_and_(pointer:fine))]:md:group-has-[[data-state=open]]/header:pr-14",
             )
-          : "group flex h-7 w-full items-center gap-1 border-0 pr-0 pl-2 text-left text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground",
+          : cn(
+              SIDEBAR_HEADING,
+              "group flex h-7 w-full items-center gap-1 border-0 pr-0 pl-2 text-left text-muted-foreground transition-none hover:text-foreground",
+            ),
         status && "w-auto min-w-0 max-w-1/2 shrink-0",
       )}
     >
@@ -3378,25 +3381,25 @@ function SectionHeader({
         // rather than trailing the name. Mobile (no hover) keeps the folder
         // icon and shows the trailing chevron below.
         <span className="relative flex size-4 shrink-0 items-center justify-center">
-          <span className="flex md:transition-opacity md:group-hover:opacity-0 md:group-focus-visible:opacity-0">
+          <span className="flex transition-none md:group-hover:opacity-0 md:group-focus-visible:opacity-0">
             {icon}
           </span>
           <ChevronRightIcon
             className={cn(
-              "absolute size-3.5 opacity-0 transition-[transform,opacity]",
+              "absolute size-3.5 opacity-0 transition-none",
               !collapsed && "rotate-90",
               "hidden md:flex md:group-hover:opacity-100 md:group-focus-visible:opacity-100",
             )}
           />
         </span>
       ) : null}
-      <span className="min-w-0 truncate font-semibold">{title}</span>
+      <span className={cn("min-w-0 truncate", icon && "font-semibold")}>{title}</span>
       {/* Trailing chevron, rotating on expand. Headers without a leading icon
             reveal it on desktop hover/focus; icon headers show it only on mobile
             (no hover) since desktop swaps the folder for the chevron above. */}
       <ChevronRightIcon
         className={cn(
-          "size-3.5 shrink-0 transition-[transform,opacity]",
+          "size-3.5 shrink-0 transition-none",
           !collapsed && "rotate-90",
           icon
             ? "md:hidden"
@@ -4617,7 +4620,7 @@ function ConversationBranchRow({
               aria-label={`${expanded ? "Collapse" : "Expand"} subchats of ${label}`}
               aria-expanded={expanded}
               aria-controls={groupId}
-              className="flex h-6 w-[var(--tree-indent)] items-center justify-center rounded text-muted-foreground hover:bg-muted"
+              className="flex h-6 w-[var(--tree-indent)] items-center justify-center rounded text-muted-foreground transition-none hover:bg-muted"
               onMouseDown={(event) => event.stopPropagation()}
               onTouchStart={(event) => event.stopPropagation()}
               onClick={(event) => {
@@ -5169,11 +5172,6 @@ function ConversationRowImpl({
             className="flex shrink-0 items-center"
           >
             <RunningDot className="size-3" />
-          </span>
-        )}
-        {openElsewhere && (
-          <span role="img" aria-label="Open elsewhere" className="shrink-0">
-            <ExternalLinkIcon className="size-3 text-muted-foreground" />
           </span>
         )}
         <span

@@ -1,3 +1,4 @@
+import type { ActivitySource } from "./ActivityView";
 import { createContext, useContext, type ReactNode } from "react";
 import type { WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import type { OpenFileOptions } from "@/shell/FileViewerContext";
@@ -19,6 +20,7 @@ export type WorkbenchViewKind =
 
 export interface OpenWorkbenchView {
   kind: WorkbenchViewKind;
+  source?: ActivitySource;
   conversationId?: string;
   workspace?: WorkbenchWorkspace;
   workspaceId?: string;

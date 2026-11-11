@@ -189,8 +189,8 @@ describe("project folder header icon/chevron", () => {
     // The "Projects" group header carries no leading icon.
     const header = headerButton("Projects");
 
-    // The parent section label uses the settings-scaled subtitle tier.
-    expect(header).toHaveClass("gap-1", "pl-2", "text-sm", "font-normal");
+    // Parent sections share the conversation heading's stronger typography.
+    expect(header).toHaveClass("gap-1", "pl-2", "text-base", "font-bold");
     expect(header).not.toHaveClass("font-medium", "uppercase");
 
     expect(header.querySelector(".lucide-folder")).toBeNull();

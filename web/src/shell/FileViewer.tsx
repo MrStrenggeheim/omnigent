@@ -63,7 +63,7 @@ import {
   ListIcon,
   Loader2Icon,
   MessageSquareTextIcon,
-  MoreHorizontalIcon,
+  SlidersHorizontalIcon,
   PencilLineIcon,
   RowsIcon,
   SearchIcon,
@@ -1615,7 +1615,7 @@ function FileViewerBody({
     key: "view-settings",
     label: "View settings",
     tooltip: "View settings",
-    icon: <MoreHorizontalIcon className="size-4" />,
+    icon: <SlidersHorizontalIcon className="size-4" />,
     menu: settingsMenu,
   });
 
@@ -1908,7 +1908,7 @@ function FileViewerBody({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button type="button" variant="ghost" size="icon-sm" aria-label="More actions">
-                    <MoreHorizontalIcon className="size-4" />
+                    <SlidersHorizontalIcon className="size-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-auto min-w-40">

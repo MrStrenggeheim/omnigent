@@ -156,8 +156,8 @@ function ChatActivityContent({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-      <div className="workspace-control-header flex items-center gap-1 border-b px-2">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--workspace-content)]">
+      <div className="workspace-control-header flex items-center gap-1 border-b bg-[var(--workspace-content)] px-2">
         {sourceControl ?? <h2 className="pl-1 font-medium text-ui">Activity</h2>}
         <div
           role="group"
@@ -169,7 +169,7 @@ function ChatActivityContent({
               key={value}
               variant={filter === value ? "secondary" : "ghost"}
               size="sm"
-              className="px-2"
+              className={filter === value ? "bg-[var(--workspace-selected)] px-2" : "px-2"}
               aria-pressed={filter === value}
               onClick={() => setFilter(value)}
             >

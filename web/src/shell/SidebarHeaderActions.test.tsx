@@ -6,6 +6,7 @@ import { ALT_KEY, MOD_KEY } from "@/components/KeyboardShortcut";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { SidebarHeaderActions } from "./SidebarHeaderActions";
+import { SidebarToggle } from "./SidebarToggle";
 
 afterEach(cleanup);
 
@@ -49,3 +50,34 @@ describe("SidebarHeaderActions shortcut hints", () => {
     ).toEqual(keys);
   });
 });
+
+it("keeps Search reachable without duplicating the application-bar toggle", () => {
+  const onOpenSearch = vi.fn();
+  render(
+    <MemoryRouter>
+      <TooltipProvider>
+        <SidebarHeaderActions
+          compact
+          showToggle={false}
+          expanded
+          onToggle={vi.fn()}
+          onOpenSearch={onOpenSearch}
+        />
+      </TooltipProvider>
+    </MemoryRouter>,
+  );
+  expect(screen.queryByRole("button", { name: /sidebar/i })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  expect(onOpenSearch).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])(
+  "keeps the shared toggle background transparent when expanded=%s",
+  (expanded) => {
+    render(<SidebarToggle side="left" expanded={expanded} aria-label="Navigation" />);
+    const button = screen.getByRole("button", { name: "Navigation" });
+    expect(button).toHaveClass("[&>[data-header-action-surface]]:bg-transparent!");
+    expect(button.querySelector("svg")).toHaveAttribute("data-panel-filled", String(expanded));
+    expect(button).toHaveAttribute("aria-expanded", String(expanded));
+  },
+);

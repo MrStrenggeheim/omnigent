@@ -61,7 +61,7 @@ export function WorkbenchAppBar({
         onClick={onToggleSidebar}
       />
       <OmnigentLogo className="size-7 shrink-0" />
-      <span className="hidden text-sm font-semibold sm:block">Omnigent</span>
+      <span className="hidden text-base font-bold sm:block">Omnigent</span>
       <div className="flex-1" />
       <Button
         variant="outline"
@@ -77,9 +77,9 @@ export function WorkbenchAppBar({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="ghost"
+            variant="default"
             size="sm"
-            className="h-6 gap-1 px-1.5 max-md:size-11"
+            className="h-8 gap-1.5 px-4 text-primary-foreground max-md:h-11"
             aria-label="Open view"
           >
             <PlusIcon className="size-4" />

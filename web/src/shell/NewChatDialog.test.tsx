@@ -5319,43 +5319,21 @@ describe("NewChatLandingScreen", () => {
     expect(permission).toHaveTextContent("Accept edits");
   });
 
-  it("shows recent workspaces first and opens WorkspacePicker only from Open folder", () => {
+  it("opens the combined workspace picker directly with current host and editable path", () => {
     localStorage.setItem(
       RECENT_KEY,
       JSON.stringify({ host_1: ["/Users/corey/repo", "/Users/corey/other"] }),
     );
     renderLanding();
-
-    const workspace = screen.getByTestId("new-chat-landing-workspace-chip");
-    fireEvent.pointerDown(workspace, { button: 0 });
-    fireEvent.click(workspace);
-    const recentsMenu = screen.getByRole("dialog");
-    expect(recentsMenu).toHaveClass("w-[31rem]", "p-1.5");
-    const firstRecent = screen.getByTestId("recent-workspace-select-0");
-    const secondRecent = screen.getByTestId("recent-workspace-select-1");
-    expect(firstRecent).toHaveClass("py-[3px]", "text-ui");
-    expect(firstRecent).toHaveTextContent("/Users/corey/repo");
-    expect(secondRecent).toHaveTextContent("/Users/corey/other");
-    expect(
-      firstRecent.compareDocumentPosition(secondRecent) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(screen.queryByTestId("workspace-picker")).toBeNull();
-
-    fireEvent.click(secondRecent);
-    expect(workspace).toHaveTextContent("other");
-
-    fireEvent.pointerDown(workspace, { button: 0 });
-    fireEvent.click(workspace);
-    expect(screen.getByTestId("new-chat-landing-workspace-open-folder-icon")).toBeVisible();
-    expect(screen.getByTestId("new-chat-landing-workspace-open-folder")).toHaveClass("text-ui");
-    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-open-folder"));
-    const workspacePicker = screen.getByTestId("workspace-picker");
-    expect(workspacePicker).toBeTruthy();
-    expect(workspacePicker.closest('[role="dialog"]')).toHaveClass(
-      "sm:max-w-[min(64rem,calc(100vw-2rem))]",
-    );
-    expect(screen.getByTestId("workspace-picker-select")).toBeTruthy();
-    expect(screen.getByTestId("workspace-picker-cancel")).toBeTruthy();
+    const trigger = screen.getByTestId("new-chat-landing-workspace-chip");
+    expect(trigger).toHaveTextContent("/Users/corey/repo");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("region", { name: "Host" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Path" })).toBeVisible();
+    expect(screen.getByTestId("workspace-picker-path-input")).toHaveValue("/Users/corey/repo");
+    expect(screen.getByRole("button", { name: "Use workspace" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
+    expect(screen.getByText("Recent paths on this host")).toBeVisible();
   });
 
   it("browses a recent folder provisionally without selecting it", () => {
@@ -5364,18 +5342,14 @@ describe("NewChatLandingScreen", () => {
       JSON.stringify({ host_1: ["/Users/corey/repo", "/Users/corey/other"] }),
     );
     renderLanding();
-
-    const workspace = screen.getByTestId("new-chat-landing-workspace-chip");
-    fireEvent.click(workspace);
-    fireEvent.click(screen.getByTestId("recent-workspace-browse-1"));
-
-    expect(screen.getByTestId("workspace-picker")).toBeVisible();
+    const trigger = screen.getByTestId("new-chat-landing-workspace-chip");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "/Users/corey/other" }));
     expect(screen.getByTestId("workspace-picker-path-input")).toHaveValue("/Users/corey/other");
-    expect(workspace).toHaveAccessibleName("Working directory: /Users/corey/repo");
-
-    fireEvent.click(screen.getByTestId("workspace-picker-cancel"));
-    expect(screen.queryByTestId("workspace-picker")).toBeNull();
-    expect(workspace).toHaveAccessibleName("Working directory: /Users/corey/repo");
+    expect(trigger).toHaveTextContent("/Users/corey/repo");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveTextContent("/Users/corey/repo");
   });
 
   it("separates the zero-session import action from an empty notice slot", () => {

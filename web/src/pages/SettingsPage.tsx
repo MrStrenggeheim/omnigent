@@ -55,6 +55,7 @@ import {
   useState,
 } from "react";
 import { useViewerId } from "@/hooks/useViewerId";
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import {
   ArchiveRestoreIcon,
   AlertTriangleIcon,
@@ -149,7 +150,7 @@ import {
 import { conversationDisplayLabel } from "@/shell/sidebarNav";
 import { absoluteTime } from "@/lib/relativeTime";
 import { useNavigate } from "@/lib/routing";
-import { useSettingsRoute } from "@/shell/settingsNav";
+import { SettingsSectionChooser, useSettingsRoute } from "@/shell/settingsNav";
 import { ImportSessionsPanel } from "@/shell/ImportSessionsPanel";
 import { isThemeMode, normalizeThemeMode, type ThemeMode } from "@/components/theme/themeMode";
 import { useResolvedThemeMode } from "@/components/theme/useResolvedThemeMode";
@@ -314,6 +315,7 @@ const SharingPage = lazy(() =>
  */
 export function SettingsPage() {
   const info = useServerInfo();
+  const isMobile = useIsMobileViewport();
   // A login session exists (accounts OR OIDC) when the server advertises a
   // login_url; gates the Account section so SSO users get it too.
   const hasAuthSession = info !== "loading" && info.login_url !== null;
@@ -340,8 +342,8 @@ export function SettingsPage() {
   // Rendered in ANY multi-user mode (accounts AND OIDC), not gated on
   // `accountsEnabled` — the nav + pages handle admin gating, and Members runs
   // read-only under OIDC (no password actions).
-  if (section === "members" || section === "policies" || section === "sharing") {
-    return (
+  const content =
+    section === "members" || section === "policies" || section === "sharing" ? (
       <Suspense fallback={null}>
         {section === "members" ? (
           <MembersPage />
@@ -351,44 +353,52 @@ export function SettingsPage() {
           <SharingPage />
         )}
       </Suspense>
+    ) : (
+      <PageScroll
+        contentClassName="px-4 md:px-8"
+        extraBottom="2.5rem"
+        // Reserve the scrollbar's width so the centered column doesn't shift when
+        // switching between a page or tab that scrolls and one that doesn't.
+        className="[scrollbar-gutter:stable]"
+        {...pageWrapperSettings}
+      >
+        {section === "appearance" && <AppearanceSection />}
+        {section === "general" && <GeneralSection />}
+        {section === "harnesses" && <SettingsHarnessesSection />}
+        {section === "custom-agents" && <SettingsCustomAgentsSection />}
+        {section === "git" && <GitSection />}
+        {section === "integrations" && <IntegrationsSection />}
+        {section === "mcp" && (
+          <Section title="MCP">
+            {info !== "loading" && info.enabled_connections?.includes("mcp") ? (
+              <McpRegistryConnections />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {info === "loading"
+                  ? "Loading MCP services…"
+                  : "MCP services are not configured on this server."}
+              </p>
+            )}
+          </Section>
+        )}
+        {section === "shortcuts" && <ShortcutsSection />}
+        {section === "import" && <ImportSection />}
+        {section === "account" && hasAuthSession && <AccountSection />}
+        {section === "archived" && <ArchivedSection />}
+        {section === "cli" && isElectronShell() && <LocalCliSection />}
+        {section === "updates" && isElectronShell() && <UpdatesSection />}
+      </PageScroll>
     );
-  }
 
   return (
-    <PageScroll
-      contentClassName="px-4 md:px-8"
-      extraBottom="2.5rem"
-      // Reserve the scrollbar's width so the centered column doesn't shift when
-      // switching between a page or tab that scrolls and one that doesn't.
-      className="[scrollbar-gutter:stable]"
-      {...pageWrapperSettings}
-    >
-      {section === "appearance" && <AppearanceSection />}
-      {section === "general" && <GeneralSection />}
-      {section === "harnesses" && <SettingsHarnessesSection />}
-      {section === "custom-agents" && <SettingsCustomAgentsSection />}
-      {section === "git" && <GitSection />}
-      {section === "integrations" && <IntegrationsSection />}
-      {section === "mcp" && (
-        <Section title="MCP">
-          {info !== "loading" && info.enabled_connections?.includes("mcp") ? (
-            <McpRegistryConnections />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {info === "loading"
-                ? "Loading MCP services…"
-                : "MCP services are not configured on this server."}
-            </p>
-          )}
-        </Section>
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      {isMobile && (
+        <div className="shrink-0 px-4 pt-[calc(var(--omnigent-header-height,0px)+var(--omnigent-inset-top,0px)+0.75rem)] pb-3 md:hidden">
+          <SettingsSectionChooser />
+        </div>
       )}
-      {section === "shortcuts" && <ShortcutsSection />}
-      {section === "import" && <ImportSection />}
-      {section === "account" && hasAuthSession && <AccountSection />}
-      {section === "archived" && <ArchivedSection />}
-      {section === "cli" && isElectronShell() && <LocalCliSection />}
-      {section === "updates" && isElectronShell() && <UpdatesSection />}
-    </PageScroll>
+      {content}
+    </div>
   );
 }
 

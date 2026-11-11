@@ -371,3 +371,31 @@ describe("SwitchHostDialog", () => {
     );
   });
 });
+
+it("accepts the combined picker's preselected host and path without replacing them", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const onSwitched = vi.fn();
+  render(
+    <QueryClientProvider client={client}>
+      <SwitchHostDialog
+        open
+        onOpenChange={vi.fn()}
+        sessionId="conv_1"
+        currentHostId="host_old"
+        initialHostId="host_new"
+        initialPath="/picked/path"
+        onSwitched={onSwitched}
+      />
+    </QueryClientProvider>,
+  );
+  expect(screen.getByTestId("mock-host-select")).toHaveValue("host_new");
+  expect(screen.getByTestId("mock-workspace-input")).toHaveValue("/picked/path");
+  fireEvent.click(screen.getByTestId("switch-host-button"));
+  await waitFor(() => expect(onSwitched).toHaveBeenCalledOnce());
+  expect(updateSessionMock).toHaveBeenCalledWith("conv_1", {
+    runnerId: "",
+    modelOverride: null,
+    silent: true,
+  });
+  expect(launchRunnerMock).toHaveBeenCalledWith("host_new", "conv_1", "/picked/path");
+});

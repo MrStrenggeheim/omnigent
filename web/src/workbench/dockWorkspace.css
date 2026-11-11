@@ -8,8 +8,7 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  --workbench-focused-tab: color-mix(in srgb, var(--brand-accent) 16%, var(--background));
-  --workbench-hover-duration: 150ms;
+  --workbench-focused-tab: var(--workspace-selected);
   color: var(--foreground);
   background: var(--background);
 }
@@ -42,8 +41,9 @@
   align-items: center;
   height: var(--dock-header-height);
   border-bottom: 1px solid var(--border);
-  background: var(--background);
+  background: var(--workspace-chrome);
   pointer-events: auto;
+  border-right: 1px solid var(--border);
 }
 
 .dock-tabs {
@@ -188,19 +188,17 @@
   flex-shrink: 0;
   align-items: center;
   padding-right: 4px;
-  transition: background-color var(--workbench-hover-duration) ease;
 }
 .dock-tab-group:hover {
-  background: var(--muted);
+  background: var(--workspace-content);
 }
 .dock-tab {
   height: 100%;
   padding-right: 6px;
   background: transparent;
-  transition: background-color var(--workbench-hover-duration) ease;
 }
 .dock-tab-group:has([aria-selected="true"]) {
-  background: var(--muted);
+  background: var(--workspace-content);
 }
 .dock-pane[data-focused="true"] .dock-tab-group:has([aria-selected="true"]) {
   background: var(--workbench-focused-tab);
@@ -230,4 +228,20 @@
     width: 44px;
     height: 44px;
   }
+}
+
+/* Neutral dividers persist independently of pane focus. */
+.dock-view-slot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  pointer-events: none;
+  z-index: 10;
+}
+.dock-tab:focus-visible,
+.dock-tab-close:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }

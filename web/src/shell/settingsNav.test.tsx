@@ -48,6 +48,7 @@ vi.mock("@/hooks/useIsAdmin", () => ({
 
 import {
   SettingsSidebarBody,
+  SettingsSectionChooser,
   settingsNavGroups,
   useSettingsRoute,
   useTrackSettingsReturn,
@@ -75,6 +76,54 @@ beforeEach(() => {
   mocks.enabledConnections = [];
 });
 afterEach(cleanup);
+
+describe("SettingsSectionChooser", () => {
+  function renderChooser() {
+    render(
+      <TooltipProvider>
+        <MemoryRouter initialEntries={["/settings/general"]}>
+          <SettingsSectionChooser />
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Settings section" }), {
+      key: "ArrowDown",
+    });
+  }
+
+  it("navigates without a sidebar and hides desktop-only and unauthorized sections", async () => {
+    renderChooser();
+    expect(screen.queryByRole("option", { name: "Keyboard shortcuts" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Account" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Members" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Custom agents" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "MCP" })).toBeNull();
+    fireEvent.click(await screen.findByRole("option", { name: "Appearance" }));
+    expect(screen.getByRole("combobox", { name: "Settings section" })).toHaveTextContent(
+      "Appearance",
+    );
+  });
+
+  it("reuses account, admin, feature and connection permissions", () => {
+    mocks.loginUrl = "/auth/login";
+    mocks.isAdmin = true;
+    mocks.customAgentsEnabled = true;
+    mocks.agentInstall = true;
+    mocks.enabledConnections = ["mcp", "github"];
+    renderChooser();
+    for (const label of [
+      "Account",
+      "Members",
+      "Policies",
+      "Sharing",
+      "Custom agents",
+      "MCP",
+      "Sandbox Integrations",
+    ]) {
+      expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
+    }
+  });
+});
 
 describe("settingsNavGroups", () => {
   it("starts general preferences with a General gear entry", () => {

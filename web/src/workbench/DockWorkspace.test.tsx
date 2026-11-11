@@ -440,6 +440,31 @@ describe("useDockLayout", () => {
     expect(result.current.layout.views.map((item) => item.id)).toEqual(["a", "only-first"]);
   });
 
+  it("applies a guarded root change after another pane receives focus", async () => {
+    const decision = deferred<boolean>();
+    const { result } = renderHook(() =>
+      useDockLayout({
+        scope,
+        storage: null,
+        initialLayout: createDockLayout([view("a"), view("b")]),
+        onBeforeClose: () => decision.promise,
+      }),
+    );
+    let update!: Promise<boolean>;
+    act(() => {
+      update = result.current.updateView("a", { resource: { path: "/new-root" } });
+      result.current.focusView("b");
+    });
+    await act(async () => {
+      decision.resolve(true);
+      expect(await update).toBe(true);
+    });
+    expect(result.current.layout.views.find((item) => item.id === "a")?.resource.path).toBe(
+      "/new-root",
+    );
+    expect(result.current.layout.panes[0].selectedViewId).toBe("b");
+  });
+
   it("guards resource replacements and layout navigation, without guarding focus or docking", async () => {
     const guard = vi.fn(async () => false);
     const { result } = renderHook(() =>

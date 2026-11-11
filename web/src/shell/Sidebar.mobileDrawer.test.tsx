@@ -100,7 +100,7 @@ describe("mobile sidebar drawer", () => {
     );
   });
 
-  it("floats Settings at the bottom and hides the desktop collapse toggle on mobile", () => {
+  it("floats Settings at the bottom and omits the duplicate header toggle", () => {
     renderSidebar();
 
     // Search stays in the header row (top); Settings gets its own float at the
@@ -112,11 +112,9 @@ describe("mobile sidebar drawer", () => {
     expect(float).toHaveAttribute("href", "/settings");
     expect(float.closest("a, button")).toHaveClass("absolute", "bottom-3", "md:hidden");
 
-    // The header-row Settings copy and the collapse toggle are desktop-only.
+    // The header-row Settings copy is desktop-only; the application bar owns the toggle.
     expect(screen.getByTestId("settings-button")).toHaveClass("max-md:hidden");
-    expect(within(headerActions).getByRole("button", { name: "Close sidebar" })).toHaveClass(
-      "max-md:hidden",
-    );
+    expect(within(headerActions).queryByRole("button", { name: "Close sidebar" })).toBeNull();
   });
 
   it("keeps both floating actions icon-only on mobile", () => {

@@ -12,25 +12,55 @@ The approved workspace specification governs behavior; later owner corrections g
 
 ## Tokens and components
 
-| Role | Canonical implementation |
-| --- | --- |
-| View surface | `--background`; same value across docked content |
-| Navigation surface | `--sidebar`; intentional hierarchy from content |
-| Overlay | Existing popover/dialog tokens; opaque readable foreground |
-| Normal text | Existing system/Geist typography and `--foreground` |
-| Secondary text | `--muted-foreground`; never use disabled opacity for ordinary text |
-| Selected tab | Shared muted surface; focused tab gets restrained accent wash |
-| Pane focus | Focused-tab fill only; no perimeter or top accent line |
-| Keyboard focus | Existing `--ring` treatment; preserve visible focus |
-| Header geometry | Existing 48px per header row |
-| Header action | `HeaderActionButton`, 24px glyph surface, 44px mobile target |
-| Sidebar toggle | `SidebarToggle` with `SidebarPanelIcon`, filled segment when open |
-| Search modes | Existing `SegmentedControl`, consistent scope/category sizing |
-| Switches | Shared `Switch`; off, on and disabled must remain distinguishable |
-| Tooltip | Canonical centered tooltip; no conversation metadata hover cards |
-| Density | Existing shared list tokens; vertically centered disclosure and label |
-| Motion | 150ms color feedback for tabs; no size/position animation; reduced-motion aware |
-| Scrolling | Existing slim scrollbar treatment; fixed headers never scroll vertically |
+| Role                     | Canonical implementation                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| View headers and content | `--workspace-content`; white in light mode, neutral `#18181b` in dark mode                  |
+| Sidebar and tab bars     | `--workspace-chrome`; pale selected-accent wash                                             |
+| Application bar          | `--workspace-appbar`; same medium-light fill as the focused tab                             |
+| Overlay                  | Existing popover/dialog tokens; opaque readable foreground                                  |
+| Normal text              | Existing system/Geist typography and `--foreground`                                         |
+| Secondary text           | `--muted-foreground`; never use disabled opacity for ordinary text                          |
+| Selected tab             | Unfocused selection uses the content surface; focused selection uses `--workspace-selected` |
+| Pane focus               | Focused-tab fill only; no perimeter or top accent line                                      |
+| Keyboard focus           | Existing `--ring` treatment; preserve visible focus                                         |
+| Header geometry          | Existing 48px per header row                                                                |
+| Header action            | `HeaderActionButton`, 24px glyph surface, 44px mobile target                                |
+| Sidebar toggle           | `SidebarToggle` with `SidebarPanelIcon`, filled segment when open                           |
+| Search modes             | Existing `SegmentedControl`, consistent scope/category sizing                               |
+| Switches                 | Shared `Switch`; off, on and disabled must remain distinguishable                           |
+| Tooltip                  | Canonical centered tooltip; no conversation metadata hover cards                            |
+| Density                  | Existing shared list tokens; vertically centered disclosure and label                       |
+| Motion                   | Immediate tab and disclosure state changes; no hover animation                              |
+| Scrolling                | Existing slim scrollbar treatment; fixed headers never scroll vertically                    |
+
+## Approved theme and interactive states
+
+The owner approved these surface and control roles on 2026-11-11.
+All chrome mixes use the existing selected accent, including saved preset and custom preferences.
+The default violet primary is deep purple `#68518b` with white text in both modes.
+Other selected palettes retain their primary and readable foreground preferences.
+
+| State or role                   | Shared treatment                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| Chrome at rest                  | `--workspace-chrome`: 10% accent mixed into content                                 |
+| Focused tab and application bar | `--workspace-selected` / `--workspace-appbar`: 28% accent mixed into content        |
+| Hover on content                | `--workspace-hover-on-content`: 8% accent mixed into content                        |
+| Hover on chrome                 | `--workspace-hover-on-chrome`: 6% foreground mixed into chrome                      |
+| Focused tab hover               | Retain selected fill; close control may show its own hover surface                  |
+| Primary action, including Send  | Shared primary fill and foreground; hover adds 5% black, press adds 10% black       |
+| Secondary action                | White with dark text and a neutral border; neutral dark counterpart with light text |
+| Secondary hover / press / open  | Add 6% / 10% / 10% foreground to the secondary surface                              |
+| Keyboard focus                  | Keep the shared visible focus ring independently of hover or selection              |
+| Disabled action                 | Shared disabled treatment; Send uses muted fill/text, with no pointer interaction   |
+| Busy Send and interrupt         | Preserve busy/disabled semantics and the destructive interrupt variant              |
+
+Primary hover and press keep text opaque rather than fading the entire control.
+Use the matching surface-hover token for icon actions and rows.
+Keep focused selection visible while hovering a tab; apply state feedback without tab or disclosure animation.
+
+`index.css` publishes the workspace tokens independently of the workbench styles.
+Import `workbenchSurfaces.css` after the existing shell and dock CSS to give docked roots, headers and content opaque shared surfaces.
+Docked content is excluded from the global dark-card glass decoration; code, diff, selection and overlay surfaces retain their specialized roles.
 
 ## Composition
 

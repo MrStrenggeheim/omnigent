@@ -1,12 +1,5 @@
 import { useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import {
-  ChevronRightIcon,
-  MessageSquareIcon,
-  ShareIcon,
-  InfoIcon,
-  GitForkIcon,
-  SquareIcon,
-} from "lucide-react";
+import { ChevronRightIcon, ShareIcon, InfoIcon, GitForkIcon, SquareIcon } from "lucide-react";
 import { ScopedConversationSurface } from "./ScopedConversationSurface";
 import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { AgentInfoContent } from "@/components/AgentInfo";
@@ -226,7 +219,6 @@ function ConversationViewContent({
     : null;
   const header = (
     <div className="flex h-12 min-h-12 shrink-0 items-center gap-1.5 border-b px-3">
-      <MessageSquareIcon className="size-4 shrink-0 text-muted-foreground" />
       <nav
         aria-label="Conversation ancestry"
         className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-sm"

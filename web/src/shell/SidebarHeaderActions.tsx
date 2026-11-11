@@ -10,25 +10,10 @@ const SIDEBAR_TOGGLE_KEYS = [MOD_KEY, ALT_KEY, "["] as const;
 const SEARCH_KEYS = [MOD_KEY, "K"] as const;
 const SETTINGS_KEYS = [MOD_KEY, ALT_KEY, ","] as const;
 
-/**
- * Search / Settings / sidebar-toggle cluster from the sidebar's header row.
- *
- * Extracted so it can render in TWO places without duplicating the markup:
- * inside the sidebar (every browser and non-mac platform, and the macOS shell
- * below md, where the phone drawer owns it) and, on the macOS desktop shell at
- * md+, in the persistent title-bar strip. There it must survive the
- * sidebar collapsing — the sidebar goes `md:w-0 md:overflow-hidden` and turns
- * `inert`, so a cluster living inside it would be clipped and unclickable, and
- * while peeking the card floats at `inset-2` and drags the cluster off the
- * traffic lights' centre line. Hoisting it out of the sidebar is what keeps the
- * three icons in one fixed place across open, collapsed, and peeking.
- *
- * Only the toggle's meaning changes with state: it collapses an open sidebar and
- * opens a closed or peeking one, so the caller passes `expanded` and the icon
- * and label follow from it.
- */
+/** Shared actions; only the persistent macOS title-bar copy includes a toggle. */
 export function SidebarHeaderActions({
   compact = false,
+  showToggle = true,
   expanded,
   onToggle,
   onOpenSearch,
@@ -38,6 +23,8 @@ export function SidebarHeaderActions({
   onTogglePointerLeave,
 }: {
   compact?: boolean;
+  /** Only the persistent title-bar copy needs a navigation toggle. */
+  showToggle?: boolean;
   /**
    * Whether the sidebar currently reads as open — `open || peek`. Drives the
    * toggle only: expanded collapses, collapsed (or peeking) opens.
@@ -68,38 +55,40 @@ export function SidebarHeaderActions({
       {!compact && (
         <SidebarSettingsButton onSettingsClick={onSettingsClick} className="max-md:hidden" />
       )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={expanded ? "Close sidebar" : "Open sidebar"}
-            aria-keyshortcuts={`${ARIA_MOD_KEY}+Alt+[`}
-            onClick={onToggle}
-            onPointerEnter={onTogglePointerEnter}
-            onPointerDown={onTogglePointerDown}
-            onPointerLeave={onTogglePointerLeave}
-            // Mobile drops the toggle entirely: there the sidebar is a drawer
-            // that leaves a strip of the chat visible, and tapping that strip
-            // is how you get back — a collapse icon would be a second, worse
-            // way to do the same thing.
-            className="size-6 text-muted-foreground hover:text-foreground max-md:hidden"
-          >
-            {/* panel-right-open reads as "push the panel away" while the sidebar
+      {showToggle && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={expanded ? "Close sidebar" : "Open sidebar"}
+              aria-keyshortcuts={`${ARIA_MOD_KEY}+Alt+[`}
+              onClick={onToggle}
+              onPointerEnter={onTogglePointerEnter}
+              onPointerDown={onTogglePointerDown}
+              onPointerLeave={onTogglePointerLeave}
+              // Mobile drops the toggle entirely: there the sidebar is a drawer
+              // that leaves a strip of the chat visible, and tapping that strip
+              // is how you get back — a collapse icon would be a second, worse
+              // way to do the same thing.
+              className="size-6 text-muted-foreground hover:text-foreground max-md:hidden"
+            >
+              {/* panel-right-open reads as "push the panel away" while the sidebar
             is open; panel-left-open as "bring it back" once it is collapsed or
             merely peeking. */}
-            {expanded ? (
-              <PanelRightOpenIcon className="size-4" />
-            ) : (
-              <PanelLeftOpenIcon className="size-4" />
-            )}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" shortcut={SIDEBAR_TOGGLE_KEYS}>
-          <span>{expanded ? "Collapse sidebar" : "Open sidebar"}</span>
-        </TooltipContent>
-      </Tooltip>
+              {expanded ? (
+                <PanelRightOpenIcon className="size-4" />
+              ) : (
+                <PanelLeftOpenIcon className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" shortcut={SIDEBAR_TOGGLE_KEYS}>
+            <span>{expanded ? "Collapse sidebar" : "Open sidebar"}</span>
+          </TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }

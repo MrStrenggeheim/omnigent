@@ -353,6 +353,25 @@
   --sidebar-active: var(--accent);
   --sidebar-active-foreground: var(--foreground);
   --tag-pink: color-mix(in srgb, var(--primary) 12%, transparent);
+  --workspace-content: #ffffff;
+  --workspace-chrome: color-mix(in srgb, var(--brand-accent) 10%, var(--workspace-content));
+  --workspace-selected: color-mix(in srgb, var(--brand-accent) 28%, var(--workspace-content));
+  --workspace-appbar: var(--workspace-selected);
+  --workspace-hover-on-content: color-mix(
+    in srgb,
+    var(--brand-accent) 8%,
+    var(--workspace-content)
+  );
+  --workspace-hover-on-chrome: color-mix(in srgb, var(--foreground) 6%, var(--workspace-chrome));
+  --primary-hover: color-mix(in srgb, var(--primary) 95%, black);
+  --primary-active: color-mix(in srgb, var(--primary) 90%, black);
+  --secondary-hover: color-mix(in srgb, var(--secondary-foreground) 6%, var(--secondary));
+  --secondary-active: color-mix(in srgb, var(--secondary-foreground) 10%, var(--secondary));
+}
+
+.dark:not([data-theme]),
+.dark[data-theme] {
+  --workspace-content: #18181b;
 }
 
 /* Main-sidebar item labels use the same text-ui semantic step as Appearance
@@ -733,7 +752,9 @@ html:not(.dark) .conversations-sidebar:not(.is-peek) {
 .dark
   :is(.bg-card, [class*="md:bg-card"]):not(
     :is(.bg-card, [class*="md:bg-card"]) :is(.bg-card, [class*="md:bg-card"])
-  ):not([data-collapsed]):not([aria-label="Workspace"]):not([aria-label="Conversations"]) {
+  ):not([data-collapsed]):not([aria-label="Workspace"]):not([aria-label="Conversations"]):not(
+    .dock-view-slot *
+  ) {
   /* -webkit- must come BEFORE the unprefixed property: LightningCSS (vite
    * build) collapses the pair and keeps only the last declaration. */
   -webkit-backdrop-filter: blur(32px) saturate(180%) !important;

@@ -2,6 +2,9 @@
 export const SIDEBAR_ROW =
   "sidebar-row sidebar-compact-text h-auto min-h-0 gap-2 rounded-[var(--radius-otto-button)] px-2 py-1.5 md:py-1";
 
+/** Shared hierarchy for the conversation list title and its section headings. */
+export const SIDEBAR_HEADING = "text-base font-bold";
+
 // Match the Settings sidebar's ghost-button hover treatment across every home
 // sidebar row.
 export const SIDEBAR_HOVER_HIGHLIGHT =

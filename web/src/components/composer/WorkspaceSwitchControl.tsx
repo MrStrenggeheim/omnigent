@@ -1,25 +1,18 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "@/lib/routing";
-import { FolderIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { WorkspacePathField } from "@/shell/WorkspacePathField";
-import { WorkspacePickerDialog } from "@/shell/WorkspacePickerDialog";
+import { WorkspaceSelectionDialog } from "@/shell/WorkspaceSelectionDialog";
+import { WorkspaceSelector } from "@/shell/WorkspaceSelector";
+import { SwitchHostDialog } from "@/shell/SwitchHostDialog";
+import { useSessionActionRestrictions } from "@/hooks/useSessionActionRestrictions";
+import { useHosts } from "@/hooks/useHosts";
 import { FileViewerContext } from "@/shell/FileViewerContext";
 import { useRecentWorkspaces } from "@/hooks/useRecentWorkspaces";
 import { authenticatedFetch } from "@/lib/identity";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
 import { notify, toast, updateNotification } from "@/lib/notifications";
 import { useChatStore } from "@/store/chatStore";
-import { COMPOSER_WORKSPACE_COLLAPSED_LABEL_CLASS } from "./ChatComposer";
 
 interface Operation {
   id: string;
@@ -59,6 +52,7 @@ interface WorkspaceSwitchProps {
   hostId: string;
   workspace: string;
   disabledReason?: string;
+  onReconnect?: () => void;
 }
 
 /** Keep an asynchronous switch attached to its original chat across composer reuse. */
@@ -71,9 +65,11 @@ function WorkspaceSwitchState({
   hostId,
   workspace,
   disabledReason,
+  onReconnect,
 }: WorkspaceSwitchProps) {
   const [open, setOpen] = useState(false);
-  const [browsing, setBrowsing] = useState(false);
+  const [hostTarget, setHostTarget] = useState<{ hostId: string; path: string } | null>(null);
+  const { switchHostDisabledReason } = useSessionActionRestrictions(sessionId, { hostId });
   const [checking, setChecking] = useState(false);
   const prepareSequence = useRef(0);
   useEffect(
@@ -87,7 +83,9 @@ function WorkspaceSwitchState({
   const queryClient = useQueryClient();
   const [, setSearchParams] = useSearchParams();
   const fileContext = useContext(FileViewerContext);
-  const { recent, addRecent } = useRecentWorkspaces(hostId);
+  const { addRecent } = useRecentWorkspaces(hostId);
+  const { data: hosts } = useHosts({ includeSandbox: true });
+  const hostLabel = hosts?.find((host) => host.host_id === hostId)?.name ?? hostId;
   const activeNotice = useRef<string | undefined>(undefined);
   const settledNotice = useRef<string | undefined>(undefined);
   const query = useQuery({
@@ -280,35 +278,41 @@ function WorkspaceSwitchState({
       );
       if (!response.ok) throw await apiErrorFromResponse(response);
       const prepared = (await response.json()) as Snapshot;
-      if (sequence !== prepareSequence.current) return;
+      if (sequence !== prepareSequence.current) return false;
       if (prepared.unchanged) {
         toast.info("Workspace unchanged", { description: prepared.workspace });
         closeDialog(false);
-        return;
+        return false;
       }
-      const apply = () => {
-        if (sequence === prepareSequence.current)
-          mutation.mutate({ target: prepared.validated_workspace ?? target, recover });
-      };
-      if (fileContext?.beforeWorkspaceChange)
-        fileContext.beforeWorkspaceChange(apply, () => closeDialog(false));
-      else apply();
+      if (fileContext?.beforeWorkspaceChange) {
+        const approved = await new Promise<boolean>((resolve) => {
+          fileContext.beforeWorkspaceChange!(
+            () => resolve(true),
+            () => resolve(false),
+          );
+        });
+        if (!approved) return false;
+      }
+      if (sequence !== prepareSequence.current) return false;
+      await mutation.mutateAsync({ target: prepared.validated_workspace ?? target, recover });
+      return false;
     } catch (failure) {
-      if (sequence !== prepareSequence.current) return;
+      if (sequence !== prepareSequence.current) return false;
       const message = failure instanceof Error ? failure.message : String(failure);
       setError(message);
       toast.error("Could not change workspace", { description: message });
     } finally {
       setChecking(false);
     }
+    return false;
   }
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-8 min-w-7 max-w-40 gap-1 px-1 text-xs font-normal text-muted-foreground md:h-7"
+      <WorkspaceSelector
+        hostLabel={hostLabel}
+        path={
+          changing ? "Changing workspace…" : operation?.blocked ? "Recover workspace" : workspace
+        }
         data-testid="composer-workspace-dir"
         aria-label={`Change workspace: ${workspace}`}
         title={disabledReason ?? `Working directory: ${workspace}. Change workspace`}
@@ -318,109 +322,111 @@ function WorkspaceSwitchState({
           setError(null);
           setOpen(true);
         }}
-      >
-        {changing ? (
-          <Loader2Icon className="size-3.5 shrink-0 animate-spin" />
-        ) : (
-          <FolderIcon className="size-3.5 shrink-0" />
-        )}
-        <span
-          data-workspace-collapse-label=""
-          className={`min-w-0 truncate ${COMPOSER_WORKSPACE_COLLAPSED_LABEL_CLASS}`}
-        >
-          {changing
-            ? "Changing workspace…"
-            : operation?.blocked
-              ? "Recover workspace"
-              : workspace.split(/[\\/]/).filter(Boolean).at(-1)}
-        </span>
-      </Button>
-      <Dialog open={open} onOpenChange={closeDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Change workspace</DialogTitle>
-            <DialogDescription>
-              The agent restarts in the selected folder and continues this chat. Files and existing
-              manual terminals stay where they are.
-            </DialogDescription>
-          </DialogHeader>
-          <fieldset disabled={changing}>
-            <label className="space-y-2 text-sm">
-              <span>Workspace folder</span>
-              <WorkspacePathField
-                hostId={hostId}
-                value={folder}
-                onChange={setFolder}
-                onBrowse={() => setBrowsing(true)}
-                recent={recent}
-                dropdownDisabled={changing || browsing}
-              />
-            </label>
-          </fieldset>
-          <p className="text-xs text-muted-foreground">
-            {operation?.blocked ? "Previous folder: " : "Current folder: "}
-            {operation?.blocked
-              ? operation.previous_workspace
-              : (query.data?.workspace ?? workspace)}
-          </p>
-          {changing && (
-            <p role="status" className="text-sm text-muted-foreground">
-              {checking
-                ? "Checking folder…"
-                : (PHASES[operation?.phase ?? ""] ?? "Changing workspace…")}
-            </p>
-          )}
-          {(error || operation?.error) && (
-            <p role="alert" className="text-sm text-destructive">
-              {error ?? operation?.error}
-              {operation?.restored ? " The original workspace was restored." : ""}
-              {operation?.recovery_error ? ` Reconnect the agent: ${operation.recovery_error}` : ""}
-            </p>
-          )}
-          {query.error && (
-            <p role="alert" className="text-sm text-destructive">
-              {query.error.message}
-            </p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => closeDialog(false)}>
-              {changing ? "Hide" : "Cancel"}
-            </Button>
-            {query.data?.can_recover && (
-              <Button
-                variant="outline"
-                onClick={() => change(operation!.previous_workspace, operation!.id)}
-              >
-                Restore original
+      />
+      <WorkspaceSelectionDialog
+        open={open}
+        onOpenChange={closeDialog}
+        hostId={hostId}
+        hostLabel={hostLabel}
+        allowHostChange={!switchHostDisabledReason && !operation?.blocked}
+        hostActions={
+          <>
+            {switchHostDisabledReason && (
+              <p className="px-2 py-2 text-xs text-muted-foreground">{switchHostDisabledReason}</p>
+            )}
+            {onReconnect && hosts?.find((host) => host.host_id === hostId)?.status !== "online" && (
+              <Button type="button" variant="ghost" onClick={onReconnect}>
+                Reconnect host
               </Button>
             )}
-            <Button
-              disabled={
-                changing ||
-                !folder.trim() ||
-                (!query.data?.can_recover && (!!disabledReason || folder.trim() === workspace))
-              }
-              onClick={() =>
-                change(folder.trim(), query.data?.can_recover ? operation?.id : undefined)
-              }
-            >
-              {changing
-                ? "Changing…"
-                : query.data?.can_recover
-                  ? "Retry change"
-                  : "Change workspace"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <WorkspacePickerDialog
-        open={browsing}
-        onOpenChange={setBrowsing}
-        hostId={hostId}
+          </>
+        }
         initialPath={folder}
         workspacePath={workspace}
-        onConfirm={setFolder}
-      />
+        closeOnConfirm={false}
+        busy={changing || (!!disabledReason && !query.data?.can_recover)}
+        onConfirm={async ({ hostId: targetHostId, path }) => {
+          if (targetHostId !== hostId) {
+            if (!targetHostId || switchHostDisabledReason || operation?.blocked || changing)
+              return false;
+            const sequence = ++prepareSequence.current;
+            if (fileContext?.beforeWorkspaceChange) {
+              const approved = await new Promise<boolean>((resolve) => {
+                fileContext.beforeWorkspaceChange!(
+                  () => resolve(true),
+                  () => resolve(false),
+                );
+              });
+              if (!approved || sequence !== prepareSequence.current) return false;
+            }
+            setHostTarget({ hostId: targetHostId, path });
+            return false;
+          }
+          setFolder(path);
+          return change(path, query.data?.can_recover ? operation?.id : undefined);
+        }}
+        description="The agent restarts in the selected folder and continues this chat. Files and existing manual terminals stay where they are."
+      >
+        <p className="mt-2 text-xs text-muted-foreground">
+          {operation?.blocked ? "Previous folder: " : "Current folder: "}
+          {operation?.blocked ? operation.previous_workspace : (query.data?.workspace ?? workspace)}
+        </p>
+        {changing && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {checking
+              ? "Checking folder…"
+              : (PHASES[operation?.phase ?? ""] ?? "Changing workspace…")}
+          </p>
+        )}
+        {(error || operation?.error) && (
+          <p role="alert" className="text-sm text-destructive">
+            {error ?? operation?.error}
+            {operation?.restored ? " The original workspace was restored." : ""}
+            {operation?.recovery_error ? ` Reconnect the agent: ${operation.recovery_error}` : ""}
+          </p>
+        )}
+        {query.error && (
+          <p role="alert" className="text-sm text-destructive">
+            {query.error.message}
+          </p>
+        )}
+        {query.data?.can_recover && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={changing}
+            onClick={() => void change(operation!.previous_workspace, operation!.id)}
+          >
+            Restore original
+          </Button>
+        )}
+      </WorkspaceSelectionDialog>
+      {hostTarget && (
+        <SwitchHostDialog
+          open
+          sessionId={sessionId}
+          currentHostId={hostId}
+          initialHostId={hostTarget.hostId}
+          initialPath={hostTarget.path}
+          onOpenChange={(next) => {
+            if (!next) setHostTarget(null);
+          }}
+          onSwitched={() => {
+            closeDialog(false);
+            void queryClient.invalidateQueries({ queryKey: ["session-workspace", sessionId] });
+            void queryClient.invalidateQueries({ queryKey: ["chat-workbench-workspace"] });
+            if (useChatStore.getState().conversationId === sessionId)
+              setSearchParams(
+                (previous) => {
+                  const next = new URLSearchParams(previous);
+                  for (const key of ["workspace", "file", "diff", "comment"]) next.delete(key);
+                  return next;
+                },
+                { replace: true },
+              );
+          }}
+        />
+      )}
     </>
   );
 }

@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
   theme: "system" as string,
   isEmbedded: false,
+  isMobile: false,
   archiveMutate: vi.fn(),
   deleteMutate: vi.fn(),
   bulkArchiveMutate: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock("@/hooks/useAvailableAgents", async (original) => ({
   prefetchAvailableAgentDetails: vi.fn(),
 }));
 vi.mock("@/lib/embedded", () => ({ useIsEmbedded: () => mocks.isEmbedded }));
+vi.mock("@/hooks/useIsMobileViewport", () => ({ useIsMobileViewport: () => mocks.isMobile }));
 vi.mock("@/lib/CapabilitiesContext", () => ({
   useServerInfo: () => ({
     accounts_enabled: mocks.accountsEnabled,
@@ -177,6 +179,11 @@ vi.mock("@/components/ui/select", async () => {
     return (
       <select
         data-testid={typeof testId === "string" ? testId : undefined}
+        aria-label={
+          isValidElement(trigger)
+            ? (trigger.props as Record<string, string>)["aria-label"]
+            : undefined
+        }
         value={value}
         disabled={disabled}
         onChange={(e) => onValueChange(e.target.value)}
@@ -190,6 +197,8 @@ vi.mock("@/components/ui/select", async () => {
     SelectTrigger,
     SelectValue: () => null,
     SelectContent: ({ children }: { children: ReactNode }) => children,
+    SelectGroup: ({ children }: { children: ReactNode }) => children,
+    SelectLabel: () => null,
     SelectItem: ({ value, children }: { value: string; children: ReactNode }) => (
       <option value={value}>{children}</option>
     ),
@@ -244,6 +253,7 @@ function renderPage(path = "/settings") {
 }
 
 beforeEach(() => {
+  mocks.isMobile = false;
   vi.mocked(useAvailableAgents).mockReturnValue({
     data: [
       {
@@ -365,6 +375,21 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     localStorage.removeItem(BACKGROUND_SESSION_TITLES_STORAGE_KEY);
   });
+
+  it.each(["general", "members", "policies"])(
+    "keeps the mobile section chooser outside scrolling %s content",
+    async (section) => {
+      mocks.isMobile = true;
+      renderPage(`/settings/${section}`);
+      const chooser = screen.getByRole("combobox", { name: "Settings section" });
+      expect(chooser.closest(".overflow-y-auto")).toBeNull();
+      fireEvent.change(chooser, { target: { value: "appearance" } });
+      expect(
+        await screen.findByRole("heading", { name: "Appearance", level: 1 }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Settings section" })).toHaveValue("appearance");
+    },
+  );
 
   it("picks a global default with the existing agent picker and preserves the last-used agent", () => {
     localStorage.setItem("omnigent:last-agent-id", "remembered");

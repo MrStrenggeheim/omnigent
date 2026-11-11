@@ -4373,14 +4373,20 @@ function ComposerImpl(
                     : undefined
                 }
               />
-              {!subAgentLabel && composerSessionId && (
-                <HostBadge
-                  sessionId={composerSessionId}
-                  appearance="composer"
-                  readOnly={isReadOnly}
-                  onReconnect={onShowReconnectHelp}
-                />
-              )}
+              {!subAgentLabel &&
+                composerSessionId &&
+                !(
+                  composerSession?.hostId &&
+                  composerWorkspace &&
+                  isOwnerLevel(permissionLevel)
+                ) && (
+                  <HostBadge
+                    sessionId={composerSessionId}
+                    appearance="composer"
+                    readOnly={isReadOnly}
+                    onReconnect={onShowReconnectHelp}
+                  />
+                )}
               <div
                 data-testid="composer-workspace-controls"
                 className="flex min-w-0 items-center gap-1"
@@ -4395,6 +4401,7 @@ function ComposerImpl(
                         sessionId={composerSessionId}
                         hostId={composerSession.hostId}
                         workspace={composerWorkspace}
+                        onReconnect={onShowReconnectHelp}
                         disabledReason={
                           composerSession.parentSessionId
                             ? "Change the parent chat's workspace"

@@ -65,6 +65,7 @@ import {
   type DockView,
   type SplitEdge,
 } from "./dockLayout";
+import { WorkbenchViewIcon } from "./viewIcons";
 import "./dockWorkspace.css";
 
 export interface DockViewVisibility {
@@ -536,10 +537,11 @@ function DockTab({
           } else listeners?.onKeyDown?.(event);
         }}
       >
+        <WorkbenchViewIcon kind={view.kind} />
         {pinned && <Pin size={12} aria-label="Kept open across chats" />}
         <span className="dock-tab-label">{view.title}</span>
       </button>
-      <TooltipButton
+      <button
         type="button"
         className="dock-tab-close"
         aria-label={`Close ${view.title}`}
@@ -551,7 +553,7 @@ function DockTab({
         }}
       >
         <X size={14} />
-      </TooltipButton>
+      </button>
     </div>
   );
 }

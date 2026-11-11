@@ -11,7 +11,7 @@ import {
   ArchiveRestoreIcon,
   ChevronLeftIcon,
   DownloadIcon,
-  EllipsisIcon,
+  SlidersHorizontalIcon,
   FolderInputIcon,
   GitBranchIcon,
   GitForkIcon,
@@ -404,7 +404,7 @@ export function HeaderConversationMenu({
             data-testid="header-conversation-actions"
             className="shrink-0 border-none text-muted-foreground hover:text-foreground max-md:size-11"
           >
-            <EllipsisIcon className="size-4" />
+            <SlidersHorizontalIcon className="size-4" />
           </HeaderActionButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent
