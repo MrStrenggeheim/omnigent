@@ -3499,3 +3499,37 @@ def test_native_terminal_fallback_respects_child_ownership(agent, ownership: str
     response = _build_session_response(conversation, [], "running", agent_name=agent.agent_name)
     assert response.labels.get("omnigent.ui") == (None if ownership == "mirror" else "terminal")
     assert conversation.labels == labels
+
+
+@pytest.mark.parametrize("sealed", [False, True])
+def test_legacy_native_side_chat_exposes_honest_branch_recovery(sealed: bool) -> None:
+    """Missing native process state never erases persisted child history."""
+    conv = Conversation(
+        id="child",
+        agent_id="11111111111111111111111111111111",
+        created_at=1,
+        updated_at=1,
+        root_conversation_id="parent",
+        kind="sub_agent",
+        parent_conversation_id="parent",
+        labels={"omnigent.codex_native.agent_nickname": "Side chat"},
+    )
+    item = ConversationItem(
+        id="message",
+        conversation_id=conv.id,
+        created_at=1,
+        response_id="turn",
+        status="completed",
+        type="message",
+        data=MessageData(role="user", content=[{"type": "input_text", "text": "retained"}]),
+    )
+    snapshot = _build_session_response(conv, [item], "idle", side_chat_sealed=sealed)
+    assert snapshot.items == [item]
+    assert snapshot.branch is not None
+    assert snapshot.branch.source_conversation_id == "parent"
+    assert snapshot.branch.source_item_id is None
+    assert snapshot.branch.inherited_item_count is None
+    assert snapshot.branch.recovery == ("unavailable" if sealed else "legacy_unknown")
+    # The old delegation fields remain intact for existing lifecycle/ACL code.
+    assert snapshot.kind == "sub_agent"
+    assert snapshot.parent_session_id == "parent"

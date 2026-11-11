@@ -5817,6 +5817,8 @@ async def test_sys_read_inbox_requeues_subagent_output_on_transient_policy_failu
             )
             assert "[Result suppressed by policy: policy evaluation failed]" in first_drain
             assert "SECRET_RETRY_MARKER" not in first_drain
+            assert '"receipt": "accepted"' in first_drain
+            assert '"delivery_state": "queued"' in first_drain
             assert subagent_work.get_subagent_work(child_id) is not None, (
                 "A transient policy failure must not unregister completed "
                 "sub-agent work, or the real child output is lost permanently."
@@ -5840,6 +5842,8 @@ async def test_sys_read_inbox_requeues_subagent_output_on_transient_policy_failu
 
     assert policy_attempts == 2
     assert "worker:retry-policy returned: SECRET_RETRY_MARKER" in second_drain
+    assert '"receipt": "inbox_drained"' in second_drain
+    assert '"delivery_state": "unknown"' in second_drain
     assert work_after_second_drain is None
 
 

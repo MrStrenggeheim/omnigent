@@ -31,6 +31,7 @@ from omnigent.entities import (
     USER_SESSION_TITLE_MAX_CHARS,
     ConversationItem,
 )
+from omnigent.entities.branch import ConversationBranch
 from omnigent.inner.native_attachments import reject_authored_framework_notices
 
 # ── Shared ──────────────────────────────────────────────────────
@@ -1686,6 +1687,16 @@ class _SessionCreateRequestBase(BaseModel):
 
     @model_validator(mode="after")
     def _check_startup_input(self) -> Self:
+        supplied = [*self.initial_items, *([self.initial_input] if self.initial_input else [])]
+        if any(
+            item.data.get("communication") is not None
+            or (
+                isinstance(item.data.get("item_data"), dict)
+                and item.data["item_data"].get("communication") is not None
+            )
+            for item in supplied
+        ):
+            raise ValueError("communication metadata is reserved for trusted delivery")
         if self.initial_input is not None and (self.host_type != "managed" or self.initial_items):
             raise ValueError(
                 "initial_input requires host_type=managed "
@@ -2412,6 +2423,7 @@ class SessionResponse(BaseModel):
     sub_agent_name: str | None = None
     kind: str = "default"
     parent_session_id: str | None = None
+    branch: ConversationBranch | None = None
     root_conversation_id: str | None = None
     llm_model: str | None = None
     harness: str | None = None
@@ -2756,6 +2768,9 @@ class SessionForkRequest(BaseModel):
         into a Codex one, or a Claude-SDK session into Claude Code). When
         ``None``, the fork keeps the source's agent. Must be a built-in
         agent (one listed by ``GET /v1/agents``).
+    :param up_to_item_id: Exact inclusive item boundary captured when branching.
+        Mutually exclusive with ``up_to_response_id``; use this when creation
+        is deferred so later items in the same response are not inherited.
     :param up_to_response_id: Truncation point for the copied history,
         e.g. ``"resp_abc123"``. When set, only items up to and including
         the last item of that response are copied — items after it are
@@ -2817,6 +2832,7 @@ class SessionForkRequest(BaseModel):
     title: str | None = Field(default=None, max_length=USER_SESSION_TITLE_MAX_CHARS)
     agent_id: str | None = None
     up_to_response_id: str | None = None
+    up_to_item_id: str | None = None
     model_override: str | None = None
     reasoning_effort: str | None = None
     terminal_launch_args: list[str] | None = None
@@ -2852,6 +2868,8 @@ class SessionForkRequest(BaseModel):
             ``host_id`` / ``sandbox_provider`` / ``workspace`` without
             ``host_type: "managed"``.
         """
+        if self.up_to_item_id is not None and self.up_to_response_id is not None:
+            raise ValueError("Choose either up_to_item_id or up_to_response_id")
         # Lazy import: schemas is imported by nearly every module, so
         # pulling the (FastAPI/click-importing) managed-hosts module in
         # at module scope would risk import cycles.
@@ -3046,6 +3064,7 @@ class SessionListItem(BaseModel):
     viewer_unread: bool = False
     search_snippet: str | None = None
     parent_session_id: str | None = None
+    branch: ConversationBranch | None = None
     # First-class project this session is filed under, or ``None`` when
     # unfiled. Lets the sidebar group sessions by project without a follow-up
     # GET. Distinct from the legacy ``omni_project`` label in ``labels``.

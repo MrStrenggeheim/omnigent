@@ -8968,6 +8968,7 @@ def _filesystem_attachment_in_history(
     file_store: FileStore | None,
     *,
     up_to_response_id: str | None = None,
+    up_to_item_id: str | None = None,
     content: Sequence[dict[str, Any]] = (),
 ) -> str | None:
     """Find a retained attachment requiring filesystem tools, using its stored name.
@@ -9003,14 +9004,16 @@ def _filesystem_attachment_in_history(
 
     # Descending order finds the last item of the cutoff response first,
     # matching the fork store's inclusive position cutoff.
-    retained = up_to_response_id is None
+    retained = up_to_response_id is None and up_to_item_id is None
     items_after: str | None = None
     while True:
         page = conversation_store.list_items(
             session_id, limit=1000, after=items_after, order="desc"
         )
         for item in page.data:
-            if item.response_id == up_to_response_id:
+            if (up_to_item_id is not None and item.id == up_to_item_id) or (
+                up_to_response_id is not None and item.response_id == up_to_response_id
+            ):
                 retained = True
             if not retained or not isinstance(item.data, MessageData):
                 continue
@@ -10608,6 +10611,13 @@ def _reject_server_reserved_label_seed(labels: dict[str, str] | None) -> None:
     """
     if not labels:
         return
+    from omnigent.entities.branch import BRANCH_LABEL_PREFIX
+
+    if any(key.startswith(BRANCH_LABEL_PREFIX) for key in labels):
+        raise OmnigentError(
+            "Branch provenance is server-internal and cannot be set by clients",
+            code=ErrorCode.INVALID_INPUT,
+        )
     from omnigent.mcp_selection import MCP_SELECTION_PREFIX
 
     if any(key.startswith(MCP_SELECTION_PREFIX) for key in labels):

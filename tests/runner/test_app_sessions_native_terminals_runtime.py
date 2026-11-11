@@ -1300,15 +1300,21 @@ async def test_auto_create_codex_terminal_fork_clones_rollout_and_resumes(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("source_thread", "forked"),
-    [(None, True), ("019e96aa-0be2-7343-8d3b-6f914d60936b", True), (None, False)],
-    ids=["sdk-source", "missing-codex-rollout", "cli-import"],
+    ("source_thread", "forked", "recovery_error"),
+    [
+        (None, True, False),
+        ("019e96aa-0be2-7343-8d3b-6f914d60936b", True, False),
+        (None, False, False),
+        (None, True, True),
+    ],
+    ids=["sdk-source", "missing-codex-rollout", "cli-import", "history-unavailable"],
 )
 async def test_auto_create_codex_terminal_fork_builds_rollout_from_items_and_resumes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     source_thread: str | None,
     forked: bool,
+    recovery_error: bool,
 ) -> None:
     """A carry-history codex session builds from items when no source rollout exists.
 
@@ -1329,6 +1335,7 @@ async def test_auto_create_codex_terminal_fork_builds_rollout_from_items_and_res
         codex_home_for_bridge_dir,
     )
     from omnigent.runner import app as runner_app_mod
+    from omnigent.runtime.prompt import BRANCH_REFERENCE_INSTRUCTIONS
     from omnigent.session_import.models import IMPORT_SOURCE_LABEL_KEY
     from omnigent.stores.conversation_store import (
         FORK_CARRY_HISTORY_LABEL_KEY,
@@ -1402,7 +1409,16 @@ async def test_auto_create_codex_terminal_fork_builds_rollout_from_items_and_res
                             "type": "message",
                             "role": "user",
                             "content": [{"type": "input_text", "text": f"codeword {codeword}"}],
-                        }
+                        },
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "is_meta": True,
+                            "response_id": "branch_reference_boundary",
+                            "content": [
+                                {"type": "input_text", "text": BRANCH_REFERENCE_INSTRUCTIONS}
+                            ],
+                        },
                     ],
                     "has_more": False,
                 },
@@ -1545,6 +1561,25 @@ async def test_auto_create_codex_terminal_fork_builds_rollout_from_items_and_res
         ),
     )
 
+    if recovery_error:
+
+        async def fail_history(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("history unavailable")
+
+        monkeypatch.setattr(codex_native, "_ensure_local_codex_resume_rollout", fail_history)
+        with pytest.raises(RuntimeError, match="history unavailable"):
+            await _auto_create_codex_terminal(
+                session_id,
+                _FakeResourceRegistry(),
+                lambda _sid, event: None,
+                agent_spec=agent_spec,
+                server_client=_ItemsForkSnapshotClient(),
+            )
+        assert not launched_specs
+        assert not patched_external_ids
+        assert not app_server.started
+        return
+
     try:
         await _auto_create_codex_terminal(
             session_id,
@@ -1580,6 +1615,7 @@ async def test_auto_create_codex_terminal_fork_builds_rollout_from_items_and_res
     meta = json.loads(body.splitlines()[0])["payload"]
     assert meta["id"] == minted
     assert meta["cwd"] == str(workspace.resolve())
+    assert BRANCH_REFERENCE_INSTRUCTIONS in body
     assert codeword in body, (
         "Built rollout must carry the source conversation's text from the "
         "copied Omnigent items; missing it means history was not seeded."

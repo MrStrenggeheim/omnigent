@@ -79,7 +79,8 @@ async def test_create_placement(placement, monkeypatch):
     else:
         assert "initial_items" not in body
         assert json.loads(requests[1].content)["data"]["message"] == "Start"
-        assert result["initial_message"] == {"queued": True}
+        assert result["initial_message"]["queued"] is True
+        assert result["initial_message"]["delivery_state"] == "queued"
 
 
 @pytest.mark.asyncio
@@ -330,7 +331,8 @@ async def test_message_routing_lookup_and_keyless_delivery(outcome):
     else:
         assert len(requests) == 2
         if outcome == "success":
-            assert result == {"queued": True}
+            assert result["queued"] is True
+            assert result["delivery_state"] == "queued"
         else:
             assert "do not automatically resend" in result["error"]
 
@@ -365,7 +367,8 @@ async def test_message_destination_is_a_uuid(spelling):
             )
         )
     if spelling in ("hex", "dashed", "legacy"):
-        assert result == {"queued": True}
+        assert result["queued"] is True
+        assert result["delivery_state"] == "queued"
         assert [str(r.url) for r in requests] == [
             f"http://server/v1/sessions/{destination.hex}/events"
         ]
@@ -435,3 +438,26 @@ async def test_managed_create_routes_to_reserved_host_through_auth_retry(monkeyp
     headers, body = requests[-1]
     assert headers.get(OMNIGENT_SLICE_KEY_HEADER.lower()) == body.get("host_id")
     assert ("host_id" in body) is supported
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 403, 503])
+async def test_buffered_peer_rechecks_authority(status):
+    from omnigent.runner.session_message import peer_delivery_allowed
+
+    calls = []
+
+    def handle(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(status, json={"queued": True})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handle), base_url="http://server"
+    ) as client:
+        allowed = await peer_delivery_allowed(
+            client,
+            "recipient",
+            {"communication": {"kind": "peer", "message_id": "exact-dispatch"}},
+        )
+    assert allowed is (status == 200)
+    assert calls == [{"type": "session_message", "data": {"check_message_id": "exact-dispatch"}}]

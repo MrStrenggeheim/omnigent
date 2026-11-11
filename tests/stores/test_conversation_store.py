@@ -5554,7 +5554,9 @@ def test_fork_conversation_copies_labels(
     fork = conversation_store.fork_conversation(source.id)
     # Both labels must be copied — a mismatch means the store's fork
     # skipped the label-copy step or only copied partial keys.
-    assert fork.labels == {"sensitivity": "high", "dept": "eng"}, (
+    assert {
+        key: value for key, value in fork.labels.items() if not key.startswith("omnigent.branch.")
+    } == {"sensitivity": "high", "dept": "eng"}, (
         "Fork should inherit all labels from the source conversation"
     )
 
@@ -5606,7 +5608,9 @@ def test_fork_conversation_drops_instance_scoped_labels(
     # source's per-instance state. A bridge-id here would re-introduce
     # the cross-bridge bug; the metrics would show the source's stale
     # usage.
-    assert fork.labels == {"omnigent.wrapper": "claude-code-native-ui"}, (
+    assert {
+        key: value for key, value in fork.labels.items() if not key.startswith("omnigent.branch.")
+    } == {"omnigent.wrapper": "claude-code-native-ui"}, (
         f"Fork must drop instance-scoped labels, kept {fork.labels!r}"
     )
     assert fork.session_todos == []
@@ -8460,3 +8464,107 @@ def test_get_conversation_keeps_distinct_query_names(
         "omnigent.conversation_store.select_conversation_metadata_by_id",
         "omnigent.conversation_store.select_conversation_labels",
     ], names
+
+
+@pytest.mark.parametrize("store_fixture", ["conversation_store", "split_db_conversation_store"])
+def test_branch_tree_and_exact_boundary_survive_reopen(
+    request: pytest.FixtureRequest,
+    store_fixture: str,
+) -> None:
+    """Four branches retain independent snapshots without joining the spawn tree."""
+    from omnigent.runtime.prompt import BRANCH_REFERENCE_INSTRUCTIONS, history_to_input_items
+    from omnigent.stores.conversation_store import FORK_SOURCE_EXTERNAL_SESSION_LABEL_KEY
+
+    store = request.getfixturevalue(store_fixture)
+    root = store.create_conversation()
+    first = store.append(root.id, [_user_message("inherited task", "turn_busy")])[0]
+    # Simulate a deferred create while the same response continues in the parent.
+    store.append(root.id, [_user_message("later parent work", "turn_busy")])
+    store.set_external_session_id(root.id, "native-parent-thread")
+    store.set_labels(root.id, {FORK_SOURCE_EXTERNAL_SESSION_LABEL_KEY: "stale-grandparent-thread"})
+    parent = root
+    branches = []
+    for depth in range(4):
+        child = store.fork_conversation(
+            parent.id,
+            up_to_item_id=first.id if depth == 0 else None,
+            reference_history=True,
+            carry_history_into_native=True,
+        )
+        branches.append(child)
+        assert child.kind == "default"
+        assert child.parent_conversation_id is None
+        assert child.root_conversation_id == child.id
+        assert child.branch is not None
+        assert child.branch.source_conversation_id == parent.id
+        assert child.branch.root_conversation_id == root.id
+        assert child.branch.reference_only
+        assert child.branch.recovery == "replay"
+        assert FORK_SOURCE_EXTERNAL_SESSION_LABEL_KEY not in child.labels
+        inherited = store.list_items(child.id, order="asc").data
+        assert inherited[-1].data.is_meta
+        assert child.branch.reference_boundary_item_id == inherited[-1].id
+        assert BRANCH_REFERENCE_INSTRUCTIONS in str(history_to_input_items(inherited))
+        assert "later parent work" not in str(history_to_input_items(inherited))
+        store.append(child.id, [_user_message(f"branch {depth} task")])
+        parent = child
+    # Clear SQLAlchemy identity maps by constructing a fresh store on the same engines.
+    reopened = SqlAlchemyConversationStore(
+        str(store._session.engine.url),
+        str(store._conv_session.engine.url),
+    )
+    for child in branches:
+        loaded = reopened.get_conversation(child.id)
+        assert loaded is not None
+        assert loaded.branch == child.branch
+        assert len(reopened.list_items(child.id).data) == child.branch.inherited_item_count + 2
+    first_branch = branches[0].branch
+    assert first_branch.source_item_id == first.id
+    assert first_branch.source_response_id == "turn_busy"
+    assert first_branch.inherited_item_count == 1
+    assert first_branch.inherited_last_item_id != first.id
+    assert store.list_child_conversation_ids_by_parent([root.id, branches[0].id]) == {
+        root.id: [],
+        branches[0].id: [],
+    }
+
+
+def test_fork_boundary_rejects_foreign_pending_and_conflicting_items(
+    conversation_store: SqlAlchemyConversationStore,
+) -> None:
+    from omnigent.stores.conversation_store import PENDING_INPUT_RESPONSE_ID
+
+    store = conversation_store
+    source = store.create_conversation()
+    other = store.create_conversation()
+    foreign = store.append(other.id, [_user_message("private")])[0]
+    pending = store.append(source.id, [_user_message("queued", PENDING_INPUT_RESPONSE_ID)])[0]
+    valid = store.append(source.id, [_user_message("committed")])[0]
+    before = {conv.id for conv in store.list_conversations().data}
+    for item_id in [foreign.id, pending.id, "missing"]:
+        with pytest.raises(ValueError, match="boundary item not found"):
+            store.fork_conversation(source.id, up_to_item_id=item_id, reference_history=True)
+    with pytest.raises(ValueError, match="Choose either"):
+        store.fork_conversation(source.id, up_to_item_id=valid.id, up_to_response_id="resp_pos")
+    assert {conv.id for conv in store.list_conversations().data} == before
+
+
+def test_legacy_branch_projection_preserves_unknown_parentage_and_history(
+    conversation_store: SqlAlchemyConversationStore,
+) -> None:
+    from omnigent.stores.conversation_store import FORK_SOURCE_LABEL_KEY
+
+    store = conversation_store
+    source = store.create_conversation()
+    legacy = store.create_conversation(labels={FORK_SOURCE_LABEL_KEY: source.id})
+    items = store.append(legacy.id, [_user_message("legacy history")])
+    branch = store.get_conversation(legacy.id).branch
+    assert branch.source_conversation_id == source.id
+    assert branch.root_conversation_id is None
+    assert branch.source_item_id is None
+    assert branch.recovery == "legacy_unknown"
+    assert store.list_items(legacy.id).data == items
+    assert store.get_conversation(source.id).branch is None
+    child = store.create_conversation(parent_conversation_id=source.id, title="delegated")
+    assert child.kind == "sub_agent"
+    assert child.branch is None

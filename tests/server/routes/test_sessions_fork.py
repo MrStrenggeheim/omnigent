@@ -193,6 +193,8 @@ class _ConversationStore:
         resume_source_native_session: bool = True,
         presentation_labels: dict[str, str] | None = None,
         up_to_response_id: str | None = None,
+        up_to_item_id: str | None = None,
+        reference_history: bool = False,
         project_id: str | None = None,
         file_id_map: dict[str, str] | None = None,
         created_by: str | None = None,
@@ -259,6 +261,8 @@ class _ConversationStore:
                 "resume_source_native_session": resume_source_native_session,
                 "presentation_labels": presentation_labels,
                 "up_to_response_id": up_to_response_id,
+                "up_to_item_id": up_to_item_id,
+                "reference_history": reference_history,
                 "project_id": project_id,
                 "file_id_map": file_id_map,
                 "created_by": created_by,
@@ -774,6 +778,28 @@ async def test_normal_fork_of_side_chat_drops_sidebar_hiding_label() -> None:
 
     assert resp.status_code == 201, resp.text
     assert SIDE_CHAT_LABEL_KEY not in resp.json()["labels"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side_chat", [False, True])
+async def test_fork_does_not_inherit_peer_stop_fence(side_chat: bool) -> None:
+    from omnigent.server.session_orchestration import PEER_STOP_LABEL
+
+    source_id = "e9f8f58523cec9a57d3bdf93be543e8c"
+    labels = {PEER_STOP_LABEL: "1", "project-note": "keep"}
+    if side_chat:
+        labels[SIDE_CHAT_LABEL_KEY] = "1"
+    source = _make_conversation(labels=labels)
+    store = _ConversationStore(conversations={source_id: source})
+    client = TestClient(_build_app(store))
+
+    response = client.post(f"/v1/sessions/{source_id}/fork", json={})
+
+    assert response.status_code == 201, response.text
+    assert PEER_STOP_LABEL in _FORK_ONLY_DROPPED_LABEL_KEYS
+    assert PEER_STOP_LABEL not in response.json()["labels"]
+    assert response.json()["labels"]["project-note"] == "keep"
+    assert source.labels[PEER_STOP_LABEL] == "1"
 
 
 @pytest.mark.asyncio
@@ -2799,3 +2825,51 @@ def test_fork_counts_files_recorded_for_filesystem_delivery(
         assert [f.source_metadata for f in copied if f.filename == "trace.gz"] == [recorded]
     else:
         assert not conv_store.fork_calls
+
+
+@pytest.mark.parametrize("use_item", [True, False])
+def test_fork_passes_exact_boundary_and_requires_reference_history(use_item: bool) -> None:
+    source = _make_conversation()
+    store = _ConversationStore({source.id: source})
+    client = TestClient(_build_app(store))
+    body = {"up_to_item_id": "msg_captured"} if use_item else {}
+    response = client.post(f"/v1/sessions/{source.id}/fork", json=body)
+    assert response.status_code == 201, response.text
+    assert store.fork_calls[0]["up_to_item_id"] == body.get("up_to_item_id")
+    assert store.fork_calls[0]["reference_history"] is True
+    assert "branch" in response.json()
+
+
+def test_fork_rejects_conflicting_boundaries_before_mutation() -> None:
+    source = _make_conversation()
+    store = _ConversationStore({source.id: source})
+    client = TestClient(_build_app(store))
+    response = client.post(
+        f"/v1/sessions/{source.id}/fork",
+        json={
+            "up_to_item_id": "msg_captured",
+            "up_to_response_id": "turn_busy",
+        },
+    )
+    assert response.status_code == 422
+    assert not store.fork_calls
+
+
+@pytest.mark.parametrize("harness", ["hermes-native", "kimi-native"])
+def test_fork_refuses_native_targets_without_snapshot_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    harness: str,
+) -> None:
+    """Unsupported native replay must not silently launch without inherited context."""
+    source = _make_conversation()
+    store = _ConversationStore({source.id: source})
+    monkeypatch.setattr(
+        "omnigent.server.routes.sessions.get_agent_cache",
+        lambda: _StubAgentCache({source.agent_id: harness}),
+    )
+    client = TestClient(_build_app(store))
+    response = client.post(f"/v1/sessions/{source.id}/fork", json={"side_chat": True})
+    assert response.status_code == 400, response.text
+    assert "cannot recover a reference-only branch" in response.text
+    assert not store.fork_calls
+    assert store.get_conversation(source.id) is source

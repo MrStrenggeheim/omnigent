@@ -619,7 +619,9 @@ def resolve(conversation_id: str, pending_id: str) -> DrainedInput | None:
         return _drained_input(entry) if entry is not None else None
 
 
-def resolve_oldest(conversation_id: str, *, hold: bool = False) -> DrainedInput | None:
+def resolve_oldest(
+    conversation_id: str, *, hold: bool = False, exclude_stable_ids: set[str] | None = None
+) -> DrainedInput | None:
     """
     Drain the oldest pending entry (FIFO) and return it.
 
@@ -657,7 +659,13 @@ def resolve_oldest(conversation_id: str, *, hold: bool = False) -> DrainedInput 
             return None
         # Insertion order = FIFO; the first live, unheld key is the oldest entry.
         oldest_id = next(
-            (pid for pid, entry in entries.items() if not entry.held and not entry.interrupted),
+            (
+                pid
+                for pid, entry in entries.items()
+                if not entry.held
+                and not entry.interrupted
+                and entry.stable_id not in (exclude_stable_ids or set())
+            ),
             None,
         )
         if oldest_id is None:
@@ -796,7 +804,12 @@ def release(conversation_id: str, drained: DrainedInput) -> None:
 
 
 def resolve_matching_text(
-    conversation_id: str, text: str, *, hold: bool = False, shell_command: bool = False
+    conversation_id: str,
+    text: str,
+    *,
+    hold: bool = False,
+    shell_command: bool = False,
+    exclude_stable_ids: set[str] | None = None,
 ) -> MatchedDrain:
     """
     Drain through the first pending entry whose text matches ``text``.
@@ -838,7 +851,11 @@ def resolve_matching_text(
         entries = _pending.get(conversation_id)
         if entries is None:
             return MatchedDrain(matched=None, skipped=[])
-        ordered = [(pid, entry) for pid, entry in entries.items() if not entry.held]
+        ordered = [
+            (pid, entry)
+            for pid, entry in entries.items()
+            if not entry.held and entry.stable_id not in (exclude_stable_ids or set())
+        ]
         texts = [
             _shell_command_text(entry.content)
             if shell_command

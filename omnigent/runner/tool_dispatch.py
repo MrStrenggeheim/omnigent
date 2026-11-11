@@ -8439,7 +8439,18 @@ async def _drain_inbox(
             server_client=server_client,
             conversation_id=conversation_id,
         )
-        items.append(_format_async_task_item(evaluation.payload))
+        rendered = _format_async_task_item(evaluation.payload)
+        if evaluation.payload.get("type") == "sub_agent":
+            rendered += "\n" + json.dumps(
+                {
+                    "receipt": "accepted" if evaluation.retry_original else "inbox_drained",
+                    "delivery_state": "queued" if evaluation.retry_original else "unknown",
+                    "source_conversation_id": _subagent_child_id(evaluation.payload),
+                    "destination_conversation_id": conversation_id,
+                    "task_id": evaluation.payload.get("work_id"),
+                }
+            )
+        items.append(rendered)
         if evaluation.retry_original:
             retry_payloads.append(payload)
         else:

@@ -250,6 +250,7 @@ def _require_attachment_compatible_history(
     file_store: FileStore | None,
     *,
     up_to_response_id: str | None = None,
+    up_to_item_id: str | None = None,
 ) -> str | None:
     """Reject a target that cannot replay files in the retained transcript.
 
@@ -264,7 +265,11 @@ def _require_attachment_compatible_history(
     from omnigent.inner.native_attachments import FILESYSTEM_ATTACHMENT_HARNESSES
 
     filename = _filesystem_attachment_in_history(
-        session_id, conversation_store, file_store, up_to_response_id=up_to_response_id
+        session_id,
+        conversation_store,
+        file_store,
+        up_to_response_id=up_to_response_id,
+        up_to_item_id=up_to_item_id,
     )
     if filename is not None:
         native = _native_coding_agent_for_agent(target_agent)
@@ -1836,6 +1841,7 @@ def register_core_routes(
         search_scope: str = Query(default="all", pattern="^(all|title|content)$"),
         include_archived: bool = Query(default=False),
         kind: str = Query(default="default", pattern="^(default|sub_agent|any)$"),
+        include_side_chats: bool = Query(default=False),
         project: str | None = Query(default=None),
         pinned: bool = Query(default=False),
         visibility: str = Query(default="all", pattern="^(all|mine|shared|archived)$"),
@@ -1942,7 +1948,10 @@ def register_core_routes(
         # Side chats surface only as Workspace-rail tabs, so drop any
         # side-chat-labeled fork from the sidebar list (it is still a normal
         # session, just not listed as a top-level one here).
-        page.data = [conv for conv in page.data if SIDE_CHAT_LABEL_KEY not in (conv.labels or {})]
+        if not include_side_chats:
+            page.data = [
+                conv for conv in page.data if SIDE_CHAT_LABEL_KEY not in (conv.labels or {})
+            ]
         # list_conversations may return rows with agent_id=None for
         # legacy conversations; skip them before building the batch IDs.
         conv_ids = [conv.id for conv in page.data if conv.agent_id is not None]
@@ -3689,6 +3698,9 @@ def register_core_routes(
         :param source_id: Session/conversation identifier of the
             source session to fork, e.g. ``"conv_abc123"``.
         :param body: The validated :class:`SessionForkRequest`.
+            ``up_to_item_id`` captures an exact inclusive boundary for deferred creation.
+            New forks receive durable branch provenance and inherited reference context;
+            their delegation parent/root fields remain independent.
         :returns: A :class:`SessionResponse` describing the newly
             created fork (status ``"idle"``).
         :raises OmnigentError: 404 if *source_id* does not exist or
@@ -3812,6 +3824,7 @@ def register_core_routes(
             conversation_store,
             file_store,
             up_to_response_id=body.up_to_response_id,
+            up_to_item_id=body.up_to_item_id,
         )
 
         # Cross-user forks copy the agent (bundle under the copy's id) so its owner
@@ -3953,26 +3966,25 @@ def register_core_routes(
 
             extra_labels[REQUESTED_HOST_ID_LABEL_KEY] = body.host_id
 
-        # When the fork binds a NATIVE target, the native CLI won't replay
-        # the copied Omnigent transcript on its own — mark the fork so the
-        # runner carries history into the native harness. Same-family: clone
-        # the source's native transcript when present, else rebuild from the
-        # copied Omnigent items. Cross-family: the source's native transcript
-        # is the wrong format, so ALWAYS rebuild from the copied Omnigent
-        # items (the converters consume Omnigent's normalized item shape, so
-        # the source harness doesn't matter). SDK targets replay the
-        # transcript as context regardless, so the marker is inert for them.
-        # claude/codex/pi native rebuild the transcript (each rebuilds its
-        # resumable session file from the copied items, so all three sit in
-        # _FORK_HISTORY_NATIVE_HARNESSES); cursor native instead replays prior
-        # turns as a text preamble (its conversation is server-backed, so a
-        # local store can't be seeded — fork-only, see
-        # _agent_carries_cursor_fork_history). The single FORK_CARRY_HISTORY
-        # label drives both; the runner branches on harness.
+        # Native targets must replay the captured Omnigent snapshot, including
+        # its reference boundary; the source's live transcript can advance.
+        # Rebuild-capable harnesses seed their local history, while preamble
+        # harnesses inject that snapshot before the child's first request.
         target_is_cursor = await asyncio.to_thread(_agent_carries_cursor_fork_history, base_agent)
         carry_history_into_native = target_is_cursor or await asyncio.to_thread(
             _agent_carries_native_fork_history, base_agent
         )
+        target_native = await asyncio.to_thread(_native_coding_agent_for_agent, base_agent)
+        if target_native is not None and (
+            not carry_history_into_native or target_native.harness == "hermes-native"
+        ):
+            # Hermes currently clones a live local database, not the captured item snapshot.
+            raise OmnigentError(
+                f"{target_native.harness} cannot recover a reference-only branch from "
+                "its captured history. Choose a harness with history replay; "
+                "the source conversation remains unchanged.",
+                code=ErrorCode.INVALID_INPUT,
+            )
         # The source's native session id is only resumable by a target in the
         # SAME provider family — a Claude target can't clone a Codex rollout.
         # Cross-family, the store must skip the fork-source directive so the
@@ -4147,6 +4159,8 @@ def register_core_routes(
                 resume_source_native_session=resume_source_native_session,
                 presentation_labels=presentation_labels,
                 up_to_response_id=body.up_to_response_id,
+                up_to_item_id=body.up_to_item_id,
+                reference_history=True,
                 project_id=fork_project_id,
                 file_id_map=fork_file_id_map,
                 created_by=user_id,

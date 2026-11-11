@@ -73,6 +73,8 @@ class ImportItemInput(BaseModel):
     def to_item(self) -> NewConversationItem:
         """Validate the type-specific payload and return a new item entity."""
         try:
+            if self.data.get("communication") is not None:
+                raise ValueError("Imported history cannot assert trusted communication metadata")
             data = parse_item_data(self.type, self.data)
             return NewConversationItem(type=self.type, response_id=self.response_id, data=data)
         except (TypeError, ValueError) as exc:

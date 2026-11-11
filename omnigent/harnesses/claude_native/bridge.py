@@ -8897,8 +8897,24 @@ def _attachment_transcript_items_from_entry(
     prompt = attachment.get("prompt")
     if not isinstance(prompt, str) or not prompt:
         return current_response_id, []
+    source_key = _transcript_source_key(entry, line_number, record_offset)
+    peer_data = _native_peer_data(attachment.get("origin"), _source_id(source_key, 0, "message"))
+    if peer_data:
+        return current_response_id, [
+            ClaudeTranscriptItem(
+                source_id=_source_id(source_key, 0, "message"),
+                item_type="message",
+                data={
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                    **peer_data,
+                },
+                response_id=_response_id_from_source(source_key),
+                subagent_return_id=_subagent_handback_id(attachment.get("origin")),
+            )
+        ]
     return_id = _subagent_handback_id(attachment.get("origin"))
-    if return_id is not None or _is_task_completion_text(prompt):
+    if return_id is not None or attachment.get("isMeta") is True:
         source_key = _transcript_source_key(entry, line_number, record_offset)
         return current_response_id, [
             ClaudeTranscriptItem(
@@ -9359,14 +9375,15 @@ def _slash_command_item_from_echo(
     )
 
 
-def _is_trusted_agent_notification_text(text: str, *, origin: object = None) -> bool:
-    """Honor native peer provenance and the existing task-notification boundary."""
-    if isinstance(origin, dict) and origin.get("kind") == "peer":
-        return True
-    stripped = text.lstrip()
-    return stripped.startswith("<task-notification>") and all(
-        marker in stripped for marker in _TASK_NOTIFICATION_REQUIRED_MARKERS
-    )
+def _is_trusted_agent_notification_text(_text: str, *, origin: object = None) -> bool:
+    """Only native structured provenance establishes agent authorship."""
+    return isinstance(origin, dict) and origin.get("kind") == "peer"
+
+
+def _native_peer_data(origin: object, source_id: str) -> dict[str, object]:
+    from omnigent.native.communication import native_peer_metadata
+
+    return native_peer_metadata(origin, source_id)
 
 
 def _is_agent_notification_text(text: str) -> bool:
@@ -9405,7 +9422,7 @@ def _subagent_handback_id(origin: object) -> str | None:
 def _is_task_completion_text(text: str) -> bool:
     return (
         text.lstrip().startswith("<task-notification>")
-        and _is_agent_notification_text(text)
+        and all(marker in text for marker in _TASK_NOTIFICATION_REQUIRED_MARKERS)
         and re.search(r"<status>\s*(?:completed|failed|cancelled|killed)\s*</status>", text)
         is not None
     )
@@ -9638,7 +9655,10 @@ def _user_transcript_items_from_entry(
                     item_type="message",
                     data={
                         "role": "user",
-                        "is_meta": True,
+                        "is_meta": not bool(_native_peer_data(entry.get("origin"), source_key)),
+                        **_native_peer_data(
+                            entry.get("origin"), _source_id(source_key, 0, "message")
+                        ),
                         "content": [{"type": "input_text", "text": content}],
                     },
                     response_id=fallback_response_id,
@@ -9731,7 +9751,12 @@ def _user_transcript_items_from_entry(
                         item_type="message",
                         data={
                             "role": "user",
-                            "is_meta": True,
+                            "is_meta": not bool(
+                                _native_peer_data(entry.get("origin"), source_key)
+                            ),
+                            **_native_peer_data(
+                                entry.get("origin"), _source_id(source_key, item_index, "message")
+                            ),
                             "content": [{"type": "input_text", "text": text}],
                         },
                         response_id=fallback_response_id,

@@ -3070,6 +3070,15 @@ def create_runner_app(
             history = []
         else:
             history = await _load_history_as_input(session_id)
+        if init_context.envelope is not None:
+            branch_boundary = init_context.envelope.snapshot.labels.get(
+                "omnigent.branch.reference_boundary_item_id"
+            )
+            if branch_boundary and _last_server_item_id.get(session_id) == branch_boundary:
+                # Inherited requests and the reference marker are not new child work.
+                # A later child-owned input changes the tail and can recover normally.
+                _suppress_recovery = True
+                recovery_id = None
         # A runner-connect init carries no suppress flag, yet the server may
         # forward the first message concurrently. A forward already past its
         # active-turn check starts the turn itself; a recovery turn started now
@@ -4373,6 +4382,20 @@ def create_runner_app(
                 _start_claude_prompt_waiter(session_id, pending_bridge_dir)
                 return
 
+            from omnigent.runner.session_message import peer_delivery_allowed
+
+            while buf and buf[0].get("communication"):
+                allowed = await peer_delivery_allowed(server_client, session_id, buf[0])
+                # Stop may have cleared this queue during the authorization request.
+                if _session_message_buffers.get(session_id) is not buf:
+                    return
+                if allowed:
+                    break
+                buf.pop(0)
+            if not buf:
+                _session_message_buffers.pop(session_id, None)
+                return
+
             # A buffered claude-sdk /compact must dispatch as its OWN turn: the
             # SDK runs native compaction only when /compact is the turn prompt,
             # but the default non-native drain coalesces the whole buffer and
@@ -4380,7 +4403,9 @@ def create_runner_app(
             # message and silently no-opping it (the runner already returned 200,
             # so the server won't fall back). Drain one at a time (like native)
             # whenever a /compact is buffered, so each lands as its own turn.
-            if _is_native_harness(session_id) or any(_is_sdk_compact_body(b) for b in buf):
+            if _is_native_harness(session_id) or any(
+                _is_sdk_compact_body(b) or b.get("communication") for b in buf
+            ):
                 next_body = buf.pop(0)
                 if not buf:
                     _session_message_buffers.pop(session_id, None)
@@ -6539,6 +6564,7 @@ def create_runner_app(
                     _awaiting_approval = pending_approvals.has_pending(conversation_id)
                     _can_forward = (
                         not _native
+                        and not message_body.get("communication")
                         and not _awaiting_approval
                         and conversation_id in _live_response_id
                     )

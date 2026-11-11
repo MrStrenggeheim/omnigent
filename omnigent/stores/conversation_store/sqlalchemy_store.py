@@ -87,13 +87,21 @@ from omnigent.db.utils import (
 from omnigent.entities import (
     Conversation,
     ConversationItem,
+    MessageData,
     NewConversationItem,
     PagedList,
     parse_item_data,
 )
+from omnigent.entities.branch import (
+    BRANCH_LABEL_PREFIX,
+    ConversationBranch,
+    branch_labels,
+    conversation_branch,
+)
 from omnigent.errors import ErrorCode, OmnigentError, StaleCursorError
 from omnigent.native.native_coding_agents import native_coding_agent_for_wrapper_label
 from omnigent.native.session_todos import validate_session_todos
+from omnigent.runtime.prompt import BRANCH_REFERENCE_INSTRUCTIONS
 from omnigent.session_import.models import IMPORT_SOURCE_LABEL_KEY
 from omnigent.stores.conversation_store import (
     _FORK_ONLY_DROPPED_LABEL_KEYS,
@@ -107,7 +115,6 @@ from omnigent.stores.conversation_store import (
     PENDING_INPUT_RESPONSE_ID,
     PINNED_LABEL_KEY,
     PROJECT_LABEL_KEY,
-    SIDE_CHAT_LABEL_KEY,
     ConversationAlreadyExistsError,
     ConversationNotFoundError,
     ConversationStore,
@@ -2202,25 +2209,21 @@ class SqlAlchemyConversationStore(ConversationStore):
                 SqlConversationItem.type == encode_item_type("message"),
             )
         )
-        # All-chat search follows the sidebar's top-level scope. Explicit
-        # current-chat searches can address authorized child conversations.
-        if conversation_id is None:
-            stmt = stmt.where(
-                SqlConversation.parent_conversation_id.is_(None),
-                ~select(SqlConversationLabel.conversation_id)
-                .where(
-                    SqlConversationLabel.workspace_id == SqlConversation.workspace_id,
-                    SqlConversationLabel.conversation_id == SqlConversation.id,
-                    SqlConversationLabel.key == SIDE_CHAT_LABEL_KEY,
-                )
-                .exists(),
-            )
-        else:
+        if conversation_id is not None:
             stmt = stmt.where(SqlConversation.id == conversation_id)
-        if conversation_id is None:
-            stmt, _ = self._conversation_permission_scope(
-                stmt, accessible_by=accessible_by, owned_by=owned_by, shared_only=shared_only
+        else:
+            # Delegates inherit their root's ACL; branches remain independent roots.
+            # Authorizing roots also excludes orphaned children and stale child grants.
+            authorized_roots, _ = self._conversation_permission_scope(
+                select(SqlConversation.id).where(
+                    SqlConversation.workspace_id == current_workspace_id(),
+                    SqlConversation.parent_conversation_id.is_(None),
+                ),
+                accessible_by=accessible_by,
+                owned_by=owned_by,
+                shared_only=shared_only,
             )
+            stmt = stmt.where(SqlConversation.root_conversation_id.in_(authorized_roots))
         if archived_only:
             stmt = stmt.where(SqlConversation.archived.is_(True))
         elif not include_archived:
@@ -4967,6 +4970,8 @@ class SqlAlchemyConversationStore(ConversationStore):
         resume_source_native_session: bool = True,
         presentation_labels: dict[str, str] | None = None,
         up_to_response_id: str | None = None,
+        up_to_item_id: str | None = None,
+        reference_history: bool = False,
         project_id: str | None = None,
         file_id_map: Mapping[str, str] | None = None,
         created_by: str | None = None,
@@ -5074,6 +5079,10 @@ class SqlAlchemyConversationStore(ConversationStore):
             switched-to TARGET harness (native → ``{ui: terminal, wrapper:
             ...}``; SDK → ``{}``). ``None`` keeps the copied labels (same-
             agent fork).
+        :param up_to_item_id: Exact inclusive source item boundary, excluding queued inputs.
+            Mutually exclusive with ``up_to_response_id``.
+        :param reference_history: Add a durable reference-only boundary after inherited
+            history and rebuild native context from that snapshot instead of the source.
         :param up_to_response_id: When set, copy only the items up to and
             including the last item of this response (by position), e.g.
             ``"resp_abc123"`` — a "fork from this response" truncation.
@@ -5126,6 +5135,8 @@ class SqlAlchemyConversationStore(ConversationStore):
             resume_source_native_session=resume_source_native_session,
             presentation_labels=presentation_labels,
             up_to_response_id=up_to_response_id,
+            up_to_item_id=up_to_item_id,
+            reference_history=reference_history,
             project_id=project_id,
             file_id_map=file_id_map,
             created_by=created_by,
@@ -5155,6 +5166,8 @@ class SqlAlchemyConversationStore(ConversationStore):
         resume_source_native_session: bool = True,
         presentation_labels: dict[str, str] | None = None,
         up_to_response_id: str | None = None,
+        up_to_item_id: str | None = None,
+        reference_history: bool = False,
         project_id: str | None = None,
         file_id_map: Mapping[str, str] | None = None,
         created_by: str | None = None,
@@ -5163,6 +5176,10 @@ class SqlAlchemyConversationStore(ConversationStore):
         ``conversation_id``. The public method generates a fresh id; this seam
         lets a subclass inject one (MAS's WHS-homed store injects the WHS node id
         so a forked session keeps a single identity across storage backends)."""
+        if up_to_response_id is not None and up_to_item_id is not None:
+            raise ValueError("Choose either up_to_item_id or up_to_response_id")
+        if up_to_response_id == PENDING_INPUT_RESPONSE_ID:
+            raise ValueError("Pending input is not a committed fork boundary")
         now = now_epoch()
         new_conv_id = conversation_id
         creating_clone = cloned_agent_bundle_location is not None
@@ -5265,6 +5282,26 @@ class SqlAlchemyConversationStore(ConversationStore):
                     )
                 ).scalar_one()
                 truncated = cutoff_position < last_position
+
+            if up_to_item_id is not None:
+                try:
+                    uuid_to_bytes(up_to_item_id)
+                except ValueError as exc:
+                    raise ValueError(
+                        "Fork boundary item not found in source conversation"
+                    ) from exc
+                cutoff_position = session.execute(
+                    select(SqlConversationItem.position).where(
+                        SqlConversationItem.workspace_id == current_workspace_id(),
+                        SqlConversationItem.conversation_id == source_conversation_id,
+                        SqlConversationItem.id == up_to_item_id,
+                        SqlConversationItem.response_id != PENDING_INPUT_RESPONSE_ID,
+                    )
+                ).scalar_one_or_none()
+                if cutoff_position is None:
+                    raise ValueError("Fork boundary item not found in source conversation")
+                # A native transcript may advance while creation is deferred.
+                truncated = True
 
             # Copy items ordered by position so the fork preserves
             # the original chronological order.
@@ -5430,7 +5467,30 @@ class SqlAlchemyConversationStore(ConversationStore):
             # 0..N-1, so its position allocator starts at N. Seed it from the
             # snapshot (not the source row's counter) so the fork is correct
             # even when the source predates the counter.
-            new_conv_values["next_position"] = len(source_items)
+            boundary_id: str | None = None
+            if reference_history and source_items:
+                boundary_id = generate_item_id("message")
+                boundary_data = MessageData(
+                    role="user",
+                    is_meta=True,
+                    content=[{"type": "input_text", "text": BRANCH_REFERENCE_INSTRUCTIONS}],
+                )
+                prepared_item_rows.append(
+                    {
+                        "id": boundary_id,
+                        "workspace_id": current_workspace_id(),
+                        "conversation_id": new_conv_id,
+                        "response_id": "branch_reference_boundary",
+                        "created_at": now,
+                        "status": encode_item_status("completed"),
+                        "position": len(source_items),
+                        "type": encode_item_type("message"),
+                        "data": self._encode_item_data_batch([boundary_data.model_dump_json()])[0],
+                        "search_text": "",
+                        "created_by": None,
+                    }
+                )
+            new_conv_values["next_position"] = len(prepared_item_rows)
 
             # Cloned agent: the row itself is written to the Omnigent DB after
             # the AP session commits (see the block below the with-statement);
@@ -5476,6 +5536,7 @@ class SqlAlchemyConversationStore(ConversationStore):
                     | _FORK_ONLY_DROPPED_LABEL_KEYS
                     | dropped_label_keys
                 )
+                and not key.startswith(BRANCH_LABEL_PREFIX)
                 and not key.startswith(f"{PINNED_LABEL_KEY}.")
                 and not key.startswith(f"{_SANDBOX_REPO_LABEL_KEY}.")
                 and not (source_workspace_missing and key.startswith("omnigent.last_task_error_"))
@@ -5526,7 +5587,12 @@ class SqlAlchemyConversationStore(ConversationStore):
             # directive is skipped so the runner's carry-history
             # fork-rebuild path synthesizes the native transcript from the
             # copied items instead.
-            if source_ext_session and not truncated and resume_source_native_session:
+            if (
+                source_ext_session
+                and not truncated
+                and resume_source_native_session
+                and not reference_history
+            ):
                 fork_labels[FORK_SOURCE_EXTERNAL_SESSION_LABEL_KEY] = source_ext_session
             # When the fork binds a native target, mark it so the runner
             # rebuilds the native transcript (clone the source's native
@@ -5552,6 +5618,32 @@ class SqlAlchemyConversationStore(ConversationStore):
             # only path that sets it, and only from an explicit request field.
             if extra_labels:
                 fork_labels.update(extra_labels)
+            source_branch = conversation_branch(
+                source_labels, parent_conversation_id=source.parent_conversation_id
+            )
+            last_item = source_items[-1] if source_items else None
+            fork_labels.update(
+                branch_labels(
+                    ConversationBranch(
+                        source_conversation_id=source_conversation_id,
+                        root_conversation_id=(
+                            source_branch.root_conversation_id
+                            if source_branch
+                            else source_conversation_id
+                        ),
+                        source_item_id=last_item.id if last_item else None,
+                        source_response_id=last_item.response_id if last_item else None,
+                        inherited_item_count=len(source_items),
+                        inherited_last_item_id=copied_item_ids[last_item.id]
+                        if last_item
+                        else None,
+                        reference_boundary_item_id=boundary_id,
+                        created_at=now,
+                        reference_only=reference_history,
+                        recovery="replay",
+                    )
+                )
+            )
 
         def insert_ap(session: Session) -> SqlConversation:
             if (

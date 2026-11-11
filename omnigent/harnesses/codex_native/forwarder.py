@@ -6395,7 +6395,12 @@ async def _post_user_message(
         "role": "user",
         "content": content,
     }
-    if _is_codex_skill_wrapper(text):
+    from omnigent.native.communication import native_peer_metadata
+
+    item_data.update(
+        native_peer_metadata(item.get("origin"), source_id or _source_id(params, item))
+    )
+    if not item_data.get("communication") and _is_codex_skill_wrapper(text):
         item_data["is_meta"] = True
         _logger.debug(
             "Marked Codex skill wrapper as meta for session=%s source_id=%s",

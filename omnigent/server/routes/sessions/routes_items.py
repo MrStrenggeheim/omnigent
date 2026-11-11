@@ -57,6 +57,14 @@ def register_items_routes(
     permission_store: PermissionStore | None = None,
 ) -> None:
     """Register the items routes on router."""
+    from .context_references import register_context_reference_routes
+
+    register_context_reference_routes(
+        router,
+        conversation_store=conversation_store,
+        auth_provider=auth_provider,
+        permission_store=permission_store,
+    )
 
     @router.get(
         "/sessions/{session_id}/items",

@@ -374,6 +374,8 @@ def _is_batchable_external_item(event: SessionEventInput) -> bool:
         return False
     item_type = event.data.get("item_type")
     item_data = event.data.get("item_data")
+    if isinstance(item_data, dict) and item_data.get("communication") is not None:
+        return False
     is_user_message = (
         item_type == "message" and isinstance(item_data, dict) and item_data.get("role") == "user"
     )
@@ -915,6 +917,15 @@ def register_events_routes(
 
     router.include_router(event_router)
 
+    from .peer_messages import register_peer_message_routes
+
+    register_peer_message_routes(
+        router,
+        conversation_store=conversation_store,
+        permission_store=permission_store,
+        auth_provider=auth_provider,
+    )
+
     async def ingest_runner_batch(
         *,
         app: Any,
@@ -1092,6 +1103,26 @@ def register_events_routes(
                 _EXTERNAL_ASSISTANT_MESSAGE_TYPE,
             ),
         )
+        if body.type == "message":
+            from .context_references import validate_context_references
+
+            await validate_context_references(
+                body.data,
+                user_id=user_id,
+                destination_id=session_id,
+                conversation_store=conversation_store,
+                permission_store=permission_store,
+            )
+        external_data = body.data.get("item_data")
+        if (
+            body.type == _EXTERNAL_CONVERSATION_ITEM_TYPE
+            and isinstance(external_data, dict)
+            and external_data.get("communication") is not None
+            and not _has_bound_runner_authority(request, conv)
+        ):
+            raise OmnigentError(
+                "Native communication requires the bound runner", code=ErrorCode.FORBIDDEN
+            )
         if body.type in {"message", "session_message"}:
             from omnigent.server.workspace_transition import require_workspace_ready
 
@@ -1102,6 +1133,54 @@ def register_events_routes(
                 raise OmnigentError(
                     "Session messages require a runner HTTP request", code=ErrorCode.FORBIDDEN
                 )
+            from omnigent.server.feature_flags import Feature
+
+            if not request.app.state.feature_flags.enabled(Feature.SESSION_ORCHESTRATION):
+                raise OmnigentError("Session orchestration is disabled", code=ErrorCode.FORBIDDEN)
+            receipt_id = body.data.get("check_message_id")
+            if receipt_id is not None:
+                from omnigent.entities.conversation import MessageData
+                from omnigent.server.session_orchestration import require_peer_replay
+
+                if not _has_bound_runner_authority(request, conv):
+                    raise OmnigentError(
+                        "Delivery check requires the destination runner", code=ErrorCode.FORBIDDEN
+                    )
+                from omnigent.db.db_models import normalize_uuid
+
+                normalized_receipt_id = (
+                    normalize_uuid(receipt_id) if isinstance(receipt_id, str) else None
+                )
+                if normalized_receipt_id is None:
+                    raise OmnigentError("Invalid peer message id", code=ErrorCode.INVALID_INPUT)
+                saved = await asyncio.to_thread(
+                    conversation_store.get_item, session_id, normalized_receipt_id
+                )
+                origin = (
+                    saved.data.communication
+                    if saved and isinstance(saved.data, MessageData)
+                    else None
+                )
+                if (
+                    saved is None
+                    or origin is None
+                    or origin.kind != "peer"
+                    or origin.source_conversation_id is None
+                ):
+                    raise OmnigentError("Unknown peer message", code=ErrorCode.INVALID_INPUT)
+                await asyncio.to_thread(
+                    require_peer_replay,
+                    origin.source_conversation_id,
+                    session_id,
+                    saved.created_by,
+                    conversation_store,
+                    permission_store,
+                )
+                return {
+                    "queued": True,
+                    "message_id": origin.message_id,
+                    "delivery_state": "unknown",
+                }
             source = await asyncio.to_thread(
                 require_orchestration_source,
                 request,
@@ -1110,9 +1189,39 @@ def register_events_routes(
                 permission_store,
                 target_id=session_id,
             )
-            from omnigent.server.session_orchestration import orchestration_message
+            from omnigent.server.session_orchestration import accept_peer_message
 
-            body = orchestration_message(source.id, body.data.get("message"))
+            if in_flight is not None:
+                in_flight.enter_context(_mark_dispatch_in_flight(session_id))
+            # Resolve replica ownership before accepting a durable input locally.
+            await _raise_if_runner_on_another_replica(conv, request.app.state, conversation_store)
+            return await accept_peer_message(
+                request, source, conv, body.data, user_id, conversation_store, permission_store
+            )
+        if body.type == "message" and body.data.get("communication") is not None:
+            from omnigent.server.session_orchestration import require_peer_replay
+
+            if not isinstance(request, StartupInputContext):
+                raise OmnigentError(
+                    "communication is reserved for trusted delivery", code=ErrorCode.FORBIDDEN
+                )
+            from omnigent.server.feature_flags import Feature
+
+            if not request.app.state.feature_flags.enabled(Feature.SESSION_ORCHESTRATION):
+                raise OmnigentError("Session orchestration is disabled", code=ErrorCode.FORBIDDEN)
+            origin = body.data["communication"]
+            await asyncio.to_thread(
+                require_peer_replay,
+                origin["source_conversation_id"],
+                session_id,
+                user_id,
+                conversation_store,
+                permission_store,
+            )
+        elif body.type == "message" and isinstance(request, Request):
+            from omnigent.server.session_orchestration import PEER_STOP_LABEL
+
+            await asyncio.to_thread(conversation_store.delete_label, session_id, PEER_STOP_LABEL)
         if body.type == "message" and _is_native_terminal_session(conv):
             _logger.info(
                 "Native input received before runner initialization",
@@ -1669,6 +1778,11 @@ def register_events_routes(
                 user_id, session_id, LEVEL_OWNER, permission_store, conversation_store
             )
         if body.type in (_INTERRUPT_TYPE, _STOP_SESSION_TYPE):
+            from omnigent.server.session_orchestration import PEER_STOP_LABEL
+
+            await asyncio.to_thread(
+                conversation_store.set_labels, session_id, {PEER_STOP_LABEL: "1"}
+            )
             startup = getattr(request.app.state, "startup_inputs", None)
             if startup is not None:
                 await startup.cancel(session_id)
@@ -3304,14 +3418,16 @@ def register_events_routes(
                     session_id,
                     exc_info=True,
                 )
-        if peer_message:
+        if body.type == "message" and body.data.get("communication") is not None:
+            from omnigent.server.session_orchestration import require_peer_replay
+
             await asyncio.to_thread(
-                require_orchestration_source,
-                cast(Request, request),
+                require_peer_replay,
+                body.data["communication"]["source_conversation_id"],
+                session_id,
                 user_id,
                 conversation_store,
                 permission_store,
-                target_id=session_id,
             )
         pending_background_title = prepare_background_session_title(
             coordinator=background_title_coordinator,

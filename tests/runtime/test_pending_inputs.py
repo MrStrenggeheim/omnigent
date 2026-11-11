@@ -1054,3 +1054,20 @@ def test_interrupted_entries_expire_with_the_ttl(monkeypatch: pytest.MonkeyPatch
 
     clock["t"] = 1000.0 + pending_inputs._TTL_S + 0.1
     assert pending_inputs.pending_ids("conv_a") == []
+
+
+@pytest.mark.parametrize("hold", [False, True])
+def test_peer_input_is_not_settled_by_literal_human_text(hold):
+    peer_id = "b" * 32
+    peer = pending_inputs.record("conv", [_text_block("same text")], stable_id=peer_id)
+    human = pending_inputs.record("conv", [_text_block("same text")], stable_id="c" * 32)
+    matched = pending_inputs.resolve_matching_text(
+        "conv",
+        "same text",
+        hold=hold,
+        exclude_stable_ids={peer_id},
+    )
+    assert matched.matched.pending_id == human
+    assert matched.skipped == []
+    assert pending_inputs.resolve_oldest("conv", exclude_stable_ids={peer_id}) is None
+    assert pending_inputs.pending_id_for_stable_id("conv", peer_id) == peer

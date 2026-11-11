@@ -259,6 +259,8 @@ class ManagedStartupInputs:
         return host is not None and host_is_live(host)
 
     async def pending_snapshot(self, session_id: str) -> list[dict[str, Any]]:
+        from omnigent.server.session_orchestration import peer_acknowledgement
+
         conv = await asyncio.to_thread(self.conversations.get_conversation, session_id)
         if conv is None or conv.labels.get(STARTUP_LABEL) == "cancelled":
             return []
@@ -266,6 +268,16 @@ class ManagedStartupInputs:
             {
                 "pending_id": pending_inputs.make_pending_id(session_id, item.id),
                 "content": input_content(item),
+                **(
+                    {
+                        "communication": {
+                            **item.data.communication.model_dump(exclude_none=True),
+                            "delivery_state": peer_acknowledgement(item)["delivery_state"],
+                        }
+                    }
+                    if isinstance(item.data, MessageData) and item.data.communication
+                    else {}
+                ),
                 **({"created_by": item.created_by} if item.created_by else {}),
             }
             for item in await asyncio.to_thread(self.conversations.list_pending_inputs, session_id)
@@ -376,14 +388,16 @@ class ManagedStartupInputs:
                 self.conversations.set_labels, session_id, {STARTUP_LABEL: "ready"}
             )
 
-    async def _deliver(self, app: Any, session_id: str, item: ConversationItem) -> None:
+    async def _deliver(
+        self, app: Any, session_id: str, item: ConversationItem
+    ) -> dict[str, Any] | None:
         if self.dispatch is None:
-            return
+            return None
         key = (current_workspace_id(), session_id)
         task = asyncio.current_task()
         assert task is not None
         if key in self._deliveries and self._deliveries[key] is not task:
-            return
+            return None
         self._deliveries[key] = task
         context: StartupInputContext | None = None
         try:
@@ -396,7 +410,7 @@ class ManagedStartupInputs:
                 or current.response_id != PENDING_INPUT_RESPONSE_ID
                 or current.status != "in_progress"
             ):
-                return
+                return None
             options = (
                 item.data.startup_options
                 if isinstance(item.data, (MessageData, SlashCommandData))
@@ -420,9 +434,24 @@ class ManagedStartupInputs:
                 model_override=options.model_override if options else None,
                 tools=options.tools if options else None,
             )
+            if isinstance(item.data, MessageData) and item.data.communication is not None:
+                event.data["communication"]["delivery_state"] = "unknown"
             response = await self.dispatch(context, session_id, event)
             if response.get("denied"):
-                raise ValueError(str(response.get("reason", "Input denied by policy")))
+                await asyncio.to_thread(
+                    self.conversations.transition_pending_input,
+                    session_id,
+                    item.id,
+                    expected="in_progress",
+                    status="failed",
+                )
+                await self._report_failure(
+                    session_id,
+                    item.id,
+                    "The message is saved but could not be delivered. "
+                    + str(response.get("reason", "Input denied by policy")),
+                )
+                return response
             if context.submitted:
                 if not response.get("pending_id") and not response.get("item_id"):
                     # Native overlays such as /btw have no transcript echo.
@@ -445,6 +474,7 @@ class ManagedStartupInputs:
                 await asyncio.to_thread(
                     self.conversations.set_labels, session_id, {STARTUP_LABEL: "ready"}
                 )
+            return response
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -470,6 +500,7 @@ class ManagedStartupInputs:
                 )
                 + str(exc)[:1000],
             )
+            return {"error": str(exc), "delivery_state": "unknown" if uncertain else "failed"}
         finally:
             self._deliveries.pop(key, None)
 

@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from omnigent.entities.branch import ConversationBranch, conversation_branch
+from omnigent.entities.communication import MessageCommunication
 from omnigent.inner.native_attachments import (
     UNRESOLVED_ATTACHMENT_MARKER_PATTERN,
     reject_authored_framework_notices,
@@ -278,6 +280,11 @@ class Conversation:
     # never read from or written to the DB.
     search_snippet: str | None = None
 
+    @property
+    def branch(self) -> ConversationBranch | None:
+        """Branch ancestry is distinct from the delegated-agent spawn tree."""
+        return conversation_branch(self.labels, parent_conversation_id=self.parent_conversation_id)
+
 
 # ── Conversation item data types ───────────────────────
 
@@ -314,8 +321,12 @@ class MessageData(BaseModel):
     :param user_authored: Confirmed or conservatively preserved user input;
         prevents legacy content cleanup from hiding literal agent markup.
     :param subagent_return_id: Native task id of an explicitly completed child.
+    :param communication: Trusted peer/native provenance, independent of model role.
     """
 
+    communication: MessageCommunication | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     resource_scope: dict[str, Any] | None = None
     role: Literal["user", "assistant"]
     # Heterogeneous content blocks (input_text, output_text, input_image, etc.)
@@ -906,9 +917,8 @@ class ConversationItem(BaseModel):
     :param response_id: The task/response ID this item belongs to.
     :param created_at: Unix epoch timestamp of creation.
     :param data: The typed data payload (MessageData, etc.).
-    :param created_by: Identity of the human actor who authored this
-        item, or ``None`` for agent/tool/system items and single-user
-        mode. Lets owner and collaborator messages be distinguished.
+    :param created_by: Authenticated account responsible for this input, when known.
+        Agent authorship comes from ``data.communication``, independently of this account.
     """
 
     id: str
@@ -973,8 +983,7 @@ class ConversationItem(BaseModel):
             "status": self.status,
             "created_at": self.created_at,
             **self.data.model_dump(exclude_none=True, by_alias=True),
-            # created_by is present only for human-authored items;
-            # omitted (not null) for agent/tool/system messages so the
-            # two stay distinguishable, matching exclude_none above.
+            # Account identity is separate from trusted peer/native authorship.
+            # Omit unknown accounts, matching exclude_none above.
             **({"created_by": self.created_by} if self.created_by is not None else {}),
         }

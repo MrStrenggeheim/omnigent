@@ -34,7 +34,7 @@ class SearchConversationsTool(Tool):
         :returns: Human-readable description of the tool.
         """
         return (
-            "Search past conversations for relevant information. "
+            "Search this conversation for relevant information. "
             "Use this to recall details from prior interactions — "
             "e.g. decisions made, code reviewed, files created, "
             "or facts discussed. Returns matching messages ranked "
@@ -52,7 +52,7 @@ class SearchConversationsTool(Tool):
             "function": {
                 "name": "search_conversations",
                 "description": (
-                    "Search past conversations for relevant information. "
+                    "Search this conversation for relevant information. "
                     "Use this to recall details from prior interactions — "
                     "e.g. decisions made, code reviewed, files created, "
                     "or facts discussed. Returns matching messages ranked "
@@ -102,21 +102,22 @@ class SearchConversationsTool(Tool):
             return json.dumps({"error": "limit must be a positive integer"})
         limit = min(limit, _MAX_SEARCH_RESULTS)
 
+        if not ctx.conversation_id:
+            return json.dumps({"error": "Search requires an authorized conversation context"})
+
         from omnigent.runtime import get_conversation_store
 
         conv_store = get_conversation_store()
-        items = conv_store.search(query, limit=limit)
+        items = conv_store.search(query, conversation_id=ctx.conversation_id, limit=limit)
 
         if not items:
             return json.dumps({"results": [], "message": "No matching conversations found."})
 
-        results = _format_results(items)
+        results = _format_results(items, conversation_id=ctx.conversation_id)
         return json.dumps({"results": results})
 
 
-def _format_results(
-    items: list[Any],
-) -> list[dict[str, Any]]:
+def _format_results(items: list[Any], *, conversation_id: str) -> list[dict[str, Any]]:
     """
     Format conversation items into search result dicts.
 
@@ -130,7 +131,7 @@ def _format_results(
     results: list[dict[str, Any]] = []
     for item in items:
         result: dict[str, Any] = {
-            "conversation_id": item.response_id,
+            "conversation_id": conversation_id,
             "item_id": item.id,
             "created_at": item.created_at,
             "type": item.type,

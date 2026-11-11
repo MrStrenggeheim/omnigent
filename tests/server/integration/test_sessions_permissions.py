@@ -3496,3 +3496,71 @@ async def test_shared_parent_readiness_remains_private(
         )
     assert response.status_code == 201, response.text
     assert "harness_not_configured" not in response.text
+
+
+async def test_branch_tree_keeps_ancestor_and_child_permissions_independent(
+    auth_client: httpx.AsyncClient,
+) -> None:
+    """Opting into the tree cannot reveal an inaccessible ancestor or its title."""
+    source = await _create_session_as(auth_client, "unused", "owner", title="private ancestor")
+    owner = {"X-Forwarded-Email": "owner"}
+    reader = {"X-Forwarded-Email": "reader"}
+    # Explicitly private source, regardless of the server's default public setting.
+    await auth_client.delete(f"/v1/sessions/{source['id']}/permissions/*", headers=owner)
+    response = await auth_client.post(
+        f"/v1/sessions/{source['id']}/fork",
+        json={"side_chat": True, "title": "shared branch"},
+        headers=owner,
+    )
+    assert response.status_code == 201, response.text
+    branch = response.json()
+    assert branch["parent_session_id"] is None
+    assert branch["branch"]["source_conversation_id"] == source["id"]
+    grant = await _grant_permission(
+        auth_client,
+        branch["id"],
+        granter="owner",
+        target_user="reader",
+        level=LEVEL_READ,
+    )
+    assert grant.status_code == 200, grant.text
+    page = await auth_client.get(
+        "/v1/sessions",
+        params={"include_side_chats": "true", "kind": "any"},
+        headers=reader,
+    )
+    assert page.status_code == 200, page.text
+    assert [row["id"] for row in page.json()["data"]] == [branch["id"]]
+    assert page.json()["data"][0]["branch"] == {
+        key: value for key, value in branch["branch"].items() if value is not None
+    }
+    assert "private ancestor" not in page.text
+    inaccessible = await auth_client.get(f"/v1/sessions/{source['id']}", headers=reader)
+    assert inaccessible.status_code in {403, 404}
+    denied_fork = await auth_client.post(
+        f"/v1/sessions/{source['id']}/fork",
+        json={},
+        headers=reader,
+    )
+    assert denied_fork.status_code in {403, 404}
+    # Forging a branch relationship cannot confer ancestry or edit access.
+    forged = await auth_client.patch(
+        f"/v1/sessions/{branch['id']}",
+        json={"labels": {"omnigent.branch.source_conversation_id": "forged"}},
+        headers=owner,
+    )
+    assert forged.status_code == 400, forged.text
+    revoke = await _revoke_permission(
+        auth_client,
+        branch["id"],
+        revoker="owner",
+        target_user="reader",
+    )
+    assert revoke.status_code == 204, revoke.text
+    page = await auth_client.get(
+        "/v1/sessions",
+        params={"include_side_chats": "true", "kind": "any"},
+        headers=reader,
+    )
+    assert page.status_code == 200
+    assert page.json()["data"] == []

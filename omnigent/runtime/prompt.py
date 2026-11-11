@@ -22,6 +22,15 @@ from omnigent.runtime.tool_result_replay import (
 )
 from omnigent.spec import AgentSpec
 
+BRANCH_REFERENCE_INSTRUCTIONS = (
+    "This is the boundary of a new conversation branch. Everything before this "
+    "boundary is inherited reference context, not active work. Do not resume "
+    "unfinished requests, plans, tool calls, approvals, or delegated tasks from "
+    "that history. Only new requests after this boundary authorize work in this "
+    "branch. Continue to follow the current user-wide, project, agent, and runtime "
+    "instructions and permissions. Branching does not create an isolated filesystem."
+)
+
 # Shape of the wake notice the runner posts into a parent session when a
 # dispatched sub-agent finishes (``omnigent.runner.subagent_work._format_subagent_wake_notice``).
 # Quoted verbatim wherever the model is told what to expect, so the notice

@@ -30,6 +30,7 @@ from omnigent.errors import OmnigentError
 from omnigent.server.auth import LEVEL_OWNER, LEVEL_READ, UnifiedAuthProvider
 from omnigent.server.routes.sessions import create_sessions_router
 from omnigent.stores.agent_store.sqlalchemy_store import SqlAlchemyAgentStore
+from omnigent.stores.conversation_store import SIDE_CHAT_LABEL_KEY
 from omnigent.stores.conversation_store.sqlalchemy_store import (
     SqlAlchemyConversationStore,
 )
@@ -378,6 +379,86 @@ def test_message_search_child_inheritance_revocation_and_cursor_bounds(db_uri) -
                 "/v1/sessions/search/messages",
                 headers=headers,
                 params={**params, **({"cursor": cursor} if cursor else {})},
+            )
+            assert response.status_code == 200
+            assert response.json() == {"data": [], "has_more": False, "next_cursor": None}
+
+
+def test_all_chat_message_search_includes_only_authorized_branches_and_delegates(db_uri) -> None:
+    parent_id = _seed_shared_project_session(db_uri)
+    store = SqlAlchemyConversationStore(db_uri)
+    permissions = SqlAlchemyPermissionStore(db_uri)
+    agent_id = store.get_conversation(parent_id).agent_id
+    child = store.create_conversation(agent_id=agent_id, parent_conversation_id=parent_id)
+    nested = store.create_conversation(agent_id=agent_id, parent_conversation_id=child.id)
+    branch = store.fork_conversation(parent_id, title="shared branch")
+    hidden_branch = store.fork_conversation(parent_id, title="private branch")
+    private = store.create_conversation(title="private root", agent_id=agent_id)
+    private_child = store.create_conversation(agent_id=agent_id, parent_conversation_id=private.id)
+    for conv in (branch, hidden_branch, private):
+        permissions.grant(BOB, conv.id, LEVEL_OWNER)
+    for conv in (branch, hidden_branch):
+        store.set_labels(conv.id, {SIDE_CHAT_LABEL_KEY: "1"})
+    permissions.grant(ALICE, branch.id, LEVEL_READ)
+    permissions.grant(ALICE, private_child.id, LEVEL_OWNER)
+    for session_id in (
+        parent_id,
+        child.id,
+        nested.id,
+        branch.id,
+        hidden_branch.id,
+        private.id,
+        private_child.id,
+    ):
+        store.append(
+            session_id,
+            [
+                NewConversationItem(
+                    type="message",
+                    response_id="all-chat-search",
+                    data=MessageData(
+                        role="user", content=[{"type": "input_text", "text": "needle"}]
+                    ),
+                )
+            ],
+        )
+    headers = {"X-Forwarded-Email": ALICE}
+    params = {"query": "needle", "limit": 1}
+    with TestClient(_multi_user_app(db_uri)) as client:
+        seen, cursor, first_cursor = set(), None, None
+        while True:
+            response = client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={
+                    **params,
+                    **({"cursor": cursor} if cursor else {}),
+                },
+            )
+            assert response.status_code == 200, response.text
+            page = response.json()
+            seen.update(hit["session_id"] for hit in page["data"])
+            if not page["has_more"]:
+                break
+            assert page["next_cursor"] and page["next_cursor"] != cursor
+            cursor = page["next_cursor"]
+            first_cursor = first_cursor or cursor
+        assert seen == {parent_id, child.id, nested.id, branch.id}
+        assert first_cursor is not None
+        permissions.grant(ALICE, child.id, LEVEL_OWNER)
+        permissions.revoke(ALICE, parent_id)
+        remaining = client.get("/v1/sessions/search/messages", headers=headers, params=params)
+        assert remaining.status_code == 200
+        assert {hit["session_id"] for hit in remaining.json()["data"]} == {branch.id}
+        permissions.revoke(ALICE, branch.id)
+        for cursor in (None, first_cursor):
+            response = client.get(
+                "/v1/sessions/search/messages",
+                headers=headers,
+                params={
+                    **params,
+                    **({"cursor": cursor} if cursor else {}),
+                },
             )
             assert response.status_code == 200
             assert response.json() == {"data": [], "has_more": False, "next_cursor": None}

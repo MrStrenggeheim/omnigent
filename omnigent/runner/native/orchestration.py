@@ -5329,9 +5329,6 @@ async def _auto_create_codex_terminal(
     # CUJ 1 same-user); otherwise the item-history fallback below runs. This
     # mirrors the claude-native fork-resume branch in
     # _auto_create_claude_terminal. See designs/FORK_SESSION_UX.md.
-    # Set when the source's rollout was declined for its model, so only the
-    # item rebuild below can carry the history.
-    fork_rebuild_required = False
     if (
         launch_config.external_session_id is None
         and launch_config.fork_source_external_id is not None
@@ -5362,7 +5359,6 @@ async def _auto_create_codex_terminal(
             )
         except _CodexForkModelMismatchError as error:
             cloned_rollout = None
-            fork_rebuild_required = True
             _logger.info(
                 "Not cloning for forked codex clone %s (%s); rebuilding from items",
                 session_id,
@@ -5427,8 +5423,7 @@ async def _auto_create_codex_terminal(
         # resume path below launches ``codex resume <our_thread_id>``. Reuses
         # the same server-items→rollout converter the cross-machine cold resume
         # uses, so the clone opens with the prior conversation as Codex context.
-        # Best-effort: launch fresh on failure, unless the source's rollout was
-        # declined for its model. See designs/FORK_SESSION_UX.md.
+        # Recovery must finish before launch; a fresh thread would lose history.
         from omnigent.harnesses.codex_native.main import (
             _ensure_local_codex_resume_rollout,
             _mint_codex_thread_id,
@@ -5447,16 +5442,14 @@ async def _auto_create_codex_terminal(
                 codex_path=_codex_cli_path,
                 terminal_launch_args=launch_config.terminal_launch_args,
             )
-        except Exception:  # best-effort unless the source's rollout was declined
-            if fork_rebuild_required:
-                # A fresh launch would silently drop the history the source still has.
-                raise
-            built_rollout = None
-            _logger.warning(
-                "Could not build rollout from items for forked codex clone %s; launching fresh",
+        except Exception:
+            _logger.exception(
+                "Cannot recover forked Codex session %s; preserving history for retry",
                 session_id,
-                exc_info=True,
             )
+            raise
+        if built_rollout is None:
+            raise RuntimeError("Cannot recover forked Codex history; retry the session launch")
         _logger.info(
             "Codex terminal fork-rebuild decision: session=%s our_thread=%s "
             "clone_workspace=%s built_rollout=%s",

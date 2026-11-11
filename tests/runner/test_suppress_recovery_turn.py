@@ -606,3 +606,63 @@ async def test_native_activity_during_initialization_distinguishes_turns_from_re
         assert len(harness.posted_bodies) == int(startup_repaint is not None)
         assert (await client.post("/v1/sessions", json=payload)).status_code == 201
         assert len(harness.posted_bodies) == int(startup_repaint is not None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("child_input", [False, True])
+async def test_branch_reference_tail_never_starts_parent_work(child_input: bool) -> None:
+    """Attaching a branch stays idle until child-owned work exists after its boundary."""
+    from omnigent.runtime.prompt import BRANCH_REFERENCE_INSTRUCTIONS
+
+    boundary = {
+        "id": "branch_boundary",
+        "type": "message",
+        "role": "user",
+        "is_meta": True,
+        "response_id": "branch_reference_boundary",
+        "content": [{"type": "input_text", "text": BRANCH_REFERENCE_INSTRUCTIONS}],
+    }
+    items = [_PENDING_USER_MESSAGE, boundary]
+    if child_input:
+        items.append(
+            {
+                **_PENDING_USER_MESSAGE,
+                "id": "child_input",
+                "content": [
+                    {"type": "input_text", "text": "child-owned task"},
+                ],
+            }
+        )
+
+    class BranchHistory(_HistoryServerClient):
+        async def get(self, url: str, **kwargs: Any) -> _HistoryServerClient._Resp:
+            if url.rstrip("/").endswith("/items"):
+                return self._Resp({"data": items, "has_more": False})
+            return await super().get(url, **kwargs)
+
+    app, _pm, harness = _build_sdk_app(BranchHistory())
+    payload = _session_init_payload(suppress_recovery_turn=False)
+    payload["session_init"]["snapshot"]["labels"] = {
+        "omnigent.branch.reference_boundary_item_id": "branch_boundary",
+    }
+    async with _runner_client(app) as client:
+        response = await client.post("/v1/sessions", json=payload)
+        assert response.status_code == 201, response.text
+        await asyncio.sleep(0.1)
+        assert len(harness.posted_bodies) == int(child_input)
+        if not child_input:
+            status = await client.get(f"/v1/sessions/{SESSION_ID}")
+            assert status.json()["status"] == "idle"
+            sent = await client.post(
+                f"/v1/sessions/{SESSION_ID}/events",
+                params={"stream": "true"},
+                json={
+                    "type": "message",
+                    "role": "user",
+                    "agent_id": AGENT_ID,
+                    "content": [{"type": "input_text", "text": "child-owned task"}],
+                },
+            )
+            assert sent.status_code == 200, sent.text
+            await asyncio.sleep(0.1)
+            assert len(harness.posted_bodies) == 1

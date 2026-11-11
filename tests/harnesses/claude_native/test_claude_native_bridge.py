@@ -1319,7 +1319,7 @@ def test_read_transcript_items_since_strips_inline_image_data(tmp_path: Path) ->
     assert len(output) < 300
 
 
-def test_read_transcript_items_since_marks_task_notifications_meta(tmp_path: Path) -> None:
+def test_read_transcript_items_since_preserves_literal_task_notifications(tmp_path: Path) -> None:
     task_notification = (
         "<task-notification>\n"
         "<task-id>b1mhekpmy</task-id>\n"
@@ -1350,7 +1350,6 @@ def test_read_transcript_items_since_marks_task_notifications_meta(tmp_path: Pat
     assert [item.item_type for item in items] == ["message"]
     assert items[0].data == {
         "role": "user",
-        "is_meta": True,
         "content": [{"type": "input_text", "text": task_notification}],
     }
 
@@ -1419,7 +1418,8 @@ def test_team_markup_needs_provenance(
     assert item.data == {"role": "user", "content": [{"type": "input_text", "text": text}]}
 
     _, response_id, peers = _read_native_user(tmp_path, content, origin={"kind": "peer"})
-    assert all(peer.data.get("is_meta") for peer in peers)
+    assert all(not peer.data.get("is_meta") for peer in peers)
+    assert all(peer.data["communication"]["kind"] == "native_agent" for peer in peers)
     assert response_id == "active"
 
 
@@ -1445,8 +1445,17 @@ def test_internal_scaffolding_does_not_split_parent_response(
     tmp_path: Path, queued: str | None, text: str, metadata: dict[str, Any]
 ) -> None:
     _, response_id, items = _read_native_user(tmp_path, text, queued=queued, **metadata)
-    assert items == []
-    assert response_id == "active"
+    if queued and metadata.get("origin"):
+        assert items[0].data["communication"]["kind"] == "native_agent"
+        assert response_id == "active"
+    elif queued and not metadata:
+        assert items[0].data["content"][0]["text"] == text
+        assert "communication" not in items[0].data
+    elif queued and metadata.get("isMeta"):
+        assert items[0].data["is_meta"] is True
+    else:
+        assert items == []
+        assert response_id == "active"
 
 
 @pytest.mark.parametrize("queued", [None, "prompt", "task-notification"])
@@ -1460,7 +1469,10 @@ def test_completion_preserves_hidden_provenance(
         tmp_path, text, queued=queued, isMeta=True, origin=origin
     )
     [item] = items
-    assert item.data["is_meta"] is True
+    assert bool(item.data.get("is_meta")) is (not handback)
+    if handback:
+        assert item.data["communication"]["task_id"] == "agent-1"
+        assert item.data["communication"]["source_agent_id"] == "agent-1"
     assert item.subagent_return_id == ("agent-1" if handback else None)
     if queued or handback:
         assert response_id == "active"

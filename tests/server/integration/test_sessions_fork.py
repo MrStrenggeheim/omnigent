@@ -183,17 +183,23 @@ async def test_fork_preserves_labels(
     """
     Forking inherits the source session's labels.
     """
+    from omnigent.server.session_orchestration import PEER_STOP_LABEL
+
     agent = await create_test_agent(client)
     session = await _create_session(
         client,
         agent["id"],
         title="Original",
-        labels={"env": "prod", "team": "ml"},
+        labels={"env": "prod", "team": "ml", PEER_STOP_LABEL: "1"},
     )
 
     resp = await _fork_session(client, session["id"], title="My Fork")
     assert resp.status_code == 201
     fork = resp.json()
+    original = await client.get(f"/v1/sessions/{session['id']}")
+    assert original.status_code == 200
+    assert original.json()["labels"][PEER_STOP_LABEL] == "1"
+    assert PEER_STOP_LABEL not in fork["labels"]
 
     # Title should be the explicit override, not inherited.
     assert fork["title"] == "My Fork", (
@@ -202,7 +208,11 @@ async def test_fork_preserves_labels(
 
     # Labels should be inherited from source — fork_conversation
     # copies labels in its transaction.
-    assert fork["labels"] == {"env": "prod", "team": "ml"}, (
+    assert {
+        key: value
+        for key, value in fork["labels"].items()
+        if not key.startswith("omnigent.branch.")
+    } == {"env": "prod", "team": "ml"}, (
         f"Fork labels should match source labels, "
         f"got {fork['labels']!r}. If empty, fork_conversation is "
         "not copying labels from the source."
@@ -437,6 +447,12 @@ async def test_fork_a_fork(
     # (which has the same items as the source).
     fork1_items = await _get_session_items(client, fork1["id"])
     fork2_items = await _get_session_items(client, fork2["id"])
+    assert len([item for item in fork1_items if item.get("is_meta")]) == 1
+    assert len([item for item in fork2_items if item.get("is_meta")]) == 2
+    assert fork2["branch"]["source_conversation_id"] == fork1["id"]
+    assert fork2["branch"]["root_conversation_id"] == session["id"]
+    fork1_items = [item for item in fork1_items if not item.get("is_meta")]
+    fork2_items = [item for item in fork2_items if not item.get("is_meta")]
 
     assert len(fork2_items) == len(fork1_items), (
         f"Second fork should have {len(fork1_items)} items (same as "
@@ -489,6 +505,11 @@ async def test_fork_copies_transcript_content_with_fresh_ids(
     resp = await _fork_session(client, session["id"])
     assert resp.status_code == 201
     fork_items = await _get_session_items(client, resp.json()["id"])
+    boundaries = [item for item in fork_items if item.get("is_meta")]
+    assert len(boundaries) == 1
+    assert boundaries[0]["response_id"] == "branch_reference_boundary"
+    assert resp.json()["branch"]["source_item_id"] == source_items[-1]["id"]
+    fork_items = [item for item in fork_items if not item.get("is_meta")]
 
     assert [i["role"] for i in fork_items] == [i["role"] for i in source_items]
     assert [i["content"][0]["text"] for i in fork_items] == [

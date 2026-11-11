@@ -1133,7 +1133,7 @@ async def test_recovered_pending_child_outlives_launch_timeout_and_delivers_orig
     """Recovery must await the original dispatch, including work on another live runner."""
     from unittest.mock import AsyncMock
 
-    from omnigent.runner.tool_dispatch import _cleanup_drained_subagent_work, _drain_inbox
+    from omnigent.runner.tool_dispatch import _drain_inbox
 
     child = _child_summary(
         runner_id="other-live-runner",
@@ -1179,7 +1179,12 @@ async def test_recovered_pending_child_outlives_launch_timeout_and_delivers_orig
     assert payload["conversation_id"] == CHILD_SESSION_ID
     assert payload["status"] == "completed"
     assert payload["output"] == "review complete: LGTM"
-    await _cleanup_drained_subagent_work(payload, server_client=server)
+    inbox.put_nowait(payload)
+    server.post = AsyncMock(return_value=server._Resp({"result": "POLICY_ACTION_ALLOW"}))
+    delivered = await _drain_inbox(inbox, server_client=server, conversation_id=PARENT_SESSION_ID)
+    assert '"receipt": "inbox_drained"' in delivered
+    assert '"delivery_state": "unknown"' in delivered
+    assert DISPATCH_ID in delivered
     server.patch.assert_awaited_once_with(
         f"/v1/sessions/{CHILD_SESSION_ID}",
         json={"labels": {subagent_work.SUBAGENT_DELIVERED_ID_LABEL_KEY: DISPATCH_ID}},

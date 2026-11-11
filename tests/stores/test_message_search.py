@@ -303,14 +303,18 @@ def test_message_search_dense_matches_are_explicitly_truncated(store) -> None:
     assert hit.text.count("a") == MAX_SEARCH_OCCURRENCES
 
 
-def test_message_search_sidebar_scope_excludes_side_chats_and_children(store) -> None:
+def test_message_search_all_chat_scope_includes_side_chats_and_children(store) -> None:
     parent = store.create_conversation(agent_id="a" * 32)
     child = store.create_conversation(agent_id="a" * 32, parent_conversation_id=parent.id)
     side = store.create_conversation(agent_id="a" * 32)
     store.set_labels(side.id, {SIDE_CHAT_LABEL_KEY: "1"})
     for conv in (parent, child, side):
         store.append(conv.id, [_message("needle")])
-    assert {hit.session_id for hit in store.search_messages("needle").data} == {parent.id}
+    assert {hit.session_id for hit in store.search_messages("needle").data} == {
+        parent.id,
+        child.id,
+        side.id,
+    }
     assert store.search_messages("needle", conversation_id=child.id).data[0].session_id == child.id
     assert store.search_messages("needle", conversation_id=side.id).data[0].session_id == side.id
 
@@ -351,3 +355,57 @@ def test_sqlite_message_search_matches_across_chunk_boundary() -> None:
             assert connection.execute(
                 "SELECT omnigent_message_matches(?)", ("x" * (MAX_SEARCH_TEXT - 2) + "😀ÉCHO",)
             ).fetchone() == (1,)
+
+
+def test_all_chat_search_authorizes_branch_and_delegate_roots_on_every_page(store) -> None:
+    """Branches keep independent grants; nested delegates follow root access after revocation."""
+    perms = SqlAlchemyPermissionStore(store.storage_location)
+    for user in ("alice", "bob"):
+        perms.ensure_user(user)
+    shared = store.create_conversation(title="shared root", agent_id="a" * 32)
+    private = store.create_conversation(title="private root", agent_id="a" * 32)
+    perms.grant("bob", shared.id, LEVEL_OWNER)
+    perms.grant("bob", private.id, LEVEL_OWNER)
+    perms.grant("alice", shared.id, LEVEL_READ)
+    child = store.create_conversation(agent_id="a" * 32, parent_conversation_id=shared.id)
+    nested = store.create_conversation(agent_id="a" * 32, parent_conversation_id=child.id)
+    inaccessible_child = store.create_conversation(
+        title="private delegate",
+        agent_id="a" * 32,
+        parent_conversation_id=private.id,
+    )
+    # A stale direct child grant never replaces root access.
+    perms.grant("alice", inaccessible_child.id, LEVEL_OWNER)
+    branch = store.fork_conversation(private.id, title="independently shared branch")
+    hidden_branch = store.fork_conversation(shared.id, title="private branch")
+    for conv in (branch, hidden_branch):
+        store.set_labels(conv.id, {SIDE_CHAT_LABEL_KEY: "1"})
+        perms.grant("bob", conv.id, LEVEL_OWNER)
+    perms.grant("alice", branch.id, LEVEL_READ)
+    for conv in (shared, private, child, nested, inaccessible_child, branch, hidden_branch):
+        store.append(conv.id, [_message("needle " + (conv.title or conv.id))])
+    expected = {shared.id, child.id, nested.id, branch.id}
+    for scope in ({"accessible_by": "alice"}, {"accessible_by": "alice", "shared_only": True}):
+        seen, cursor = set(), None
+        while True:
+            page = store.search_messages("needle", limit=1, cursor=cursor, **scope)
+            seen.update(hit.session_id for hit in page.data)
+            assert not any(
+                "private" in hit.text or "private" in (hit.title or "") for hit in page.data
+            )
+            if not page.has_more:
+                break
+            assert page.next_cursor and page.next_cursor != cursor
+            cursor = page.next_cursor
+        assert seen == expected
+    assert store.search_messages("needle", owned_by="alice").data == []
+    first = store.search_messages("needle", accessible_by="alice", limit=1)
+    assert first.next_cursor
+    perms.grant("alice", child.id, LEVEL_OWNER)
+    perms.revoke("alice", shared.id)
+    assert {
+        hit.session_id for hit in store.search_messages("needle", accessible_by="alice").data
+    } == {branch.id}
+    perms.revoke("alice", branch.id)
+    for cursor in (None, first.next_cursor):
+        assert store.search_messages("needle", accessible_by="alice", cursor=cursor).data == []

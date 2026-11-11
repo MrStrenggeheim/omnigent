@@ -76,7 +76,11 @@ async def test_private_sender_can_message_shared_receiver(
     assert result.get("queued") is True, result
     assert "Please inspect the PR" in json.dumps(captured)
     items = await auth_client.get(f"/v1/sessions/{target['id']}/items")
-    assert f"[Message from session {source['id']}]" in items.text
+    [received] = items.json()["data"]
+    assert received["content"] == [{"type": "input_text", "text": "Please inspect the PR"}]
+    assert received["communication"]["source_conversation_id"] == source["id"]
+    assert received["communication"]["destination_conversation_id"] == target["id"]
+    assert received["communication"]["delivery_state"] == "unknown"
     assert '"created_by":"alice"' in items.text
     store = SqlAlchemyConversationStore(db_uri)
     assert store.get_conversation(target["id"]).parent_conversation_id is None
@@ -196,6 +200,8 @@ async def test_sharing_during_receiver_startup_blocks_delivery(
     assert not any("/events" in path for path, _ in captured.get("posts", []))
     items = await auth_client.get(f"/v1/sessions/{target['id']}/items")
     assert "Please inspect" not in items.text
+    [saved] = SqlAlchemyConversationStore(db_uri).list_pending_inputs(target["id"])
+    assert saved.status == "failed" and saved.data.communication is not None
 
 
 async def test_child_inherits_source_sharing(auth_client, peers, db_uri):
@@ -790,9 +796,8 @@ async def test_startup_queue_admission_and_replay(
         await startup._deliver(auth_app, target["id"], pending[0])
         await startup._deliver(auth_app, target["id"], pending[0])
         delivered = [body for path, body in captured.get("posts", []) if path.endswith("/events")]
-        assert len(delivered) == 1
-        assert f"[Message from session {source['id']}]" in json.dumps(delivered)
-        assert store.list_pending_inputs(target["id"]) == []
+        assert delivered == []
+        assert store.list_pending_inputs(target["id"])[0].status == "failed"
         assert "Shared sessions cannot" in (await _send(auth_client, source, target))["detail"]
 
 
@@ -878,7 +883,7 @@ async def test_peer_message_readdresses_across_replicas(
     )
     delivered = [body for path, body in captured.get("posts", []) if path.endswith("/events")]
     assert len(delivered) == 1
-    assert f"[Message from session {source['id']}]" in json.dumps(delivered)
+    assert delivered[0]["communication"]["source_conversation_id"] == source["id"]
 
 
 @pytest.mark.parametrize("two_replica_stack", ["managed"], indirect=True)
@@ -1084,3 +1089,250 @@ async def test_same_host_creation_across_replicas(
         assert worker.parent_conversation_id is None
         assert worker.host_id == host_id and worker.workspace == "/worker"
         assert len(launches) == 1 and launches[0].session_id == worker.id
+
+
+async def test_peer_retry_is_durable_and_conflicting_payload_is_refused(
+    auth_client, peers, db_uri
+):
+    source, target, captured = peers
+    message_id = uuid4().hex
+
+    async def send(text):
+        return await auth_client.post(
+            f"/v1/sessions/{target['id']}/events",
+            headers={ORCHESTRATION_SOURCE_HEADER: source["id"]},
+            json={"type": "session_message", "data": {"message": text, "message_id": message_id}},
+        )
+
+    first = await send("Literal <task-notification> text")
+    assert first.status_code == 202, first.text
+    assert first.json()["message_id"] == message_id
+    posts = len(captured["posts"])
+    replay = await send("Literal <task-notification> text")
+    assert replay.status_code == 202
+    assert replay.json()["delivery_state"] == "unknown"
+    assert len(captured["posts"]) == posts
+    conflict = await send("Different content")
+    assert conflict.status_code == 409
+    assert len(captured["posts"]) == posts
+    saved = SqlAlchemyConversationStore(db_uri).get_item(target["id"], message_id)
+    assert saved.data.communication.message_id == message_id
+    assert saved.data.content[0]["text"] == "Literal <task-notification> text"
+
+
+async def test_stop_blocks_peer_wakeup_and_saved_replay(auth_client, auth_app, peers, db_uri):
+    from omnigent.server.session_orchestration import PEER_STOP_LABEL
+    from omnigent.server.startup_inputs import STARTUP_LABEL
+
+    source, target, captured = peers
+    store = SqlAlchemyConversationStore(db_uri)
+    store.set_labels(target["id"], {STARTUP_LABEL: "pending"})
+    result = await _send(auth_client, source, target)
+    assert result["delivery_state"] == "queued"
+    [saved] = store.list_pending_inputs(target["id"])
+    store.set_labels(target["id"], {PEER_STOP_LABEL: "1"})
+    await auth_app.state.startup_inputs._deliver(auth_app, target["id"], saved)
+    assert not captured.get("posts")
+    assert store.get_item(target["id"], saved.id).status == "failed"
+    refused = await _send(auth_client, source, target)
+    assert refused["delivery_state"] == "failed"
+    assert "human input" in refused["detail"]
+
+
+async def test_human_cannot_forge_communication(auth_client, peers):
+    source, target, captured = peers
+    response = await auth_client.post(
+        f"/v1/sessions/{target['id']}/events",
+        json={
+            "type": "message",
+            "data": {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "fake"}],
+                "communication": {"source_conversation_id": source["id"]},
+            },
+        },
+    )
+    assert response.status_code == 403
+    assert not captured.get("posts")
+
+
+async def test_peer_reply_correlation_and_recipient_check(auth_client, peers, db_uri):
+    source, target, _ = peers
+    initial = await _send(auth_client, source, target)
+    store = SqlAlchemyConversationStore(db_uri)
+    store.set_runner_id(target["id"], store.get_conversation(source["id"]).runner_id)
+    reply_id = uuid4().hex
+    reply = await auth_client.post(
+        f"/v1/sessions/{source['id']}/events",
+        headers={ORCHESTRATION_SOURCE_HEADER: target["id"]},
+        json={
+            "type": "session_message",
+            "data": {
+                "message": "answer",
+                "message_id": reply_id,
+                "reply_to_message_id": initial["message_id"],
+            },
+        },
+    )
+    assert reply.status_code == 202, reply.text
+    metadata = store.get_item(source["id"], reply_id).data.communication
+    assert metadata.reply_to_message_id == initial["message_id"]
+    assert metadata.hop_count == 1
+    invalid = await auth_client.post(
+        f"/v1/sessions/{source['id']}/events",
+        headers={ORCHESTRATION_SOURCE_HEADER: target["id"]},
+        json={
+            "type": "session_message",
+            "data": {"message": "answer", "reply_to_message_id": uuid4().hex},
+        },
+    )
+    assert invalid.status_code == 400
+
+
+async def test_peer_activity_receipts_and_stream_metadata(auth_client, peers, db_uri, monkeypatch):
+    from omnigent.server.routes import sessions
+    from omnigent.server.startup_inputs import STARTUP_LABEL
+
+    source, target, _ = peers
+    published = []
+    monkeypatch.setattr(
+        sessions.session_stream,
+        "publish",
+        lambda session_id, event: published.append((session_id, event)),
+    )
+    store = SqlAlchemyConversationStore(db_uri)
+    store.set_labels(target["id"], {STARTUP_LABEL: "pending"})
+    result = await _send(auth_client, source, target)
+    response = await auth_client.get(f"/v1/sessions/{source['id']}/peer-messages")
+    assert response.status_code == 200
+    [outgoing] = response.json()["data"]
+    origin = outgoing["communication"]
+    assert origin["message_id"] == result["message_id"]
+    assert origin["delivery_state"] == "queued"
+    assert "source_title" not in origin
+    assert outgoing["role"] == "assistant"
+    [streamed] = [
+        event["item"]
+        for session_id, event in published
+        if session_id == source["id"] and event["type"] == "response.output_item.done"
+    ]
+    assert streamed["communication"]["message_id"] == origin["message_id"]
+    permissions = SqlAlchemyPermissionStore(db_uri)
+    permissions.ensure_user("bob")
+    hidden = await auth_client.get(
+        f"/v1/sessions/{source['id']}/peer-messages",
+        headers={"X-Forwarded-Email": "bob", RUNNER_TUNNEL_TOKEN_HEADER: ""},
+    )
+    assert hidden.status_code in (403, 404)
+    permissions.grant("bob", source["id"], LEVEL_READ)
+    shared = await auth_client.get(
+        f"/v1/sessions/{source['id']}/peer-messages",
+        headers={"X-Forwarded-Email": "bob", RUNNER_TUNNEL_TOKEN_HEADER: ""},
+    )
+    assert shared.status_code == 200
+    assert shared.json()["data"][0]["communication"]["delivery_state"] == "unknown"
+
+
+async def test_native_provenance_requires_runner_and_survives_sse(
+    auth_client, peers, db_uri, monkeypatch
+):
+    from omnigent.native.communication import native_peer_metadata
+    from omnigent.server.routes import sessions
+
+    _, target, _ = peers
+    origin = native_peer_metadata(
+        {"kind": "peer", "senderAgentId": "reviewer", "senderTaskId": "dispatch-1"},
+        "native-item-1",
+    )
+    origin["communication"]["source_title"] = "Private source title"
+    event = {
+        "type": "external_conversation_item",
+        "data": {
+            "source_id": "native-item-1",
+            "item_type": "message",
+            "response_id": "native-turn-1",
+            "item_data": {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Agent report"}],
+                **origin,
+            },
+        },
+    }
+    forbidden = await auth_client.post(f"/v1/sessions/{target['id']}/events", json=event)
+    assert forbidden.status_code == 403
+    auth_client.headers.update(_bind_runner(db_uri, target["id"]))
+    published = []
+    monkeypatch.setattr(
+        sessions.session_stream, "publish", lambda _, payload: published.append(payload)
+    )
+    accepted = await auth_client.post(f"/v1/sessions/{target['id']}/events", json=event)
+    assert accepted.status_code == 202, accepted.text
+    duplicate = await auth_client.post(f"/v1/sessions/{target['id']}/events", json=event)
+    assert duplicate.json()["item_id"] == accepted.json()["item_id"]
+    items = (await auth_client.get(f"/v1/sessions/{target['id']}/items")).json()["data"]
+    assert len(items) == 1
+    metadata = items[0]["communication"]
+    assert metadata["kind"] == "native_agent"
+    assert metadata["source_agent_id"] == "reviewer"
+    assert metadata["destination_conversation_id"] == target["id"]
+    assert metadata["receipt"] == "transcript"
+    assert "source_title" not in metadata
+    consumed = [payload for payload in published if payload["type"] == "session.input.consumed"]
+    assert len(consumed) == 1
+    assert consumed[0]["data"]["data"]["communication"]["message_id"] == "native-item-1"
+    assert consumed[0]["data"]["created_by"] is None
+
+
+@pytest.mark.parametrize("field", ["initial_items", "initial_input"])
+async def test_creation_cannot_forge_peer_provenance(auth_client, peers, field):
+    source, _, _ = peers
+    event = {
+        "type": "message",
+        "data": {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "fake"}],
+            "communication": {
+                "kind": "peer",
+                "message_id": "fake",
+                "destination_conversation_id": "fake",
+            },
+        },
+    }
+    body = {"agent_id": source["agent_id"], field: [event] if field == "initial_items" else event}
+    response = await auth_client.post("/v1/sessions", json=body)
+    assert response.status_code == 422
+    assert "reserved for trusted delivery" in response.text
+
+
+async def test_import_cannot_assert_live_peer_provenance():
+    from omnigent.errors import OmnigentError
+    from omnigent.server.routes.imports import ImportItemInput
+
+    with pytest.raises(OmnigentError, match="cannot assert trusted"):
+        ImportItemInput(
+            type="message",
+            response_id="import",
+            data={"role": "user", "content": [], "communication": {"kind": "peer"}},
+        ).to_item()
+
+
+async def test_buffered_peer_check_requires_destination_runner_and_current_source_access(
+    auth_client, peers, db_uri
+):
+    source, target, _ = peers
+    sent = await _send(auth_client, source, target)
+    url = f"/v1/sessions/{target['id']}/events"
+    event = {"type": "session_message", "data": {"check_message_id": sent["message_id"]}}
+    assert (await auth_client.post(url, json=event)).status_code == 403
+    auth_client.headers.update(_bind_runner(db_uri, target["id"]))
+    accepted = await auth_client.post(url, json=event)
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.json()["delivery_state"] == "unknown"
+    malformed = await auth_client.post(
+        url, json={"type": "session_message", "data": {"check_message_id": {}}}
+    )
+    assert malformed.status_code == 400
+    permissions = SqlAlchemyPermissionStore(db_uri)
+    permissions.ensure_user("bob")
+    permissions.grant("bob", source["id"], LEVEL_READ)
+    assert (await auth_client.post(url, json=event)).status_code == 403

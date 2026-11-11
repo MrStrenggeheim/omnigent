@@ -1287,6 +1287,7 @@ def _build_session_list_item(
         # push-stream path leaves it None (no query in flight there).
         search_snippet=conv.search_snippet,
         parent_session_id=conv.parent_conversation_id,
+        branch=conv.branch,
         project_id=conv.project_id,
     )
 
@@ -1505,6 +1506,11 @@ def _build_session_response(
         sub_agent_name=conv.sub_agent_name,
         kind=conv.kind,
         parent_session_id=conv.parent_conversation_id,
+        branch=(
+            conv.branch.model_copy(update={"recovery": "unavailable"})
+            if side_chat_sealed and conv.branch is not None
+            else conv.branch
+        ),
         root_conversation_id=conv.root_conversation_id,
         llm_model=llm_model,
         harness=harness,
@@ -2927,6 +2933,7 @@ def _drains_pending_inputs(item: NewConversationItem) -> bool:
         and isinstance(item.data, MessageData)
         and item.data.role == "user"
         and not item.data.is_meta
+        and item.data.communication is None
         and not _is_native_interrupt_record(item.data)
     )
 
@@ -3059,6 +3066,16 @@ async def _persist_external_conversation_item_unlocked(
             return existing.id
     if _drains_pending_inputs(item) and STARTUP_LABEL in conv.labels:
         await restore_pending_inputs(conversation_store, session_id)
+    # Text/FIFO matching cannot establish agent authorship or confirm peer delivery.
+    protected_peer_ids = set()
+    if STARTUP_LABEL in conv.labels:
+        protected_peer_ids = {
+            pending.id
+            for pending in await asyncio.to_thread(
+                conversation_store.list_pending_inputs, session_id
+            )
+            if isinstance(pending.data, MessageData) and pending.data.communication is not None
+        }
     # A native user message round-tripping back from the transcript:
     # drain its optimistic pending-input entry and fold the entry's file
     # blocks (image / file) into the item BEFORE persisting. The transcript
@@ -3084,6 +3101,7 @@ async def _persist_external_conversation_item_unlocked(
         and isinstance(item.data, MessageData)
         and item.data.role == "user"
         and not item.data.is_meta
+        and item.data.communication is None
         and not _is_native_interrupt_record(item.data)
     ):
         # Match the mirror to its entry by text: a pasted message the TUI never
@@ -3093,7 +3111,9 @@ async def _persist_external_conversation_item_unlocked(
         # to the oldest entry, except for Kiro, whose prompt text is exact.
         text = _message_text(item.data.content) or ""
         agent_message_candidate = body.data.get("agent_message_candidate") is True
-        matched = pending_inputs.resolve_matching_text(session_id, text, hold=True)
+        matched = pending_inputs.resolve_matching_text(
+            session_id, text, hold=True, exclude_stable_ids=protected_peer_ids
+        )
         drained = matched.matched
         match_method = matched.match_method
         if agent_message_candidate:
@@ -3114,7 +3134,9 @@ async def _persist_external_conversation_item_unlocked(
             # Leave the older entries queued for a later mirror instead.
             held_older = [*matched.skipped, *matched.uncertain]
         if drained is None and not agent_message_candidate and not _is_kiro_native_session(conv):
-            drained = pending_inputs.resolve_oldest(session_id, hold=True)
+            drained = pending_inputs.resolve_oldest(
+                session_id, hold=True, exclude_stable_ids=protected_peer_ids
+            )
             if drained is not None:
                 match_method = "fifo_fallback"
                 # The mirror's true owner may be any entry still queued, so none
@@ -3151,7 +3173,9 @@ async def _persist_external_conversation_item_unlocked(
         spellings = dict.fromkeys((item.data.name, item.data.name.rpartition(":")[2]))
         for spelling in spellings:
             command_line = f"/{spelling} {item.data.arguments}".strip()
-            matched = pending_inputs.resolve_matching_text(session_id, command_line, hold=True)
+            matched = pending_inputs.resolve_matching_text(
+                session_id, command_line, hold=True, exclude_stable_ids=protected_peer_ids
+            )
             if matched.matched is not None:
                 break
         drained = matched.matched
@@ -3285,6 +3309,23 @@ def _new_external_conversation_item(
 ) -> NewConversationItem:
     """Parse an external item event, keyed by its ``source_id`` when it has one."""
     item = _parse_external_conversation_item(body)
+    if isinstance(item.data, MessageData) and item.data.communication is not None:
+        origin = item.data.communication
+        if origin.kind != "native_agent":
+            raise OmnigentError(
+                "External items cannot assert peer delivery", code=ErrorCode.FORBIDDEN
+            )
+        item.data = item.data.model_copy(
+            update={
+                "communication": origin.model_copy(
+                    update={
+                        "destination_conversation_id": session_id,
+                        "source_conversation_id": None,
+                        "source_title": None,
+                    }
+                )
+            }
+        )
     return_id = body.data.get("subagent_return_id")
     if (
         isinstance(return_id, str)
@@ -6260,10 +6301,12 @@ def _build_native_terminal_message_event(
             f"{display_name} terminal sessions accept only user message events",
             code=ErrorCode.INVALID_INPUT,
         )
+    from omnigent.native.communication import peer_model_content
+
     event: dict[str, Any] = {
         "type": "message",
         "role": "user",
-        "content": data.content,
+        "content": peer_model_content(data.content, data.communication),
         "model": model,
         "harness": harness,
         # The runner resolves the harness from the agent spec keyed by
@@ -6275,6 +6318,8 @@ def _build_native_terminal_message_event(
         # which always includes it.
         "agent_id": conv.agent_id,
     }
+    if data.communication is not None:
+        event["communication"] = data.communication.model_dump()
     if agent_revision is not None:
         event["agent_revision"] = agent_revision
     # The web's stable id for this message rides along so the runner can name
@@ -6998,6 +7043,10 @@ async def _forward_event_to_runner(
     # harness don't have access to the server's file store — the
     # LLM endpoint needs the actual content, not an internal ID.
     forwarded_data = dict(body.data)
+    if isinstance(item.data, MessageData) and item.data.communication is not None:
+        from omnigent.native.communication import peer_model_content
+
+        forwarded_data["content"] = peer_model_content(item.data.content, item.data.communication)
     if (
         file_store is not None
         and artifact_store is not None
@@ -7968,8 +8017,10 @@ async def _dispatch_session_event_to_runner_impl(
         # it back and this bubble would sit in the parent chat forever.
         from omnigent.harnesses.codex_native.side_chat import is_side_chat_command
 
-        opens_side_chat = _native_pane_harness(conv) == "codex-native" and is_side_chat_command(
-            _extract_user_text_for_routing(body)
+        opens_side_chat = (
+            not body.data.get("communication")
+            and _native_pane_harness(conv) == "codex-native"
+            and is_side_chat_command(_extract_user_text_for_routing(body))
         )
         # An older host forwards `/side` to Codex as a plain prompt (no fork), so
         # the web side chat opens and hangs and the question lands on the main
@@ -7989,7 +8040,8 @@ async def _dispatch_session_event_to_runner_impl(
         # mirrors it back to drain an entry (the web clears its own bubble). With an attachment
         # pasted ahead of the text it is an ordinary prompt, so only text-only content counts.
         is_btw = (
-            _native_pane_harness(conv) == "claude-native"
+            not body.data.get("communication")
+            and _native_pane_harness(conv) == "claude-native"
             and isinstance(content, list)
             and all(
                 isinstance(block, dict) and block.get("type") == "input_text" for block in content
@@ -13604,8 +13656,13 @@ async def _get_session_snapshot(
     startup = getattr(request.app.state, "startup_inputs", None) if request is not None else None
     if startup is not None and STARTUP_LABEL in conv.labels:
         queued = await startup.pending_snapshot(session_id)
-        known = {item["pending_id"] for item in response.pending_inputs}
-        response.pending_inputs.extend(item for item in queued if item["pending_id"] not in known)
+        known = {item["pending_id"]: item for item in response.pending_inputs}
+        for item in queued:
+            if item["pending_id"] in known:
+                if "communication" in item:
+                    known[item["pending_id"]]["communication"] = item["communication"]
+            else:
+                response.pending_inputs.append(item)
     return response
 
 

@@ -230,11 +230,16 @@ _SANDBOX_REPO_LABEL_KEY = "omnigent.sandbox.repo"
 # ``REQUESTED_HOST_ID_LABEL_KEY`` (cross-checked by a store test).
 _SANDBOX_REQUESTED_HOST_ID_LABEL_KEY = "omnigent.sandbox.requested_host_id"
 _FORK_ONLY_DROPPED_LABEL_KEYS = IMPORT_PROVENANCE_LABEL_KEYS | {
+    FORK_SOURCE_LABEL_KEY,
+    FORK_SOURCE_EXTERNAL_SESSION_LABEL_KEY,
+    FORK_CARRY_HISTORY_LABEL_KEY,
     ARCHIVED_AT_LABEL_KEY,
     SIDE_CHAT_LABEL_KEY,
     SIDE_CHAT_SOURCE_LABEL_KEY,
     _SANDBOX_REPO_LABEL_KEY,
     _SANDBOX_REQUESTED_HOST_ID_LABEL_KEY,
+    # Stop fences the source session; a new branch has its own lifecycle.
+    "omnigent.peer_messages.stopped",
 }
 
 
@@ -1958,6 +1963,8 @@ class ConversationStore(ABC):
         resume_source_native_session: bool = True,
         presentation_labels: dict[str, str] | None = None,
         up_to_response_id: str | None = None,
+        up_to_item_id: str | None = None,
+        reference_history: bool = False,
         project_id: str | None = None,
         file_id_map: Mapping[str, str] | None = None,
         created_by: str | None = None,
@@ -2052,6 +2059,10 @@ class ConversationStore(ABC):
             harness: a native target supplies ``{ui: terminal, wrapper:
             ...}``; an SDK target supplies ``{}`` (drop them → chat mode).
             ``None`` (default, same-agent fork) keeps the copied labels.
+        :param up_to_item_id: Exact inclusive source item boundary, excluding queued inputs.
+            Mutually exclusive with ``up_to_response_id``.
+        :param reference_history: Add a durable reference-only boundary after inherited
+            history and rebuild native context from that snapshot instead of the source.
         :param up_to_response_id: When set, copy only the items up to and
             including the last item of this response (by position), e.g.
             ``"resp_abc123"`` — a "fork from this response" truncation.

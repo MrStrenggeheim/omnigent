@@ -613,13 +613,20 @@ class _RefusingSteerHarnessClient(_HandshakeHarnessClient):
 
 
 @pytest.mark.asyncio
-async def test_refused_steer_is_delivered_as_fresh_continuation_turn() -> None:
+@pytest.mark.parametrize("peer", [False, True])
+async def test_refused_steer_is_delivered_as_fresh_continuation_turn(peer, monkeypatch) -> None:
     """A steer the harness refused is not lost: it runs as the continuation turn.
 
     The harness refuses a steer whose turn already ended, so the buffered copy
     is the only delivery. The continuation body must not carry the steer's
     ``injection_id``, or the harness would refuse to start that turn too.
     """
+    from unittest.mock import AsyncMock
+
+    from omnigent.runner import session_message
+
+    authorize = AsyncMock(return_value=True)
+    monkeypatch.setattr(session_message, "peer_delivery_allowed", authorize)
     gate = asyncio.Event()
     spec = AgentSpec(spec_version=1, name="t")
     hc = _RefusingSteerHarnessClient(gate)
@@ -646,6 +653,8 @@ async def test_refused_steer_is_delivered_as_fresh_continuation_turn() -> None:
         assert (await client.post(f"/v1/sessions/{sid}/events", json=first)).status_code == 202
         await asyncio.sleep(0.05)
         second = {**message, "content": [{"type": "input_text", "text": "second"}]}
+        if peer:
+            second["communication"] = {"kind": "peer", "message_id": "dispatch-1"}
         resp2 = await client.post(f"/v1/sessions/{sid}/events", json=second)
         assert resp2.json()["status"] == "buffered"
         gate.set()
@@ -654,8 +663,12 @@ async def test_refused_steer_is_delivered_as_fresh_continuation_turn() -> None:
                 break
             await asyncio.sleep(0.01)
 
-    assert len(hc.patched_events) == 1
-    assert hc.patched_events[0].get("injection_id"), "the steer forward carries its id"
+    if peer:
+        assert hc.patched_events == []
+        authorize.assert_awaited_once()
+    else:
+        assert len(hc.patched_events) == 1
+        assert hc.patched_events[0].get("injection_id"), "the steer forward carries its id"
     assert len(hc.posted_bodies) == 2, f"expected a continuation turn: {hc.posted_bodies}"
     continuation = hc.posted_bodies[1]
     assert _body_contains_text(continuation, "second")
