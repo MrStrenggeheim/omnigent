@@ -47,16 +47,18 @@ import { useSessionItems, type RawSessionItem } from "@/hooks/useSessionItems";
 import { useSseEventLog } from "@/hooks/useSseEventLog";
 import type { SseLogEntry } from "@/lib/sseEventLog";
 import { cn } from "@/lib/utils";
-import { useChatStore } from "@/store/chatStore";
+import { useConversationEntryState } from "@/hooks/useConversationEntryState";
 
 /** True when the focused session's agent loop is live. */
-function useFocusedSessionActive(): boolean {
-  const status = useChatStore((s) => s.sessionStatus);
+function useFocusedSessionActive(sessionId: string): boolean {
+  const status = useConversationEntryState(sessionId).sessionStatus;
   return status === "running" || status === "waiting";
 }
 
 interface ExecutionLogsPanelProps {
   open: boolean;
+  contained?: boolean;
+  active?: boolean;
   /**
    * Parent (main) conversation id. Acts as the session id for the
    * pinned "main" entry and as the parent reference for the
@@ -93,6 +95,8 @@ const ITEMS_POLL_MS = 3_000;
 
 export function ExecutionLogsPanel({
   open,
+  contained = false,
+  active = true,
   conversationId,
   initialKey,
   onClose,
@@ -112,7 +116,7 @@ export function ExecutionLogsPanel({
     if (initialKey) setActiveKey(initialKey);
   }, [open, initialKey]);
 
-  usePanelEscapeClose(open, onClose);
+  usePanelEscapeClose(open && active, onClose, contained ? { scope: ref } : undefined);
 
   useEffect(() => {
     if (ref.current) {
@@ -133,10 +137,10 @@ export function ExecutionLogsPanel({
       ref={ref}
       data-testid="execution-logs-panel"
       data-state={open ? "open" : "closed"}
-      style={{ width: panelWidth }}
+      style={{ width: contained ? "100%" : panelWidth }}
       className={cn(
         "flex flex-col overflow-hidden bg-card transition-[translate,border-color,border-width] duration-150 ease-out",
-        "fixed inset-0 z-40",
+        contained ? "relative h-full min-h-0 w-full" : "fixed inset-0 z-40",
         open ? "translate-x-0 shadow-lg" : "translate-x-full shadow-none",
         "md:relative md:inset-auto md:z-auto md:shadow-none md:translate-x-0 md:shrink-0",
         open ? "md:border-border md:border-l" : "md:w-0 md:border-l-0",
@@ -144,14 +148,14 @@ export function ExecutionLogsPanel({
       aria-hidden={!open}
       data-collapsed={!open || undefined}
     >
-      {isDesktop && (
+      {isDesktop && !contained && (
         <div
           {...handleProps}
           className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
         />
       )}
-      {open && <MobileWorkspaceTabs onClose={onClose} />}
-      {isDesktop && (
+      {open && !contained && <MobileWorkspaceTabs onClose={onClose} />}
+      {isDesktop && !contained && (
         <header className="workspace-control-header flex items-center justify-between border-border border-b px-3">
           <h2 className="font-medium text-ui">Execution logs</h2>
           <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
@@ -254,7 +258,7 @@ function buildLogEntries(conversationId: string, children: ChildSessionInfo[]): 
 }
 
 function SessionItemsList({ sessionId }: { sessionId: string }) {
-  const sessionActive = useFocusedSessionActive();
+  const sessionActive = useFocusedSessionActive(sessionId);
   const { items, isLoading, error, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useSessionItems(sessionId, sessionActive ? ITEMS_POLL_MS : null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);

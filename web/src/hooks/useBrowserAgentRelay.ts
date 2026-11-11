@@ -231,8 +231,12 @@ async function postResult(
  * @param conversationId Gate only — the relay registers while a conversation is
  *   open. Routing uses the delivering conversation, not this.
  */
-export function useBrowserAgentRelay(conversationId: string | null | undefined): void {
+export function useBrowserAgentRelay(
+  conversationId: string | null | undefined,
+  scopeToConversation = false,
+): void {
   const relayEnabled = !!conversationId;
+  const relayConversationId = scopeToConversation ? conversationId : null;
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!relayEnabled) return;
@@ -241,6 +245,7 @@ export function useBrowserAgentRelay(conversationId: string | null | undefined):
     let cancelled = false;
     const handler = async (evt: BrowserActionRequestEvent, sourceConversationId: string | null) => {
       if (!sourceConversationId) return; // no delivering session — nothing to target
+      if (relayConversationId && sourceConversationId !== relayConversationId) return;
       const desktop = getBrowserDesktop();
       if (!desktop) return; // no browser-capable shell — nothing to claim
       // Claim FIRST — only the winner proceeds, so two windows can't double-execute.
@@ -303,5 +308,5 @@ export function useBrowserAgentRelay(conversationId: string | null | undefined):
       cancelled = true;
       unsubscribe();
     };
-  }, [relayEnabled, queryClient]);
+  }, [relayEnabled, queryClient, relayConversationId]);
 }

@@ -18,6 +18,7 @@ import { isAndroidShell, isElectronShell, isIOSShell } from "@/lib/nativeBridge"
 import { sessionRoutingHostId, setSessionHost, setSessionParent } from "./sessionHost";
 import { backgroundSessionTitlesRequestHeaders } from "./backgroundSessionTitlesPreferences";
 import { parseBackgroundTasks } from "./sse";
+import { readMessageCommunication } from "./messageCommunication";
 import type {
   BackgroundTaskInfo,
   ModelUsage,
@@ -103,6 +104,7 @@ interface ModelUsageWire {
  * camelCase `Session` type at the parse boundary.
  */
 interface SessionResponseWire {
+  branch?: Session["branch"];
   id: string;
   agent_id: string;
   /** Human-readable name of the bound agent, e.g. ``"research-agent"``. */
@@ -222,6 +224,7 @@ interface SessionResponseWire {
     pending_id: string;
     content: MessageContentBlock[];
     created_by?: string;
+    communication?: unknown;
   }[];
   /**
    * Numeric permission level (1=read, 2=edit, 3=manage, 4=owner) the
@@ -323,6 +326,7 @@ function sessionFromWire(wire: SessionResponseWire): Session {
   setSessionParent(wire.id, wire.parent_session_id, wire.labels);
   return {
     id: wire.id,
+    branch: wire.branch ?? null,
     agentId: wire.agent_id,
     agentName: wire.agent_name ?? null,
     runnerId: wire.runner_id,
@@ -359,11 +363,15 @@ function sessionFromWire(wire: SessionResponseWire): Session {
     usageByModel: usageByModelFromWire(wire.usage_by_model),
     lastTaskError: wire.last_task_error,
     pendingElicitations: wire.pending_elicitations ?? [],
-    pendingInputs: (wire.pending_inputs ?? []).map((p) => ({
-      pendingId: p.pending_id,
-      content: p.content,
-      ...(p.created_by !== undefined ? { createdBy: p.created_by } : {}),
-    })),
+    pendingInputs: (wire.pending_inputs ?? []).map((p) => {
+      const communication = readMessageCommunication(p.communication);
+      return {
+        pendingId: p.pending_id,
+        content: p.content,
+        ...(p.created_by !== undefined ? { createdBy: p.created_by } : {}),
+        ...(communication ? { communication } : {}),
+      };
+    }),
     permissionLevel: wire.permission_level ?? null,
     parentSessionId: wire.parent_session_id ?? null,
     subAgentName: wire.sub_agent_name ?? null,
@@ -822,6 +830,7 @@ export async function forkSession(
     title?: string;
     agentId?: string;
     upToResponseId?: string;
+    upToItemId?: string;
     config?: {
       modelOverride?: string;
       reasoningEffort?: string;
@@ -833,11 +842,15 @@ export async function forkSession(
     sideChat?: boolean;
   } = {},
 ): Promise<Session> {
-  const { title, agentId, upToResponseId, config, sandbox, sideChat } = options;
+  const { title, agentId, upToResponseId, upToItemId, config, sandbox, sideChat } = options;
+  if (upToResponseId !== undefined && upToItemId !== undefined) {
+    throw new Error("Choose either a response boundary or an item boundary");
+  }
   const body: {
     title?: string;
     agent_id?: string;
     up_to_response_id?: string;
+    up_to_item_id?: string;
     model_override?: string;
     reasoning_effort?: string;
     terminal_launch_args?: string[];
@@ -860,6 +873,7 @@ export async function forkSession(
   if (upToResponseId !== undefined) {
     body.up_to_response_id = upToResponseId;
   }
+  if (upToItemId !== undefined) body.up_to_item_id = upToItemId;
   if (config?.modelOverride !== undefined) {
     body.model_override = config.modelOverride;
   }

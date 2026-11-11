@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bubble } from "@/lib/renderItems";
 import { useChatStore, type ChatState } from "@/store/chatStore";
 import { ForkDialogContextProvider } from "@/shell/ForkDialogContext";
-import { BubbleView, containsMermaidDiagram } from "./chatBubbleParts";
+import { BubbleView, buildPendingBubbles, containsMermaidDiagram } from "./chatBubbleParts";
+import { MemoryRouter } from "react-router-dom";
+import type { MessageCommunication } from "@/lib/messageCommunication";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const fetchMock = vi.fn();
@@ -786,4 +788,37 @@ describe("AssistantBubble copy", () => {
       "<h2>Findings</h2>\n<p>A <strong>bold</strong> claim and <code>code</code>.</p>",
     );
   });
+});
+
+it("renders a restored pending peer with attribution instead of a human bubble", () => {
+  const communication: MessageCommunication = {
+    kind: "peer",
+    message_id: "peer-id",
+    source_conversation_id: "source",
+    source_title: "Reviewer",
+    destination_conversation_id: "recipient",
+    delivery_state: "unknown",
+    receipt: "accepted",
+  };
+  const [bubble] = buildPendingBubbles(
+    [
+      {
+        tempId: "pending-peer",
+        communication,
+        content: [{ type: "input_text", text: "Review result" }],
+      },
+    ],
+    "human-account",
+  );
+  expect(bubble).toMatchObject({ communication, pending: true });
+  render(
+    <MemoryRouter>
+      <ConversationScopeContext.Provider value="recipient">
+        <BubbleView bubble={bubble!} isLastAssistant={false} />
+      </ConversationScopeContext.Provider>
+    </MemoryRouter>,
+  );
+  expect(screen.getByTestId("peer-message")).toHaveTextContent("From Reviewer");
+  expect(screen.getByTestId("peer-message")).toHaveTextContent("Unconfirmed");
+  expect(screen.queryByText("human-account")).not.toBeInTheDocument();
 });

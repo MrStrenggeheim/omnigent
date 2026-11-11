@@ -283,9 +283,51 @@ describe.each([undefined, "updated_at", "created_at"] as const)(
         expect(params.get("visibility")).toBe(visibility ?? "all");
         expect(params.get("sort_by")).toBe(sortBy ?? "updated_at");
         expect(params.get("order")).toBe("desc");
+        expect(params.has("include_side_chats")).toBe(false);
+        expect(params.has("kind")).toBe(false);
         queryClient.clear();
       },
     );
+  },
+);
+
+it.each(["all", "title", "content"] as const)(
+  "includes authorized branch discovery in %s searches without losing filters or pagination",
+  async (searchScope) => {
+    const children = [
+      conversation({
+        id: "subchat",
+        title: "Source child",
+        labels: { "omnigent.side_chat": "true" },
+        parent_session_id: "parent",
+      }),
+      conversation({ id: "delegate", title: "Delegate source", parent_session_id: "parent" }),
+    ];
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({ data: children, first_id: "subchat", last_id: "delegate", has_more: true }),
+    );
+    const queryClient = new QueryClient();
+    const page = await fetchConversationsPage({
+      searchQuery: "source",
+      searchScope,
+      after: "prior",
+      project: "Project name",
+      visibility: "shared",
+      includeArchived: true,
+      queryClient,
+    });
+    const params = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams;
+    expect(params.get("include_side_chats")).toBe("true");
+    expect(params.get("kind")).toBe("any");
+    expect(params.get("search_query")).toBe("source");
+    expect(params.get("search_scope")).toBe(searchScope === "all" ? null : searchScope);
+    expect(params.get("visibility")).toBe("shared");
+    expect(params.get("project")).toBe("Project name");
+    expect(params.get("after")).toBe("prior");
+    expect(params.get("include_archived")).toBe("true");
+    expect(page.data).toEqual(children);
+    expect(page.has_more).toBe(true);
+    queryClient.clear();
   },
 );
 
@@ -308,6 +350,8 @@ describe("useSessionSearch", () => {
     const params = new URL(url, "http://localhost").searchParams;
     expect(params.get("search_query")).toBe("kestrel");
     expect(params.get("search_scope")).toBe(scope);
+    expect(params.get("include_side_chats")).toBe("true");
+    expect(params.get("kind")).toBe("any");
     expect(params.get("limit")).toBe("8");
   });
 

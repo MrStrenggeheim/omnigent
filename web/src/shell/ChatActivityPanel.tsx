@@ -1,6 +1,9 @@
 import { TooltipButton } from "@/components/ui/tooltip";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDownIcon, ChevronRightIcon, TerminalIcon } from "lucide-react";
+import { ActivityRow } from "@/components/ActivityRow";
+import { PeerMessage } from "@/components/blocks/PeerMessage";
+import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -11,21 +14,24 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useChatActivity, type ChatActivityEntry } from "@/hooks/useChatActivity";
+import { peerActivityKey, usePeerMessages } from "@/hooks/usePeerMessages";
 import { AgentsViewModeControls, SubagentsPanel, type AgentsViewMode } from "./SubagentsPanel";
 
 export interface ChatActivityTerminalTarget {
   sessionId: string;
   terminalId: string;
+  workspaceId?: string;
 }
 
 export interface ChatActivityPanelProps {
   conversationId: string;
   rootSessionId: string;
+  sourceControl?: ReactNode;
   /** Open this exact existing resource, even when it belongs to another chat. */
   onOpenTerminal?: (target: ChatActivityTerminalTarget) => void;
 }
 
-type ActivityFilter = "All" | "Agents" | "Shells";
+type ActivityFilter = "All" | "Agents" | "Messages" | "Shells";
 interface ShellGroup {
   id: string;
   terminal?: ChatActivityEntry;
@@ -124,9 +130,11 @@ export function ChatActivityPanel(props: ChatActivityPanelProps) {
 function ChatActivityContent({
   conversationId,
   rootSessionId,
+  sourceControl,
   onOpenTerminal,
 }: ChatActivityPanelProps) {
   const activity = useChatActivity(conversationId);
+  const peers = usePeerMessages(conversationId);
   const [filter, setFilter] = useState<ActivityFilter>("All");
   const [viewMode, setViewMode] = useState<AgentsViewMode>("list");
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -150,13 +158,13 @@ function ChatActivityContent({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
       <div className="workspace-control-header flex items-center gap-1 border-b px-2">
-        <h2 className="pl-1 font-medium text-ui">Activity</h2>
+        {sourceControl ?? <h2 className="pl-1 font-medium text-ui">Activity</h2>}
         <div
           role="group"
           aria-label="Activity filter"
           className="ml-auto flex items-center gap-0.5"
         >
-          {(["All", "Agents", "Shells"] as const).map((value) => (
+          {(["All", "Agents", "Messages", "Shells"] as const).map((value) => (
             <Button
               key={value}
               variant={filter === value ? "secondary" : "ghost"}
@@ -169,12 +177,12 @@ function ChatActivityContent({
             </Button>
           ))}
         </div>
-        {filter !== "Shells" && (
+        {(filter === "All" || filter === "Agents") && (
           <AgentsViewModeControls viewMode={viewMode} onViewModeChange={setViewMode} />
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <section aria-label="Agents" hidden={filter === "Shells"}>
+        <section aria-label="Agents" hidden={filter !== "All" && filter !== "Agents"}>
           <SubagentsPanel
             conversationId={conversationId}
             rootSessionId={rootSessionId}
@@ -182,7 +190,61 @@ function ChatActivityContent({
             viewMode={viewMode}
           />
         </section>
-        <section aria-label="Shell activity" hidden={filter === "Agents"} className="space-y-2 p-2">
+        <section
+          aria-label="Messages"
+          hidden={filter !== "All" && filter !== "Messages"}
+          className="p-2"
+        >
+          <h3 className="px-2 text-sm font-medium">Messages</h3>
+          {peers.isLoading && (
+            <p className="px-2 text-sm text-muted-foreground">Loading outgoing messages…</p>
+          )}
+          {peers.error && (
+            <div role="status" className="px-2 text-sm text-muted-foreground">
+              <p>
+                Outgoing messages could not be refreshed. Incoming messages reflect loaded
+                conversation history.
+              </p>
+              <Button variant="ghost" size="sm" onClick={() => void peers.refetch()}>
+                Retry messages
+              </Button>
+            </div>
+          )}
+          {peers.messages.length === 0 && !peers.isLoading && (
+            <p className="px-2 text-sm text-muted-foreground">No messages in loaded history.</p>
+          )}
+          <ul>
+            {peers.messages.map((message) => (
+              <li
+                key={peerActivityKey(message)}
+                className="border-b border-border/50 last:border-b-0"
+              >
+                <ConversationScopeContext.Provider value={conversationId}>
+                  <PeerMessage
+                    communication={message.communication}
+                    content={message.content}
+                    itemId={message.id}
+                  />
+                </ConversationScopeContext.Provider>
+              </li>
+            ))}
+          </ul>
+          {peers.hasNextPage && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={peers.isFetchingNextPage}
+              onClick={() => void peers.fetchNextPage()}
+            >
+              Load older outgoing messages
+            </Button>
+          )}
+        </section>
+        <section
+          aria-label="Shell activity"
+          hidden={filter !== "All" && filter !== "Shells"}
+          className="space-y-2 p-2"
+        >
           <h3 className="px-2 text-sm font-medium">Shells</h3>
           {activity.isLoading && (
             <p className="px-2 text-sm text-muted-foreground">Loading shell activity…</p>
@@ -269,68 +331,86 @@ function ShellRow({
   const live = terminal && isLive(terminal);
   const target =
     live && terminal.terminal_id
-      ? { sessionId: terminal.session_id, terminalId: terminal.terminal_id }
+      ? {
+          sessionId: terminal.session_id,
+          terminalId: terminal.terminal_id,
+          ...(terminal.owner_kind === "workspace"
+            ? { workspaceId: terminal.workspace_id ?? terminal.owner_id }
+            : {}),
+        }
       : undefined;
   const openTerminal = target && onOpenTerminal ? () => onOpenTerminal(target) : undefined;
   return (
-    <li className="rounded-md px-2 py-2 hover:bg-muted">
-      <div className="flex min-w-0 items-center gap-2">
-        <TerminalIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-        <TooltipButton
-          type="button"
-          className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline"
-          onClick={openTerminal ?? onInspect}
-        >
-          {groupName(group)}
-        </TooltipButton>
+    <li className="border-b border-border/50 px-2 last:border-b-0">
+      <ActivityRow
+        icon={<TerminalIcon aria-hidden="true" className="size-3.5" />}
+        title={
+          <TooltipButton
+            type="button"
+            className="min-w-0 truncate text-left text-sm hover:underline"
+            onClick={openTerminal ?? onInspect}
+          >
+            {groupName(group)}
+          </TooltipButton>
+        }
+        status={
+          <>
+            {STATE_LABELS[state]}
+            {terminal?.exit_status != null ? ` · exit ${terminal.exit_status}` : ""}
+          </>
+        }
+      >
         <Button
           variant="ghost"
-          size="icon-xs"
+          size="sm"
           aria-label={`Inspect ${groupName(group)}`}
           onClick={onInspect}
         >
-          <ChevronRightIcon className="size-3.5" />
+          Inspect output
         </Button>
-      </div>
-      <p className="pl-6 text-xs text-muted-foreground">
-        {STATE_LABELS[state]}
-        {terminal?.exit_status != null ? ` · exit ${terminal.exit_status}` : ""}
-      </p>
-      {terminal?.owner_kind === "workspace" && (
-        <p className="pl-6 text-xs text-muted-foreground">Workspace terminal · used by this chat</p>
-      )}
-      {terminal?.parent_agent_id && (
-        <p className="truncate pl-6 text-xs text-muted-foreground">
-          Agent: {terminal.parent_agent_id}
-        </p>
-      )}
-      {live && !openTerminal && (
-        <p className="pl-6 text-xs text-muted-foreground">Live terminal unavailable here.</p>
-      )}
-      {group.commands.length > 0 && (
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm">
-              Commands ({group.commands.length})
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <ul className="space-y-1 border-l pl-3">
-              {group.commands.map((command) => (
-                <li key={command.id}>
-                  <TooltipButton
-                    type="button"
-                    className="w-full truncate text-left font-mono text-xs hover:underline"
-                    onClick={onInspect}
-                  >
-                    {command.name}
-                  </TooltipButton>
-                </li>
-              ))}
-            </ul>
-          </CollapsibleContent>
-        </Collapsible>
-      )}
+        {terminal && (
+          <p className="text-xs text-muted-foreground">
+            Source conversation: {terminal.session_id}
+          </p>
+        )}
+        {terminal?.owner_kind === "workspace" && (
+          <p className="pl-6 text-xs text-muted-foreground">
+            Workspace terminal · used by this chat
+          </p>
+        )}
+        {terminal?.parent_agent_id && (
+          <p className="truncate pl-6 text-xs text-muted-foreground">
+            Agent: {terminal.parent_agent_id}
+          </p>
+        )}
+        {live && !openTerminal && (
+          <p className="pl-6 text-xs text-muted-foreground">Live terminal unavailable here.</p>
+        )}
+        {group.commands.length > 0 && (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm">
+                Commands ({group.commands.length})
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ul className="space-y-1 border-l pl-3">
+                {group.commands.map((command) => (
+                  <li key={command.id}>
+                    <TooltipButton
+                      type="button"
+                      className="w-full truncate text-left font-mono text-xs hover:underline"
+                      onClick={onInspect}
+                    >
+                      {command.name}
+                    </TooltipButton>
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </ActivityRow>
     </li>
   );
 }

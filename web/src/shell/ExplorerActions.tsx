@@ -428,6 +428,10 @@ export function ExplorerActionsProvider({
   const destinationFor = (target: ExplorerEntry) =>
     target.directory ? target.path : parentPath(target.path);
   const search = (path: string) => {
+    if (viewer?.openContentSearch) {
+      viewer.openContentSearch(path);
+      return;
+    }
     window.dispatchEvent(
       new CustomEvent("omnigent:open-content-search", {
         detail: {

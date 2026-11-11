@@ -1,5 +1,8 @@
+import { WorkbenchProvider } from "@/workbench/WorkbenchContext";
+import { ScopedChatStoreProvider, useConversationChatStore } from "@/workbench/ScopedChatStore";
+import { conversationRegistry } from "@/store/conversationRegistry";
 import { create } from "zustand";
-import type { SkillSummary, SkillsStatus } from "@/lib/types";
+import type { SkillSummary, SkillsStatus, Session } from "@/lib/types";
 
 import type * as UseWorkspaceChangedFilesModule from "@/hooks/useWorkspaceChangedFiles";
 import type * as UseSessionModule from "@/hooks/useSession";
@@ -137,7 +140,8 @@ vi.mock("@/hooks/useChildSessions", async (importOriginal) => ({
 // HostBadge now renders in the composer's status-line tray and reads the
 // session's host binding via TanStack Query. Stub the hooks so it self-hides
 // (no host bound) without needing a QueryClient provider around these renders.
-const { composerSessionSnapshot } = vi.hoisted(() => ({
+const { composerSessionSnapshot, scopedSessionSnapshots } = vi.hoisted(() => ({
+  scopedSessionSnapshots: new Map<string, Session>(),
   composerSessionSnapshot: {
     hostId: null as string | null,
     workspace: null as string | null,
@@ -147,8 +151,8 @@ const { composerSessionSnapshot } = vi.hoisted(() => ({
 }));
 vi.mock("@/hooks/useSession", async (importOriginal) => ({
   ...(await importOriginal<typeof UseSessionModule>()),
-  useSession: () => ({
-    session: composerSessionSnapshot,
+  useSession: (id: string | null) => ({
+    session: (id && scopedSessionSnapshots.get(id)) || composerSessionSnapshot,
     isLoading: false,
     error: null,
   }),
@@ -7703,4 +7707,356 @@ describe("saved sandbox inference policy", () => {
       expect(useChatStore.getState().setModel).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("full composer in independent conversation panes", () => {
+  const original = useChatStore.getState();
+  let client: QueryClient;
+  beforeEach(() => {
+    client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    clearSessionDrafts();
+    useChatStore.setState({ ...original, conversationId: "unrelated", queuedMessages: [] });
+    for (const id of ["pane-first", "pane-second"]) {
+      conversationRegistry.acquire(id).setState({
+        boundAgentId: `agent-${id}`,
+        sessionHarness: "claude-native",
+        sessionStatus: "idle",
+        isNativeTerminalSession: true,
+        llmModel: "fable",
+        sessionReasoningEffort: "low",
+        claudePermissionMode: "default",
+        codexModelOptions: CLAUDE_MODEL_OPTIONS,
+      });
+      scopedSessionSnapshots.set(id, {
+        id,
+        agentId: `agent-${id}`,
+        agentName: "Claude Code",
+        status: "idle",
+        createdAt: 1,
+        title: id,
+        items: [],
+        parentSessionId: null,
+        subAgentName: null,
+        kind: "default",
+        workspace: `/${id}`,
+        hostId: `host-${id}`,
+        harness: "claude-native",
+        permissionLevel: 4,
+        labels: { "omnigent.wrapper": "claude-code-native-ui" },
+      });
+    }
+  });
+  afterEach(() => {
+    cleanup();
+    client.clear();
+    scopedSessionSnapshots.clear();
+    clearSessionDrafts();
+    vi.restoreAllMocks();
+    useChatStore.setState(original);
+  });
+  function Pane({ id, readOnly = false }: { id: string; readOnly?: boolean }) {
+    const store = useConversationChatStore();
+    return (
+      <div data-testid={id}>
+        <Composer
+          {...composerProps({
+            selectedAgentId: `agent-${id}`,
+            showModels: true,
+            modelPickerKind: "claude",
+            codexModelOptions: CLAUDE_MODEL_OPTIONS,
+            showClaudePermissionMode: true,
+            permissionLevel: readOnly ? 1 : 4,
+            onSend: (text: string, files?: File[], replyDraft?: StoredReplyDraft) => {
+              void store.getState().send(text, `agent-${id}`, files, { replyDraft });
+            },
+            onStop: () => store.getState().stop(),
+          })}
+        />
+      </div>
+    );
+  }
+  function Panes({
+    secondFocused = false,
+    secondVisible = true,
+    secondReadOnly = false,
+  }: {
+    secondFocused?: boolean;
+    secondVisible?: boolean;
+    secondReadOnly?: boolean;
+  }) {
+    return (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ScopedChatStoreProvider conversationId="pane-first" focused={!secondFocused}>
+              <Pane id="pane-first" />
+            </ScopedChatStoreProvider>
+            <ScopedChatStoreProvider
+              conversationId="pane-second"
+              focused={secondFocused}
+              visible={secondVisible}
+            >
+              <Pane id="pane-second" readOnly={secondReadOnly} />
+            </ScopedChatStoreProvider>
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+  const input = (id: string) =>
+    within(screen.getByTestId(id)).getByLabelText("Message the agent") as HTMLTextAreaElement;
+
+  it("restores primary drafts, keeps workspace controls local, and pins a send after global focus changes", async () => {
+    setSessionDraft("pane-first", { text: "Existing primary draft", files: [] });
+    setSessionDraft("pane-second", { text: "Second draft", files: [] });
+    const send = vi.spyOn(useChatStore.getState(), "send").mockResolvedValue(undefined);
+    render(<Panes />);
+    expect(input("pane-first")).toHaveValue("Existing primary draft");
+    expect(input("pane-second")).toHaveValue("Second draft");
+    for (const id of ["pane-first", "pane-second"]) {
+      expect(composerGitStatusArgsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: id, hostId: `host-${id}`, workspace: `/${id}` }),
+      );
+      expect(
+        within(screen.getByTestId(id)).getByTestId("composer-workspace-dir"),
+      ).toHaveAccessibleName(`Change workspace: /${id}`);
+    }
+    fireEvent.change(input("pane-first"), { target: { value: "Keep this first draft" } });
+    fireEvent.change(input("pane-second"), { target: { value: "Send only to second" } });
+    act(() => useChatStore.setState({ conversationId: "elsewhere" }));
+    fireEvent.keyDown(input("pane-second"), { key: "Enter", code: "Enter" });
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        "Send only to second",
+        "agent-pane-second",
+        undefined,
+        expect.objectContaining({ pinnedConversationId: "pane-second" }),
+      ),
+    );
+    expect(input("pane-first")).toHaveValue("Keep this first draft");
+    expect(getSessionDraft("pane-first")?.text).toBe("Keep this first draft");
+    expect(useChatStore.getState().conversationId).toBe("elsewhere");
+  });
+
+  it("targets the second pane for model, effort and permission controls", async () => {
+    const model = vi
+      .spyOn(useChatStore.getState(), "setModel")
+      .mockImplementation(async (value, _options, id) => {
+        conversationRegistry.peek(id!)!.setState({ sessionModelOverride: value });
+      });
+    const effort = vi
+      .spyOn(useChatStore.getState(), "setEffort")
+      .mockImplementation(async (value, id) => {
+        conversationRegistry.peek(id!)!.setState({ sessionReasoningEffort: value });
+      });
+    const permissions = vi
+      .spyOn(useChatStore.getState(), "setClaudePermissionMode")
+      .mockImplementation(async (value, id) => {
+        conversationRegistry.peek(id!)!.setState({ claudePermissionMode: value });
+      });
+    render(<Panes secondFocused />);
+    fireEvent.keyDown(
+      within(screen.getByTestId("pane-second")).getByTestId("composer-config-gear"),
+      { key: "ArrowDown" },
+    );
+    fireEvent.click(screen.getByTestId("composer-agent-edit"));
+    fireEvent.click(await screen.findByTestId("composer-agent-model-opus"));
+    await waitFor(() =>
+      expect(model).toHaveBeenCalledWith("opus", { expectConfirmation: true }, "pane-second"),
+    );
+    fireEvent.click(screen.getByTestId("composer-agent-effort-high"));
+    await waitFor(() => expect(effort).toHaveBeenCalledWith("high", "pane-second"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    fireEvent.keyDown(
+      within(screen.getByTestId("pane-second")).getByTestId("composer-permission-chip"),
+      { key: "ArrowDown" },
+    );
+    fireEvent.click(await screen.findByTestId("composer-permission-option-acceptEdits"));
+    await waitFor(() => expect(permissions).toHaveBeenCalledWith("acceptEdits", "pane-second"));
+    expect(conversationRegistry.peek("pane-first")?.getState()).toMatchObject({
+      sessionModelOverride: null,
+      sessionReasoningEffort: "low",
+      claudePermissionMode: "default",
+    });
+  });
+
+  it("gives global focus and model shortcuts only to a visible focused pane", async () => {
+    const { rerender } = render(<Panes />);
+    expect(document.activeElement).toBe(input("pane-first"));
+    input("pane-second").focus();
+    fireEvent.keyDown(window, { code: "KeyL", ctrlKey: true, shiftKey: true });
+    expect(document.activeElement).toBe(input("pane-first"));
+    rerender(<Panes secondFocused secondVisible={false} />);
+    input("pane-first").blur();
+    fireEvent.keyDown(window, { code: "KeyL", ctrlKey: true, shiftKey: true });
+    expect(document.activeElement).not.toBe(input("pane-second"));
+    fireEvent.keyDown(window, { code: "KeyM", ctrlKey: true, shiftKey: true });
+    expect(screen.queryByTestId("composer-agent-menu")).not.toBeInTheDocument();
+  });
+});
+
+describe("Workbench durable composer subchats", () => {
+  const boundary: UserMessageBlock = {
+    type: "user_message",
+    ctx: {
+      agent: null,
+      depth: 0,
+      turn: 0,
+      timestamp: 0,
+      responseId: "",
+      itemId: "captured-source-item",
+    },
+    content: [{ type: "input_text", text: "Earlier source message" }],
+  };
+  beforeEach(() => {
+    clearSessionDrafts();
+    localStorage.clear();
+    setComposerState({
+      conversationId: "durable-source",
+      blocks: [boundary],
+      sessionHarness: "codex-native",
+      skills: [],
+      failedSendDraft: null,
+      restoredSendDraft: null,
+      pendingUserMessages: [],
+      queuedMessages: [],
+      pendingComposerAttachments: [],
+      sideChatToOpen: null,
+      sideChatDrafts: {},
+      sideChatComposers: {},
+      sideChatSelectionTarget: null,
+      btwSidechat: null,
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    clearSessionDrafts();
+    vi.restoreAllMocks();
+  });
+  function response(id = "durable-child") {
+    return new Response(
+      JSON.stringify({
+        id,
+        agent_id: "agent",
+        created_at: 0,
+        status: "idle",
+        title: "Subchat",
+        labels: {},
+        items: [],
+      }),
+    );
+  }
+  function workbenchComposer(
+    openConversation: (id: string, options?: { beside?: boolean }) => void,
+    props = composerProps(),
+    ref = createRef<ComponentRef<typeof Composer>>(),
+  ) {
+    const actions = {
+      openConversation,
+      openView: vi.fn(),
+      focusedConversationId: "unrelated-focused-chat",
+    };
+    return render(
+      <WorkbenchProvider value={actions}>
+        <Composer {...props} ref={ref} />
+      </WorkbenchProvider>,
+    );
+  }
+  it("routes native /side to one immediate durable fork without sending or creating an invisible rail tab", async () => {
+    let finish!: (value: Response) => void;
+    const fetch = vi.spyOn(identity, "authenticatedFetch").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const props = composerProps();
+    const open = vi.fn();
+    workbenchComposer(open, props);
+    fireEvent.change(textarea(), { target: { value: "/side investigate this" } });
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/v1/sessions/durable-source/fork");
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
+      title: "Subchat",
+      up_to_item_id: "captured-source-item",
+    });
+    expect(textarea()).toHaveValue("/side investigate this");
+    expect(props.onSend).not.toHaveBeenCalled();
+    await act(async () => finish(response()));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("durable-child", { beside: true }));
+    expect(getSessionDraft("durable-child")?.text).toBe("investigate this");
+    expect(textarea()).toHaveValue("");
+    expect(useChatStore.getState().sideChatToOpen).toBeNull();
+    expect(useChatStore.getState().sideChatDrafts).toEqual({});
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
+  it("keeps the source draft on failure, and preserves edits made while a later fork is pending", async () => {
+    const errorToast = vi.spyOn(toast, "error");
+    const fetch = vi
+      .spyOn(identity, "authenticatedFetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "fork unavailable" }), { status: 409 }),
+      );
+    const open = vi.fn();
+    workbenchComposer(open);
+    fireEvent.change(textarea(), { target: { value: "/side keep this question" } });
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    await waitFor(() => expect(errorToast).toHaveBeenCalled());
+    expect(textarea()).toHaveValue("/side keep this question");
+    expect(getSessionDraft("durable-source")?.text).toBe("/side keep this question");
+    expect(open).not.toHaveBeenCalled();
+    let finish!: (value: Response) => void;
+    fetch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    fireEvent.change(textarea(), { target: { value: "new source draft" } });
+    await act(async () => finish(response()));
+    expect(getSessionDraft("durable-child")?.text).toBe("keep this question");
+    expect(textarea()).toHaveValue("new source draft");
+  });
+  it("opens New subchat from Add immediately and seeds the existing draft without sending", async () => {
+    const fetch = vi
+      .spyOn(identity, "authenticatedFetch")
+      .mockResolvedValue(response("menu-child"));
+    const open = vi.fn();
+    const props = composerProps();
+    workbenchComposer(open, props);
+    fireEvent.change(textarea(), { target: { value: "unsent source draft" } });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Add" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /New subchat/ }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("menu-child", { beside: true }));
+    expect(fetch.mock.calls[0][0]).toBe("/v1/sessions/durable-source/fork");
+    expect(getSessionDraft("menu-child")?.text).toBe("unsent source draft");
+    expect(textarea()).toHaveValue("unsent source draft");
+    expect(useChatStore.getState().sideChatToOpen).toBeNull();
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
+  it("selection actions create the snapshot immediately and seed an unsent quote", async () => {
+    const fetch = vi
+      .spyOn(identity, "authenticatedFetch")
+      .mockResolvedValue(response("quote-child"));
+    const open = vi.fn();
+    const props = composerProps();
+    const ref = createRef<ComponentRef<typeof Composer>>();
+    workbenchComposer(open, props, ref);
+    act(() => ref.current?.startSideChat("quoted selection"));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(open).toHaveBeenCalledWith("quote-child", { beside: true }));
+    expect(getSessionDraft("quote-child")?.replyDraft?.quotes).toEqual([
+      { before: "", text: "quoted selection" },
+    ]);
+    expect(useChatStore.getState().sideChatToOpen).toBeNull();
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
 });

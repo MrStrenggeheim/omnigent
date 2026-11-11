@@ -1381,23 +1381,17 @@ describe("WorkspacePanel mobile side chats", () => {
     });
 
   it.each([false, true])(
-    "keeps a side chat, draft, and queue when close fails (mobile=%s)",
+    "detaches a side chat without stopping or clearing its draft/queue (mobile=%s)",
     async (mobile) => {
       isMobileMock.mockReturnValue(mobile);
       openTabs();
+      const stop = vi.spyOn(sessionsApi, "stopSession");
       const followUp = {
         queueId: "q_side",
         text: "Queued follow-up",
         conversationId: "conv_side_b",
       };
       const otherChat = { queueId: "q_other", text: "Other chat", conversationId: "conv_side_a" };
-      const sideQueue = () =>
-        useChatStore.getState().queuedMessages.filter((m) => m.conversationId === "conv_side_b");
-      const queuedAtStop: unknown[] = [];
-      const stop = vi.spyOn(sessionsApi, "stopSession").mockImplementationOnce(async () => {
-        queuedAtStop.push(sideQueue());
-        throw new Error("offline");
-      });
       useChatStore.setState({
         sideChatDrafts: { conv_side_b: "Keep this question" },
         queuedMessages: [followUp, otherChat],
@@ -1407,29 +1401,13 @@ describe("WorkspacePanel mobile side chats", () => {
         ? screen.getByTestId("side-chats-panel-drawer")
         : screen.getByRole("complementary", { name: "Workspace" });
       fireEvent.click(within(surface).getByRole("button", { name: "Close Side chat 2" }));
-
-      await waitFor(() =>
-        expect(toast.error).toHaveBeenCalledWith("Couldn't close side chat. Try again."),
-      );
-      expect(screen.getByTestId("side-chat-pane-stub")).toHaveTextContent("conv_side_b");
-      expect(useChatStore.getState().sideChatDrafts.conv_side_b).toBe("Keep this question");
-      expect(sideQueue()).toEqual([followUp]);
-
-      const queuedDuringStop = { ...followUp, queueId: "q_late", text: "Queued while closing" };
-      stop.mockImplementationOnce(async () => {
-        queuedAtStop.push(sideQueue());
-        useChatStore.setState((s) => ({ queuedMessages: [...s.queuedMessages, queuedDuringStop] }));
-        return { queued: false };
-      });
-      fireEvent.click(within(surface).getByRole("button", { name: "Close Side chat 2" }));
       await waitFor(() =>
         expect(screen.getByTestId("side-chat-pane-stub")).toHaveTextContent("conv_side_a"),
       );
-      expect(stop.mock.calls).toEqual([["conv_side_b"], ["conv_side_b"]]);
-      expect(queuedAtStop).toEqual([[], []]);
-      expect(useChatStore.getState().sideChatDrafts.conv_side_b).toBeUndefined();
-      expect(useChatStore.getState().queuedMessages).toEqual([otherChat]);
-      useChatStore.setState({ queuedMessages: [] });
+      expect(stop).not.toHaveBeenCalled();
+      expect(useChatStore.getState().sideChatDrafts.conv_side_b).toBe("Keep this question");
+      expect(useChatStore.getState().queuedMessages).toEqual([followUp, otherChat]);
+      expect(toast.error).not.toHaveBeenCalled();
       stop.mockRestore();
     },
   );

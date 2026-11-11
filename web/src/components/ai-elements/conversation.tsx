@@ -21,17 +21,22 @@ export const ConversationScrollLockContext = createContext<ConversationScrollLoc
 // Module handle so non-React scroll helpers (deep links, activity rail,
 // Cmd+Alt nav) can release the bottom-lock without Conversation context.
 let activeScrollLock: ConversationScrollLock | null = null;
+const scrollLocks = new Map<Element, ConversationScrollLock>();
 
 /**
  * Release StickToBottom's bottom-lock so a programmatic scroll is not
  * overridden by the next content-resize ``scrollToBottom``. Same recipe as
  * JumpToTopButton / the "Worked for" fold snap. No-op outside a conversation.
  */
-export function releaseConversationScrollLock(): void {
-  if (!activeScrollLock) return;
-  activeScrollLock.stopScroll();
-  activeScrollLock.state.isAtBottom = false;
-  activeScrollLock.state.escapedFromLock = true;
+export function releaseConversationScrollLock(root?: ParentNode | null): void {
+  const lock =
+    root instanceof Node
+      ? [...scrollLocks].find(([element]) => root === element || root.contains(element))?.[1]
+      : activeScrollLock;
+  if (!lock) return;
+  lock.stopScroll();
+  lock.state.isAtBottom = false;
+  lock.state.escapedFromLock = true;
 }
 
 /**
@@ -45,7 +50,7 @@ export function releaseConversationScrollLock(): void {
  */
 const ScrollLockBridge = ({ children }: { children: ReactNode }) => {
   const ctx = useStickToBottomContext() as ReturnType<typeof useStickToBottomContext> &
-    ConversationScrollLock;
+    ConversationScrollLock & { scrollRef: { current: HTMLElement | null } };
   const value = useMemo(
     () => ({ stopScroll: ctx.stopScroll, state: ctx.state }),
     [ctx.stopScroll, ctx.state],
@@ -54,10 +59,13 @@ const ScrollLockBridge = ({ children }: { children: ReactNode }) => {
   // (message deep links) try to scroll away from the bottom.
   useLayoutEffect(() => {
     activeScrollLock = value;
+    const element = ctx.scrollRef?.current;
+    if (element) scrollLocks.set(element, value);
     return () => {
       if (activeScrollLock === value) activeScrollLock = null;
+      if (element && scrollLocks.get(element) === value) scrollLocks.delete(element);
     };
-  }, [value]);
+  }, [value, ctx.scrollRef]);
   return (
     <ConversationScrollLockContext.Provider value={value}>
       {children}

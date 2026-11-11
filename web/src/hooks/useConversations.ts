@@ -548,7 +548,12 @@ export async function fetchConversationsPage({
     visibility: visibility ?? "all",
   });
   if (after) params.set("after", after);
-  if (searchQuery) params.set("search_query", searchQuery);
+  if (searchQuery) {
+    params.set("search_query", searchQuery);
+    // Discovery includes authorized branches; idle sidebar lists keep their default scope.
+    params.set("include_side_chats", "true");
+    params.set("kind", "any");
+  }
   if (searchQuery && searchScope !== "all") params.set("search_scope", searchScope);
   // Only request archived rows when the toggle is on, so the default
   // sidebar never pays to fetch them. The server excludes archived

@@ -297,6 +297,9 @@ function LocationDisplay() {
 }
 
 interface RenderProps {
+  commentId?: string;
+  initialDiff?: boolean;
+  linkRequestId?: string;
   workspaceId?: string;
   comparisonScope?: "files" | "changes";
   recipientValid?: boolean;
@@ -331,6 +334,9 @@ interface RenderProps {
  * the current params after state changes.
  */
 function viewerTree({
+  commentId,
+  initialDiff,
+  linkRequestId,
   workspaceId,
   comparisonScope,
   recipientValid,
@@ -355,6 +361,9 @@ function viewerTree({
       <MemoryRouter initialEntries={[url]}>
         <LocationDisplay />
         <FileViewer
+          commentId={commentId}
+          initialDiff={initialDiff}
+          linkRequestId={linkRequestId}
           syncUrl={syncUrl}
           frameless={frameless}
           mobileOverlay={mobileOverlay}
@@ -3158,4 +3167,24 @@ it("copies the active editor buffer through the three-dot menu", async () => {
   fireEvent.click(screen.getByRole("menuitem", { name: "Copy file content" }));
   await waitFor(() => expect(copyText).toHaveBeenCalledWith("current buffer for file1.py"));
   expect(toast.success).toHaveBeenCalledWith("File content copied");
+});
+
+it("applies captured comment/diff links without reading another pane's URL", async () => {
+  useCommentsMock.mockReturnValue(makeCommentsQuery([makeComment("captured")]));
+  const view = renderViewer({
+    open: true,
+    syncUrl: false,
+    commentId: "captured",
+    initialDiff: true,
+    linkRequestId: "link-1",
+    initialSearch: "comment=unrelated&file=other.py&diff=0",
+  });
+  expect(await screen.findByTestId("diff-viewer")).toBeInTheDocument();
+  expect(screen.getByTestId("comments-panel")).toBeInTheDocument();
+  expect(getSeenCommentIds().has("captured")).toBe(true);
+  expect(screen.getByTestId("url-params")).toHaveTextContent("comment=unrelated");
+  view.rerender(
+    viewerTree({ open: true, syncUrl: false, initialDiff: false, linkRequestId: "link-2" }),
+  );
+  expect(screen.queryByTestId("diff-viewer")).not.toBeInTheDocument();
 });

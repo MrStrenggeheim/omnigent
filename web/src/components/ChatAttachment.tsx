@@ -7,6 +7,7 @@ import {
   useEffect,
   useState,
   type ComponentPropsWithoutRef,
+  type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon, MoreHorizontalIcon, ScanEyeIcon } from "lucide-react";
@@ -100,12 +101,15 @@ export function ChatAttachment({
   reference,
   itemId,
   compact = false,
+  unresolvedFallback,
 }: {
   sessionId: string | null;
   attachment?: AttachmentContent;
   reference?: string;
   itemId?: string | null;
   compact?: boolean;
+  /** Implicit prose stays unchanged until its captured reference resolves to a file. */
+  unresolvedFallback?: ReactNode;
 }) {
   const attachment = normalizeAttachmentContent(rawAttachment);
   const [open, setOpen] = useState(false);
@@ -148,7 +152,8 @@ export function ChatAttachment({
   const content = useQuery({
     queryKey: ["chat-attachment-bytes", sessionId, fileId ?? itemId, reference, inline],
     enabled:
-      ((!!url && !!sessionId) || !!inline?.startsWith("data:")) && ((!compact && image) || open),
+      ((!!url && !!sessionId) || !!inline?.startsWith("data:")) &&
+      ((!compact && image) || open || unresolvedFallback !== undefined),
     retry: false,
     gcTime: 30_000,
     queryFn: async ({ signal }) => {
@@ -198,6 +203,7 @@ export function ChatAttachment({
     metadata.data || content.data
       ? formatBytes(content.data?.size ?? metadata.data!.metadata.bytes)
       : null;
+  if (unresolvedFallback !== undefined && (!content.data || error)) return unresolvedFallback;
   return (
     <span
       className={

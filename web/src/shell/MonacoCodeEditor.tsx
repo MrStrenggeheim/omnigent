@@ -1,3 +1,5 @@
+import { panelFolderKey, useResourceViewId } from "@/lib/panelFolder";
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { useFileContentReader } from "./FileContentReader";
 // Monaco-based source viewer/editor, including large Markdown files.
@@ -322,8 +324,13 @@ function MonacoCodeEditorInner({
   // onDidScrollChange subscription always writes the current file's key.
   const positionRef = useRef(position);
   positionRef.current = position;
+  const viewId = useResourceViewId();
+  const scrollWorkspace = useWorkbenchWorkspace();
+  const scrollOwner = viewId
+    ? panelFolderKey(scrollWorkspace?.id ?? conversationId, viewId)
+    : conversationId;
   const scrollKeyRef = useRef("");
-  scrollKeyRef.current = `viewer:${conversationId}:${path}`;
+  scrollKeyRef.current = `viewer:${scrollOwner}:${path}`;
 
   const handleMount: OnMount = useCallback(
     (editor, monaco) => {

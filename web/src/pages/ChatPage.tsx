@@ -1,3 +1,14 @@
+import { useWorkbench } from "@/workbench/WorkbenchContext";
+import { openDurableSubchat, subchatBoundary } from "@/workbench/durableSubchat";
+import { ConversationActivityDock } from "@/components/composer/ConversationActivityDock";
+import { useScopedInitialPrompt } from "@/workbench/useScopedInitialPrompt";
+import {
+  useConversationChatStore,
+  useConversationChatFocused,
+  useConversationChatVisible,
+  useIsScopedConversation,
+} from "@/workbench/ScopedChatStore";
+import { registerQuoteDestination, appendDraftText } from "@/lib/quoteDraftDestinations";
 import { FILE_ANNOTATION_EVENT, type FileAnnotation } from "@/shell/FileSelectionMenu";
 import { WorkspaceSwitchControl } from "@/components/composer/WorkspaceSwitchControl";
 import { SelectionPopup } from "@/components/chat/SelectionPopup";
@@ -98,7 +109,6 @@ import {
   isStaleTempConvId,
   isTempConvId,
   type PendingInitialPrompt,
-  useChatStore,
 } from "@/store/chatStore";
 import {
   claudeNativeSubagentLabel,
@@ -131,7 +141,12 @@ import {
   rankMentionEntries,
 } from "@/lib/composerMentions";
 import { useMentionBrowser } from "@/hooks/useMentionBrowser";
-import { getSessionDraft, promoteSessionDraft, setSessionDraft } from "@/lib/sessionDrafts";
+import {
+  getSessionDraft,
+  promoteSessionDraft,
+  setSessionDraft,
+  type SessionDraft,
+} from "@/lib/sessionDrafts";
 import {
   appendReplyQuote,
   restoreReplyDraft,
@@ -221,7 +236,7 @@ import {
   skillMenuDescription,
   SlashCommandMenu,
 } from "@/components/SlashCommandMenu";
-import { FileMentionMenu } from "@/components/FileMentionMenu";
+import { ComposerMentionMenu } from "@/components/composer/ComposerMentionMenu";
 import { FileDropOverlay } from "@/components/FileDropOverlay";
 import { FilePathAwareMessageResponse } from "@/components/blocks/ChatMarkdown";
 import {
@@ -397,8 +412,15 @@ function truncateTitle(raw: string, max = 60): string {
  * and triggers `switchTo` when the URL changes. The store owns the
  * items fetch (no useConversationItems here).
  */
-export function ChatPage() {
-  const { conversationId: urlConvId } = useParams<{ conversationId: string }>();
+export function ChatPage({
+  conversationId: scopedConversationId,
+  visible = true,
+}: { conversationId?: string; visible?: boolean } = {}) {
+  const useChatStore = useConversationChatStore();
+  const scoped = useIsScopedConversation();
+  const focused = useConversationChatFocused();
+  const { conversationId: routeConvId } = useParams<{ conversationId: string }>();
+  const urlConvId = scopedConversationId ?? routeConvId;
   // The id for every server-scoped fetch/hook — `undefined` while the URL holds
   // a client-only temp id, so none of them hit `/v1/sessions/<temp>/*` before
   // the session exists. `switchTo` still gets the raw `urlConvId`.
@@ -456,7 +478,7 @@ export function ChatPage() {
   // user is currently viewing. Re-fires when conversations refresh
   // (every 4 s) so messages arriving while viewing are marked seen.
   useMarkConversationSeen(
-    sessionConvId,
+    visible ? sessionConvId : undefined,
     conversations?.find((c) => c.id === sessionConvId)?.updated_at,
   );
 
@@ -484,9 +506,9 @@ export function ChatPage() {
       return;
     }
     void useChatStore.getState().switchTo(urlConvId ?? null);
-  }, [urlConvId, navigate, pathname, search, rebasePath]);
+  }, [urlConvId, navigate, pathname, search, rebasePath, useChatStore]);
 
-  useConversationRedirect(urlConvId);
+  useConversationRedirect(urlConvId, !scoped || focused);
 
   // Pull the first message the landing composer stashed for this conversation,
   // if any. Read-once (consume deletes), so a refresh/back can't replay
@@ -499,6 +521,7 @@ export function ChatPage() {
   // null when no prompt is pending clears a prior conversation's value
   // when ChatPage stays mounted across `/c/:a` → `/c/:b`.
   useEffect(() => {
+    if (scoped) return;
     if (!urlConvId) {
       setInitialPrompt(null);
       return;
@@ -508,7 +531,7 @@ export function ChatPage() {
       cached?.conversationId === urlConvId ? cached.prompt : consumePendingInitialPrompt(urlConvId);
     consumedInitialPromptRef.current = { conversationId: urlConvId, prompt };
     setInitialPrompt(prompt === null ? null : { conversationId: urlConvId, prompt });
-  }, [urlConvId]);
+  }, [urlConvId, scoped]);
 
   // Subscribe to the bits of store state we render. Each is a
   // primitive selector so re-renders fire only when that specific
@@ -558,6 +581,7 @@ export function ChatPage() {
   // so the pick survives sidebar clicks; resets on full page reload.
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const agentId = selectedAgentId ?? agents?.[0]?.id ?? null;
+  useScopedInitialPrompt(urlConvId ?? "", scoped ? agentId : null);
 
   // Sync the picker to the conversation's bound agent when switching.
   // `boundAgentId` is `null` on `/`, during the snapshot fetch, and
@@ -597,6 +621,7 @@ export function ChatPage() {
   // sends once — while still resetting for the next conversation, since
   // ChatPage stays mounted across `/c/:a` → `/c/:b`.
   useEffect(() => {
+    if (scoped) return;
     if (
       !shouldSendInitialPrompt({
         initialPrompt: initialPrompt?.prompt.text ?? null,
@@ -617,7 +642,7 @@ export function ChatPage() {
     initialPromptSentForConvRef.current = urlConvId;
     const { send, sendSlashCommand } = useChatStore.getState();
     dispatchInitialPrompt(initialPrompt.prompt, agentId, send, sendSlashCommand);
-  }, [initialPrompt, urlConvId, loadingConversation, agentId]);
+  }, [initialPrompt, urlConvId, loadingConversation, agentId, scoped, useChatStore]);
 
   // Open state owned here (not inside MainAgentSurface) so the dialog
   // survives a re-mount of the chat surface. Declared BEFORE the
@@ -653,7 +678,7 @@ export function ChatPage() {
     const { text, files, replyDraft } = pendingResumePrompt;
     setPendingResumePrompt(null);
     void useChatStore.getState().send(text, agentId, files, { replyDraft });
-  }, [pendingResumePrompt, runnerOnline, agentId, urlConvId]);
+  }, [pendingResumePrompt, runnerOnline, agentId, urlConvId, useChatStore]);
 
   // Pending elicitation = parked on user input — suppress shimmer. Must
   // sit before the early-return guards below (Rules of Hooks). Read through
@@ -848,10 +873,11 @@ export function ChatPage() {
       ? (boundAgentBySession?.name ?? boundAgentName ?? subAgentLabel ?? null)
       : null;
   useEffect(() => {
+    if (scoped) return;
     const fallback = urlConvId ? UNTITLED_CONVERSATION_LABEL : appName;
     const base = truncateTitle(activeConv?.title ?? subAgentTabTitle ?? fallback);
     document.title = showsWorking ? `● ${base}` : base;
-  }, [activeConv?.title, subAgentTabTitle, showsWorking, urlConvId, appName]);
+  }, [activeConv?.title, subAgentTabTitle, showsWorking, urlConvId, appName, scoped]);
 
   const sessionModelOptions = useChatStore((s) => s.codexModelOptions);
   const llmModel = useChatStore((s) => s.llmModel);
@@ -1015,6 +1041,7 @@ export function ChatPage() {
       isUnreachable,
       reconnect,
       navigate,
+      useChatStore,
     ],
   );
 
@@ -1046,12 +1073,13 @@ export function ChatPage() {
       isUnreachable,
       reconnect,
       navigate,
+      useChatStore,
     ],
   );
 
   const onStop = useCallback(() => {
     useChatStore.getState().stop();
-  }, []);
+  }, [useChatStore]);
 
   // A client-only conversation has no server session to POST to yet. Keep the
   // composer editable so the user can draft the next message during creation,
@@ -1553,6 +1581,10 @@ const MainAgentSurface = memo(function MainAgentSurfaceImpl({
   subAgentLabel,
   wrapperLabel,
 }: MainAgentSurfaceProps) {
+  const useChatStore = useConversationChatStore();
+  const scoped = useIsScopedConversation();
+  const visible = useConversationChatVisible();
+  const focused = useConversationChatFocused();
   const terminalFirst = useTerminalFirst();
   // Streaming-hot subscriptions and the bubble pipeline live in <Transcript>.
   // The turn rail is a hover minimap with no mobile affordance (CSS-hidden
@@ -1616,16 +1648,16 @@ const MainAgentSurface = memo(function MainAgentSurfaceImpl({
   // Drives both native overlays so neither floats over an opened drawer.
   const surfaceFrontmost = useSurfaceFrontmost(
     showTerminal ? terminalSurfaceEl : containerEl,
-    !!conversationId,
+    !!conversationId && visible,
   );
   useEffect(() => {
-    if (!isIOSShell()) return;
+    if (!isIOSShell() || !focused) return;
     setNativeServerSwitcherHidden(serverSwitcherHiddenForSurface(surfaceFrontmost));
-  }, [surfaceFrontmost]);
+  }, [surfaceFrontmost, focused]);
   useEffect(() => {
-    if (!isIOSShell()) return;
+    if (!isIOSShell() || !focused) return;
     return () => setNativeServerSwitcherHidden(true);
-  }, []);
+  }, [focused]);
   // The conversation's scroll container + the StickToBottom controls needed to
   // override its bottom-lock, lifted out of the context by
   // ConversationScrollRefBridge so the pinned-but-unmasked JumpToTopButton can
@@ -1788,7 +1820,7 @@ const MainAgentSurface = memo(function MainAgentSurfaceImpl({
         <MainTerminalView
           conversationId={entry.conversationId}
           initialTerminalKey={isActive ? terminalFirst?.terminalViewKey : null}
-          visible={isShown}
+          visible={isShown && visible}
           runnerOnline={isActive ? runnerOnline : undefined}
           lastTaskError={isActive ? lastTaskError : undefined}
           onResume={isActive ? handleTerminalResume : undefined}
@@ -1847,6 +1879,7 @@ const MainAgentSurface = memo(function MainAgentSurfaceImpl({
             />
           )}
 
+          {scoped && conversationId && <ConversationActivityDock conversationId={conversationId} />}
           <Composer
             ref={composerRef}
             disabled={disabled}
@@ -2108,7 +2141,7 @@ export function buildSlashCommandMap(
     if (name === "/clear" && !showClear) continue;
     // /btw is a Claude Code CLI built-in — only offer it on claude-native.
     if (name === "/btw" && !showBtw) continue;
-    // /side is a Codex CLI built-in (ephemeral fork) — only offer it on codex-native.
+    // Expose /side only when this session supports creating a child.
     if (name === "/side" && !showSide) continue;
     m[name] = name === "/model" && supportsModelReset ? `${description} | default` : description;
   }
@@ -2207,6 +2240,7 @@ export function composerHarnessLabel(
  * Session cost lives in the header agent-info popover, not here.
  */
 function ComposerStatusLine() {
+  const useChatStore = useConversationChatStore();
   const conversationId = useChatStore((s) => s.conversationId);
   const codexPlanMode = useChatStore((s) => s.codexPlanMode);
 
@@ -2381,6 +2415,20 @@ function ComposerImpl(
   }: ComposerProps,
   ref: ForwardedRef<ComposerHandle>,
 ) {
+  const useChatStore = useConversationChatStore();
+  const scoped = useIsScopedConversation();
+  const workbench = useWorkbench();
+  const [subchatBusy, setSubchatBusy] = useState(false);
+  const composerMounted = useRef(true);
+  useEffect(() => {
+    composerMounted.current = true;
+    return () => {
+      composerMounted.current = false;
+    };
+  }, []);
+  const focused = useConversationChatFocused();
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
   const workspaceSwitching = useChatStore((s) => s.workspaceSwitching);
   const disabled = baseDisabled || workspaceSwitching;
   const {
@@ -2437,7 +2485,7 @@ function ComposerImpl(
   // disabled (disabled inputs emit no keydown), so close the overlay from a
   // document-level Escape while it's open — matching native Claude Code.
   useEffect(() => {
-    if (!composerLockedByBtw) return;
+    if (!composerLockedByBtw || !focused) return;
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -2446,7 +2494,7 @@ function ComposerImpl(
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [composerLockedByBtw, dismissBtwSidechat]);
+  }, [composerLockedByBtw, dismissBtwSidechat, focused]);
   // The conversation whose draft the composer's value/files currently hold.
   // Trails `conversationId` by one commit across a session switch; see the
   // draft-restore effect.
@@ -2604,7 +2652,12 @@ function ComposerImpl(
   // exists and the gear isn't disabled (not read-only, unreachable, or busy).
   useModelPickerHotkey(
     () => setPickerOpenNonce((n) => n + 1),
-    showModels && codexModelOptions.length > 0 && !isReadOnly && !unreachable && !configBusy,
+    focused &&
+      showModels &&
+      codexModelOptions.length > 0 &&
+      !isReadOnly &&
+      !unreachable &&
+      !configBusy,
   );
   const hydratedComposerContext = useMemo(
     () => composerContextFromLabels(composerSession?.labels),
@@ -2760,8 +2813,9 @@ function ComposerImpl(
   // Ctrl+Shift+L focuses the composer input from anywhere in the session view.
   // No-op on mobile, where programmatic focus would pop the software keyboard.
   useFocusComposerHotkey(() => {
-    if (!isMobileRef.current) textareaRef.current?.focus({ preventScroll: true });
-  });
+    if (focusedRef.current && !isMobileRef.current)
+      textareaRef.current?.focus({ preventScroll: true });
+  }, focused);
 
   // Attachments — same hook as the landing composer; the live composer's
   // own side effects (dirty tracking, desktop refocus) stay in the
@@ -2782,7 +2836,7 @@ function ComposerImpl(
       dirtyRef.current = true;
       // Return focus to the composer so the user can keep typing right
       // after attaching (the file picker / paperclip button steals it).
-      if (!isMobileRef.current) textareaRef.current?.focus();
+      if (focusedRef.current && !isMobileRef.current) textareaRef.current?.focus();
     },
     onRemoved: () => {
       dirtyRef.current = true;
@@ -2816,7 +2870,7 @@ function ComposerImpl(
     // this to settle rather than mistaking that for "the user is typing".
     setSettledConversationId(conversationId ?? null);
     draftConversationIdRef.current = conversationId ?? null;
-    if (!isMobileRef.current) textareaRef.current?.focus();
+    if (focusedRef.current && !isMobileRef.current) textareaRef.current?.focus();
 
     return () => {
       if (!conversationId || !dirtyRef.current) return;
@@ -2883,25 +2937,10 @@ function ComposerImpl(
   // vendor TUI (see submit) — the forwarder relays its answer to the overlay.
   const showBtw = sessionHarness === "claude-native";
   const skillPrefix = skillInvocationPrefix(sessionHarness);
-  // /side is a Codex Code CLI built-in (ephemeral fork side chat), so offer it
-  // only on codex-native sessions. Selected/typed, it sends as plaintext to the
-  // vendor turn path (see submit); the runner opens the fork as a sub-agent chat.
+  // Workbench /side creates a durable fork; legacy Codex keeps its native route.
   const showSide = supportsSideChat(sessionHarness);
-  const slashCommands = useMemo(
-    () =>
-      buildSlashCommandMap(
-        skills,
-        showEffort,
-        showModel,
-        showCompact,
-        showBtw,
-        showSide,
-        skillPrefix,
-        supportsModelReset,
-        composerSessionId !== null,
-        showClear,
-      ),
-    [
+  const slashCommands = useMemo(() => {
+    const commands = buildSlashCommandMap(
       skills,
       showEffort,
       showModel,
@@ -2910,10 +2949,24 @@ function ComposerImpl(
       showSide,
       skillPrefix,
       supportsModelReset,
-      composerSessionId,
+      composerSessionId !== null,
       showClear,
-    ],
-  );
+    );
+    if (workbench && commands["/side"]) commands["/side"] = "Create a subchat with an unsent draft";
+    return commands;
+  }, [
+    skills,
+    showEffort,
+    showModel,
+    showCompact,
+    showBtw,
+    showSide,
+    skillPrefix,
+    supportsModelReset,
+    composerSessionId,
+    showClear,
+    workbench,
+  ]);
   const slashCommandNames = useMemo(() => Object.keys(slashCommands), [slashCommands]);
   // Skills always need an optional argument fill-in so the user can
   // type extra context after the name; built-in commands keep their
@@ -2989,11 +3042,13 @@ function ComposerImpl(
     mentionedItems,
     setMentionedItems,
     attachMention,
+    attachReference,
     openMentionDir,
     removeMentionedItem,
     handleKeyDown: handleMentionKeyDown,
     dismiss: dismissMention,
   } = useMentionBrowser({
+    referenceDraftKey: conversationId ?? undefined,
     mention,
     setMention,
     mentionEntries,
@@ -3043,7 +3098,7 @@ function ComposerImpl(
     // resets the queue, but this closes the non-switch unmount paths too.
     return () => useChatStore.getState().clearPendingComposerAttachments();
     // setMentionedItems is a stable useState setter (from useMentionBrowser).
-  }, [pendingComposerAttachments, setMentionedItems]);
+  }, [pendingComposerAttachments, setMentionedItems, useChatStore]);
 
   // Restore the text (and attachments) of a send that failed, so the user can
   // fix and resend instead of retyping. The composer is empty in the normal
@@ -3073,7 +3128,7 @@ function ComposerImpl(
     textareaRef.current = tailTextareaRef.current;
     dirtyRef.current = true;
     if (failed.files.length > 0) attachmentsRef.current.replaceFiles(failed.files);
-    if (!isMobileRef.current) textareaRef.current?.focus();
+    if (focusedRef.current && !isMobileRef.current) textareaRef.current?.focus();
   }, [failedSendDraft, conversationId, settledConversationId, replaceText, draft]);
 
   // Retract a restored failed-send draft once its send proves delivered (its
@@ -3100,7 +3155,7 @@ function ComposerImpl(
     attachmentsRef.current.replaceFiles([]);
     dirtyRef.current = false;
     if (conversationId) setSessionDraft(conversationId, { text: "", files: [] });
-  }, [restoredSendDraft, conversationId, settledConversationId, replaceText, draft]);
+  }, [restoredSendDraft, conversationId, settledConversationId, replaceText, draft, useChatStore]);
 
   /**
    * Execute a slash command by name + optional argument string.
@@ -3480,6 +3535,88 @@ function ComposerImpl(
   // User edits and quote changes leave recall mode.
   const recallingRef = useRef(false);
 
+  useEffect(() => {
+    if (!conversationId) return;
+    return registerQuoteDestination(conversationId, (addition) => {
+      editText(null, (current) => appendDraftText(current, addition));
+      dirtyRef.current = true;
+      textareaRef.current = tailTextareaRef.current;
+      if (focusedRef.current) tailTextareaRef.current?.focus();
+    });
+  }, [conversationId, editText]);
+
+  const mentionedItemsRef = useRef(mentionedItems);
+  mentionedItemsRef.current = mentionedItems;
+  const startWorkbenchSubchat = (seed?: SessionDraft, moveCommand = false) => {
+    const sourceId = composerSessionId;
+    if (
+      !workbench ||
+      !sourceId ||
+      disabled ||
+      isReadOnly ||
+      draftConversationIdRef.current !== sourceId
+    )
+      return;
+    const capturedText = valueRef.current;
+    const capturedReply = JSON.stringify(replyDraftRef.current);
+    const capturedFiles = filesRef.current;
+    const capturedMentions = mentionedItemsRef.current;
+    const preamble = buildMentionPreamble(
+      capturedMentions.filter((item) => !item.reference),
+      sessionHarness,
+    );
+    let childDraft = seed ?? { text: fullText, replyDraft: storedReplyDraft, files };
+    if (preamble) {
+      const reply = childDraft.replyDraft;
+      if (reply?.quotes.length) {
+        const next = {
+          ...reply,
+          quotes: reply.quotes.map((quote, index) =>
+            index === 0 ? { ...quote, before: preamble + quote.before } : quote,
+          ),
+        };
+        childDraft = { ...childDraft, text: serializeReplyDraft(next), replyDraft: next };
+      } else childDraft = { ...childDraft, text: preamble + childDraft.text };
+    }
+    const request = openDurableSubchat({
+      sourceId,
+      boundaryId: subchatBoundary(useChatStore.getState().blocks),
+      draft: childDraft,
+      openConversation: workbench.openConversation,
+    });
+    if (!request) return;
+    setSubchatBusy(true);
+    setCommandError(null);
+    void request
+      .then(() => {
+        // A pending fork must never clear newer edits or another conversation's draft.
+        if (
+          !moveCommand ||
+          !composerMounted.current ||
+          draftConversationIdRef.current !== sourceId ||
+          valueRef.current !== capturedText ||
+          JSON.stringify(replyDraftRef.current) !== capturedReply ||
+          filesRef.current !== capturedFiles ||
+          mentionedItemsRef.current !== capturedMentions
+        )
+          return;
+        dirtyRef.current = true;
+        replaceText("");
+        clearAttachments();
+        setMentionedItems([]);
+        setMention(null);
+        setSessionDraft(sourceId, { text: "", files: [] });
+      })
+      .catch((error) => {
+        toast.error(
+          `Couldn't create a subchat: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => {
+        if (composerMounted.current) setSubchatBusy(false);
+      });
+  };
+
   const replyQuoteInsertedRef = useRef(false);
   useImperativeHandle(ref, () => ({
     appendReplyQuote(text) {
@@ -3494,6 +3631,16 @@ function ComposerImpl(
       recallingRef.current = false;
     },
     startSideChat(selectedText) {
+      if (workbench) {
+        if (!selectedText.trim()) return;
+        const quoted = appendReplyQuote({ text: "" }, selectedText);
+        startWorkbenchSubchat({
+          text: serializeReplyDraft(quoted),
+          replyDraft: snapshotReplyDraft(quoted),
+          files: [],
+        });
+        return;
+      }
       // Quote in the visible side chat, or open a pending tab immediately.
       // A pending tab creates its fork only when the user sends.
       const sourceId = useChatStore.getState().conversationId;
@@ -3525,7 +3672,7 @@ function ComposerImpl(
       )
         return;
       appendQuote(
-        `Annotation from ${annotation.path}\n\n${annotation.text}${annotation.workspaceRoot ? `\n\nWorkspace: ${annotation.workspaceRoot}` : ""}`,
+        `Annotation from ${annotation.path}\n\n${annotation.text}${annotation.workspaceRoot ? `\n\nWorkspace: ${annotation.workspaceRoot}` : ""}${annotation.workspaceId ? `\nSource workspace: ${annotation.workspaceId}` : ""}${annotation.hostId ? `\nSource machine: ${annotation.hostId}` : ""}`,
       );
       dirtyRef.current = true;
       replyQuoteInsertedRef.current = true;
@@ -3541,7 +3688,7 @@ function ComposerImpl(
     replyQuoteInsertedRef.current = false;
     const textarea = tailTextareaRef.current;
     if (!textarea) return;
-    if (!isMobileRef.current) textarea.focus({ preventScroll: true });
+    if (focusedRef.current && !isMobileRef.current) textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(0, 0);
     if (textarea.parentElement)
       textarea.parentElement.scrollTop = textarea.parentElement.scrollHeight;
@@ -3578,6 +3725,16 @@ function ComposerImpl(
     // The /btw overlay locks the composer — never send while it's open.
     if (composerLockedByBtw) return;
     const trimmed = fullText.trim();
+    const sideCommand = workbench && draft.text.trimStart().match(/^\/side(?:\s+|$)/i);
+    if (sideCommand) {
+      const child = { ...draft, text: draft.text.trimStart().slice(sideCommand[0].length) };
+      startWorkbenchSubchat(
+        { text: serializeReplyDraft(child), replyDraft: snapshotReplyDraft(child), files },
+        true,
+      );
+      return;
+    }
+
     // Allow send if there's text, attached files, OR "@"-tagged paths.
     if (
       (!trimmed && files.length === 0 && mentionedItems.length === 0) ||
@@ -3879,11 +4036,7 @@ function ComposerImpl(
     dirtyRef.current = true;
     if (commandError !== null) setCommandError(null);
     if (attachmentError !== null) clearError();
-    setMention(
-      mentionEnabled
-        ? detectMentionAt(e.target.value, e.target.selectionStart ?? e.target.value.length)
-        : null,
-    );
+    setMention(detectMentionAt(e.target.value, e.target.selectionStart ?? e.target.value.length));
     recallingRef.current = false;
     resetCursor();
   };
@@ -4029,7 +4182,13 @@ function ComposerImpl(
                 inputFor={(quote) => ({
                   onChange: (e) => handleTextChange(quote.id, e),
                   onFocus: (e) => handleTextFocus(quote.id, e.currentTarget),
-                  onBlur: dismissMention,
+                  onBlur: (event) => {
+                    if (!(
+                      event.relatedTarget instanceof Element &&
+                      event.relatedTarget.closest("[data-context-reference-picker]")
+                    ))
+                      dismissMention();
+                  },
                   onKeyDown: handleKeyDown,
                   onPaste,
                   "data-has-draft": hasDraft ? "true" : undefined,
@@ -4066,7 +4225,10 @@ function ComposerImpl(
             Also shown (as a loading row) while the listing is still fetching,
             so "@" isn't silently dead during runner cold-boot or a drill-in. */}
               {(mentionOpen || mentionListingPending) && (
-                <FileMentionMenu
+                <ComposerMentionMenu
+                  query={mention?.query ?? ""}
+                  destinationId={composerSessionId ?? null}
+                  onReference={attachReference}
                   currentDir={mentionDir}
                   activeIndex={mentionIndex}
                   entries={mentionEntries}
@@ -4184,9 +4346,15 @@ function ComposerImpl(
                 planDisabled={isReadOnly || planModeBusy}
                 planActive={codexPlanMode}
                 planLabel={codexPlanMode ? "Exit Plan mode" : "Enter Plan mode"}
+                sideChatLabel={workbench ? "New subchat" : undefined}
+                sideChatDisabled={subchatBusy}
                 onSideChat={
                   composerSessionId && !isReadOnly && supportsSideChat(sessionHarness)
                     ? () => {
+                        if (workbench) {
+                          startWorkbenchSubchat();
+                          return;
+                        }
                         if (usesNativeSideChatFork(sessionHarness)) {
                           // Codex forks in-process from a typed /side; prefill so
                           // the user types the question.
@@ -4275,8 +4443,8 @@ function ComposerImpl(
                 data-testid="composer-task-indicators"
                 className="flex shrink-0 items-center gap-0 empty:hidden"
               >
-                <BackgroundTaskIndicator />
-                <SubagentTaskIndicator conversationId={conversationId} />
+                {!scoped && <BackgroundTaskIndicator />}
+                {!scoped && <SubagentTaskIndicator conversationId={conversationId} />}
                 {goal && <GoalStatusPill goal={goal} onOpen={() => setGoalDialogOpen(true)} />}
               </div>
               <div className="flex min-w-0 items-center rounded-lg">
@@ -4976,6 +5144,8 @@ function SessionHarnessPicker({
   disabled: boolean;
   openNonce?: number;
 }) {
+  const useChatStore = useConversationChatStore();
+  const focused = useConversationChatFocused();
   const isMobile = useIsMobileViewport();
   const [menuOpen, setMenuOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -5318,7 +5488,7 @@ function SessionHarnessPicker({
   const { preview, dismissPreview } = useComposerConfigCycleHotkeys(
     cycleModelSection?.choices,
     cycleEffortSection?.choices.filter(({ key }) => key !== "__fast__"),
-    !disabled && !busy && pendingModelChange === null,
+    focused && !disabled && !busy && pendingModelChange === null,
     busy || pendingModelChange !== null,
     staged ? { apply: applyCycle, cancel: cancelCycle } : undefined,
   );
@@ -5446,6 +5616,7 @@ function useSessionConfigSummary({
   modelLabel: string | null;
   costRoutingEligible: boolean;
 }): { label: string; value: string }[] {
+  const useChatStore = useConversationChatStore();
   const selectedEffort = useSessionEffort();
   const costControlModeOverride = useChatStore((s) => s.costControlModeOverride);
   const routingOn = costRoutingEligible && costControlModeOverride === "on";
@@ -5480,6 +5651,7 @@ function useSessionConfigSummary({
  * different efforts each read their own.
  */
 function useSessionEffort(): string | null {
+  const useChatStore = useConversationChatStore();
   return useChatStore((s) => s.sessionReasoningEffort);
 }
 
@@ -5498,6 +5670,7 @@ function useResolvedComposerModel(
   modelLabelOptions: readonly NativeModelOption[],
   hostId: string | null | undefined,
 ) {
+  const useChatStore = useConversationChatStore();
   const sessionId = useChatStore((s) => s.conversationId);
   const agentId = useChatStore((s) => s.boundAgentId);
   const harness = useChatStore((s) => s.sessionHarness);

@@ -1,3 +1,5 @@
+import { panelFolderKey, useResourceViewId } from "@/lib/panelFolder";
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 // Monaco-based diff view for changed files (replaces the @pierre/diffs viewer).
 //
 // Shows before/after via Monaco's DiffEditor — inline (unified) or side-by-side
@@ -172,8 +174,13 @@ export function MonacoDiffViewer({
   // so a file's diff and its editor view don't share one offset.
   const positionRef = useRef(position);
   positionRef.current = position;
+  const viewId = useResourceViewId();
+  const scrollWorkspace = useWorkbenchWorkspace();
+  const scrollOwner = viewId
+    ? panelFolderKey(scrollWorkspace?.id ?? conversationId, viewId)
+    : conversationId;
   const scrollKeyRef = useRef("");
-  scrollKeyRef.current = `viewer-diff:${conversationId}:${path}`;
+  scrollKeyRef.current = `viewer-diff:${scrollOwner}:${path}`;
 
   const handleMount: DiffOnMount = useCallback(
     (diffEditor, monaco) => {

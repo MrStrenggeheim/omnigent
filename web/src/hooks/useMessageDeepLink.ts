@@ -1,18 +1,22 @@
+import { useConversationChatStore, useConversationChatRoot } from "@/workbench/ScopedChatStore";
 // Apply ``?message=<id>`` deep links: after the session loads, page in
 // older history if needed, then scroll + flash the target message.
 // Reuses the same scroll/flash path as the activity rail.
 
 import { useEffect, useRef } from "react";
-import { useSearchParams } from "@/lib/routing";
+import { useSearchParams, useParams } from "@/lib/routing";
 import { MESSAGE_QUERY_PARAM, findMessageElement } from "@/lib/messageDeepLink";
 import { scrollToMessage } from "@/hooks/useUserMessageNav";
-import { useChatStore } from "@/store/chatStore";
 import { useTerminalFirst } from "@/shell/TerminalFirstContext";
 
 /** Select Chat from the surface that stays mounted while Terminal is visible. */
 export function useMessageDeepLinkChatView(conversationId: string | null): void {
+  const useChatStore = useConversationChatStore();
+  const root = useConversationChatRoot();
+  const route = useParams<{ conversationId: string }>();
   const [searchParams] = useSearchParams();
-  const messageId = searchParams.get(MESSAGE_QUERY_PARAM);
+  const messageId =
+    !root || route.conversationId === conversationId ? searchParams.get(MESSAGE_QUERY_PARAM) : null;
   const terminalFirst = useTerminalFirst();
   const showTerminal = terminalFirst?.isTerminalFirst && terminalFirst.view === "terminal";
   const setView = terminalFirst?.setView;
@@ -43,8 +47,12 @@ export function useMessageDeepLink(
   conversationId: string | null,
   { ensureMessageVisible, ready = true, rangeNonce = 0 }: MessageDeepLinkOptions = {},
 ): void {
+  const useChatStore = useConversationChatStore();
+  const root = useConversationChatRoot();
+  const route = useParams<{ conversationId: string }>();
   const [searchParams] = useSearchParams();
-  const messageId = searchParams.get(MESSAGE_QUERY_PARAM);
+  const messageId =
+    !root || route.conversationId === conversationId ? searchParams.get(MESSAGE_QUERY_PARAM) : null;
   const terminalFirst = useTerminalFirst();
   const showTerminal = terminalFirst?.isTerminalFirst && terminalFirst.view === "terminal";
   const loadingConversation = useChatStore((s) => s.loadingConversation);
@@ -63,9 +71,9 @@ export function useMessageDeepLink(
     if (appliedKeyRef.current === key) return;
     if (!ready || showTerminal || loadingConversation || loadingMoreHistory) return;
 
-    if (findMessageElement(messageId)) {
+    if (findMessageElement(messageId, root?.current ?? document)) {
       appliedKeyRef.current = key;
-      scrollToMessage(messageId, flashUserMessage);
+      scrollToMessage(messageId, flashUserMessage, ensureMessageVisible, root?.current ?? document);
       return;
     }
     // Geometry publishes a new range after this scroll mounts the target.
@@ -87,5 +95,7 @@ export function useMessageDeepLink(
     flashUserMessage,
     ensureMessageVisible,
     rangeNonce,
+    root,
+    useChatStore,
   ]);
 }

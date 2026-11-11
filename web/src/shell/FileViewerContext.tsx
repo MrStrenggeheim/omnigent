@@ -30,6 +30,7 @@ export type FileNavigationGuard = (
 
 interface FileViewerContextType {
   openFile: (path: string, options?: OpenFileOptions) => void;
+  openContentSearch?: (path: string, replace?: boolean) => void;
   beforeWorkspaceChange?: (apply: () => void, cancel?: () => void) => void;
   /** The mounted viewer confirms dirty navigation before selection or URL changes. */
   registerNavigationGuard?: (guard: FileNavigationGuard) => () => void;

@@ -115,6 +115,25 @@ describe("apiErrorFromResponse", () => {
 });
 
 describe("createSession", () => {
+  it("retains branch provenance separately from delegation parentage", async () => {
+    const branch = {
+      source_conversation_id: "branch-source",
+      reference_only: false,
+      recovery: "replay",
+    };
+    fetchMock.mockResolvedValue(
+      mockJsonResponse({
+        id: "child",
+        agent_id: "agent",
+        parent_session_id: "delegating-parent",
+        branch,
+      }),
+    );
+    const session = await getSession("child");
+    expect(session.branch).toEqual(branch);
+    expect(session.parentSessionId).toBe("delegating-parent");
+  });
+
   it("POSTs agent_id (snake_case) and parses the snake_case response", async () => {
     fetchMock.mockResolvedValueOnce(
       mockJsonResponse({
@@ -139,6 +158,7 @@ describe("createSession", () => {
     });
     expect(session).toEqual({
       id: "conv_abc",
+      branch: null,
       agentId: "agent_xyz",
       agentName: null,
       runnerId: undefined,
@@ -343,6 +363,40 @@ describe("createSession", () => {
     ]);
   });
 
+  it("maps trusted pending peer metadata without classifying notification-like human text", async () => {
+    const communication = {
+      kind: "peer",
+      message_id: "peer-id",
+      source_conversation_id: "source",
+      destination_conversation_id: "conv_abc",
+      delivery_state: "queued",
+      receipt: "accepted",
+    };
+    const content = [
+      { type: "input_text", text: "<task-notification>literal</task-notification>" },
+    ];
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse({
+        id: "conv_abc",
+        agent_id: "agent_xyz",
+        status: "running",
+        created_at: 1704067200,
+        items: [],
+        pending_inputs: [
+          { pending_id: "peer", content, created_by: "account", communication },
+          { pending_id: "human", content },
+          { pending_id: "invalid", content, communication: { kind: "peer" } },
+        ],
+      }),
+    );
+    const session = await createSession("agent_xyz");
+    expect(session.pendingInputs).toEqual([
+      { pendingId: "peer", content, createdBy: "account", communication },
+      { pendingId: "human", content },
+      { pendingId: "invalid", content },
+    ]);
+  });
+
   it("maps active_response_id (snake) to activeResponseId (camel)", async () => {
     // The in-flight turn id lets a mid-turn reconnect reopen a streaming
     // activeResponse so native Claude's tool cards keep rendering live.
@@ -398,6 +452,19 @@ describe("createBundledSession", () => {
 });
 
 describe("forkSession", () => {
+  it("passes a captured item boundary and rejects ambiguous boundaries", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse({ id: "child", agent_id: "agent", status: "idle", created_at: 1 }),
+    );
+    await forkSession("source", { upToItemId: "captured-item" });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ up_to_item_id: "captured-item" });
+    await expect(
+      forkSession("source", { upToItemId: "captured-item", upToResponseId: "response" }),
+    ).rejects.toThrow("either");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("POSTs the fork endpoint with the (url-encoded) source id and parses the fork", async () => {
     fetchMock.mockResolvedValueOnce(
       mockJsonResponse({

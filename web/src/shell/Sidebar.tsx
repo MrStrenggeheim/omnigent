@@ -1,5 +1,12 @@
+import { branchRoots, branchChildren, visibleBranchRows } from "@/lib/conversationBranches";
+import {
+  SidebarBranchContext,
+  useConversationBranches,
+  type SidebarBranchState,
+} from "@/hooks/useConversationBranches";
 import { useContextSearch } from "./ContextSearchContext";
 import { ContextSearchSidebar } from "./ContextSearchSidebar";
+import { useWorkbench } from "@/workbench/WorkbenchContext";
 import { filterSessionScope } from "@/lib/sessionVisibility";
 import { useGridSessions } from "@/grid/GridSessionsContext";
 import { GridSidebar } from "@/grid/GridWorkspace";
@@ -27,6 +34,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -391,6 +399,7 @@ function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...a
 }
 
 function SidebarRowDataProvider({
+  branches,
   projectNamesById,
   projectIconsById,
   hostsById,
@@ -401,6 +410,7 @@ function SidebarRowDataProvider({
   onActivate,
   children,
 }: {
+  branches: SidebarBranchState | null;
   projectNamesById: Map<string, string>;
   projectIconsById: Map<string, string>;
   hostsById: ReadonlyMap<string, Host>;
@@ -420,7 +430,9 @@ function SidebarRowDataProvider({
               <ViewerIdContext.Provider value={viewerId}>
                 <ServerInfoContext.Provider value={serverInfo}>
                   <RowActivationContext.Provider value={onActivate}>
-                    {children}
+                    <SidebarBranchContext.Provider value={branches}>
+                      {children}
+                    </SidebarBranchContext.Provider>
                   </RowActivationContext.Provider>
                 </ServerInfoContext.Provider>
               </ViewerIdContext.Provider>
@@ -461,6 +473,7 @@ const SIDEBAR_FILTER_EMPTY: Record<SidebarTab, string> = {
 type SelectionScope = "sessions" | "projects";
 
 interface SidebarProps {
+  workbench?: boolean;
   open: boolean;
   onClose: () => void;
   /**
@@ -685,6 +698,7 @@ export function useMigrateLocalPinsToServer(
 }
 
 function SidebarImpl({
+  workbench = false,
   open,
   onClose,
   onOpen,
@@ -692,6 +706,7 @@ function SidebarImpl({
   onOpenSearch,
   peek,
 }: SidebarProps) {
+  const workbenchActions = useWorkbench();
   const contextSearch = useContextSearch();
   const mobileViewport = useIsMobileViewport();
   const sidebarData = useSidebarData();
@@ -817,6 +832,11 @@ function SidebarImpl({
     if (e.defaultPrevented) return;
     if (e.button !== 0) return;
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const conversationMatch = new URL(e.currentTarget.href).pathname.match(/\/c\/([^/]+)$/);
+    if (workbenchActions && conversationMatch) {
+      e.preventDefault();
+      workbenchActions.openConversation(decodeURIComponent(conversationMatch[1]));
+    }
     if (isMobileViewport()) onClose();
   });
 
@@ -1146,7 +1166,12 @@ function SidebarImpl({
             {/* h-14 below md matches the mobile chat header height so the
             Search bubble shares a centerline with the overflow bubble in the
             chat strip beside the open drawer. */}
-            <div className="sidebar-header-row flex h-14 shrink-0 items-center justify-between pr-3 pl-4 max-md:pl-16 md:h-12">
+            <div
+              className={cn(
+                "sidebar-header-row flex h-12 shrink-0 items-center justify-between pr-3 pl-4",
+                !workbench && "max-md:h-14 max-md:pl-16",
+              )}
+            >
               {/* Brand mark doubles as the "home" affordance: clicking it
             returns to `/`, the new-session composer. Without this there
             is no way back to the landing composer once you're inside a
@@ -1160,7 +1185,9 @@ function SidebarImpl({
                 componentId="sidebar.home"
                 className="sidebar-brand rounded-none transition-opacity duration-200 ease-[var(--ease-otto)] hover:opacity-70"
               >
-                {branding.app_name ? (
+                {workbench ? (
+                  <span className="text-sm font-medium">Conversations</span>
+                ) : branding.app_name ? (
                   <span className="text-[15px] font-semibold tracking-tight">
                     {branding.app_name}
                   </span>
@@ -1178,6 +1205,7 @@ function SidebarImpl({
             keep their place when the sidebar collapses or peeks. Everywhere
             else this is the only copy. */}
               <SidebarHeaderActions
+                compact={workbench}
                 expanded={!peek}
                 // onOpen is optional (the sidebar renders standalone in tests), so
                 // fall back to a no-op rather than widening the child's contract.
@@ -1209,6 +1237,7 @@ function SidebarImpl({
                     // transparent 1px border so the icon lands exactly on that
                     // column, flush with the Inbox row and folder rows.
                     SIDEBAR_ROW,
+                    "density-row",
                     "group/new-session w-full justify-start border-0 font-normal",
                     SIDEBAR_HOVER_HIGHLIGHT,
                     isNewChatPage && SIDEBAR_ACTIVE_HIGHLIGHT,
@@ -1251,6 +1280,7 @@ function SidebarImpl({
                     // the active-pill, hover, insets, icon column, and text weight
                     // all match post-refactor.
                     SIDEBAR_ROW,
+                    "density-row",
                     "w-full justify-start border-0 font-normal",
                     SIDEBAR_HOVER_HIGHLIGHT,
                     isTasksPage && SIDEBAR_ACTIVE_HIGHLIGHT,
@@ -1275,6 +1305,7 @@ function SidebarImpl({
                   variant="ghost"
                   className={cn(
                     SIDEBAR_ROW,
+                    "density-row",
                     "w-full justify-start border-0 font-normal",
                     SIDEBAR_HOVER_HIGHLIGHT,
                     isInboxPage && SIDEBAR_ACTIVE_HIGHLIGHT,
@@ -1332,6 +1363,7 @@ function SidebarImpl({
                     variant="ghost"
                     className={cn(
                       SIDEBAR_ROW,
+                      "density-row",
                       "w-full justify-start border-0 font-normal",
                       SIDEBAR_HOVER_HIGHLIGHT,
                       isUsagePage && SIDEBAR_ACTIVE_HIGHLIGHT,
@@ -1417,17 +1449,19 @@ function SidebarImpl({
                 {/* Mobile: Settings floats over the bottom of the session list, with
           Search floating at the top of the header row — the two icons the
           drawer keeps once the collapse toggle is gone. */}
-                <SidebarSettingsButton
-                  testId="sidebar-settings-float"
-                  className="absolute right-3 bottom-3 md:hidden"
-                />
+                {!workbench && (
+                  <SidebarSettingsButton
+                    testId="sidebar-settings-float"
+                    className="absolute right-3 bottom-3 md:hidden"
+                  />
+                )}
               </div>
 
               {/* Native-shell server picker, pinned below the scrolling session
           list. Self-hiding: renders nothing outside a shell with the picker
           bridge (see SidebarServerPicker), so browsers keep an unchanged
           sidebar that ends with the list. */}
-              <SidebarServerPicker />
+              {!workbench && <SidebarServerPicker />}
             </div>
           </>
         )}
@@ -1692,6 +1726,7 @@ function ProjectFolder({
               <p
                 className={cn(
                   SIDEBAR_ROW,
+                  "density-row",
                   "flex w-full flex-col justify-center text-left text-muted-foreground",
                 )}
               >
@@ -1783,6 +1818,8 @@ function ConversationList({
   getVisibleIdsRef,
 }: ConversationListProps) {
   const grids = useGridSessions();
+  const workbench = useWorkbench();
+  const { conversationId: branchRouteId } = useParams<{ conversationId: string }>();
   // Row-invariant values resolved once here and shared with rows via context
   // (see IsMobileContext etc.), so each row doesn't run its own copy.
   const viewerId = useViewerId();
@@ -1828,10 +1865,23 @@ function ConversationList({
   const startingId = useStartingConversationId(statusView);
   // All loaded conversations from the single paginated list (for the flat
   // session list; pinned rows are merged in from the server pinned query).
-  const allConversations = useMemo(
+  const listedConversations = useMemo(
     () => conversationsQuery.data?.pages.flatMap((page) => page.data) ?? [],
     [conversationsQuery.data],
   );
+  const branchInputs = useMemo(
+    () => dedupeConversationsById([...listedConversations, ...pinnedConversations]),
+    [listedConversations, pinnedConversations],
+  );
+  const branches = useConversationBranches({
+    enabled: !!workbench,
+    rows: branchInputs,
+    activeId: workbench?.focusedConversationId ?? branchRouteId,
+    filter: activeTab,
+    searchQuery,
+    openIds: workbench?.openConversationIds,
+  });
+  const allConversations = workbench ? branches.rows : listedConversations;
   const groupOrder = useMemo(
     () =>
       view.grouping === "harness"
@@ -1906,12 +1956,15 @@ function ConversationList({
   // updated_at bump from sending a message doesn't reorder the row
   // out from under you. Snapshot is dropped on navigate-away so the
   // chat snaps back to its real position once you've left.
-  const { conversationId: activeId } = useParams<{ conversationId: string }>();
+  const { conversationId: routeActiveId } = useParams<{ conversationId: string }>();
+  const activeId = workbench?.focusedConversationId ?? routeActiveId;
   // Resolve the active conversation's top-level root once here (rows get a plain
   // `isActive` prop, not their own query). Falls back to the raw id while the
   // parent walk loads — a top-level session resolves to itself.
-  const activeRootSessionId = useActiveRootSessionId(activeId ?? null);
-  const resolvedActiveId = activeRootSessionId ?? activeId ?? null;
+  const activeRootSessionId = useActiveRootSessionId(workbench ? null : (activeId ?? null));
+  const resolvedActiveId = workbench
+    ? (activeId ?? null)
+    : (activeRootSessionId ?? activeId ?? null);
   const [optimisticActiveId, setOptimisticActiveId] = useState<string | null>(null);
   useEffect(() => setOptimisticActiveId(null), [activeId]);
   const activateRow = useCallback((id: string, event: MouseEvent<HTMLAnchorElement>) => {
@@ -2438,8 +2491,9 @@ function ConversationList({
     for (const rows of folderConversations.values()) {
       for (const c of rows) byId.set(c.id, c);
     }
-    return [...byId.values()];
-  }, [sections.projectGroups, folderConversations]);
+    const pool = [...byId.values()];
+    return workbench ? visibleBranchRows(pool, branches.rows, branches.expanded) : pool;
+  }, [sections.projectGroups, folderConversations, workbench, branches.rows, branches.expanded]);
 
   // The bulk-action bar lives under the header of the section it targets, so it
   // unmounts when that section empties (e.g. every selected session
@@ -2491,13 +2545,21 @@ function ConversationList({
   // session hotkey. Titles must match the <ConversationSection> props below.
   const orderedConversationIds = useMemo(() => {
     const visible = (title: string, list: readonly Conversation[]) =>
-      effectiveCollapsedSections.includes(title) ? [] : list;
+      effectiveCollapsedSections.includes(title)
+        ? []
+        : workbench
+          ? visibleBranchRows(list, branches.rows, branches.expanded)
+          : list;
     // A project's chats are navigable only when the "Projects" group is
     // expanded AND that individual project folder is expanded (folders are
     // collapsed unless explicitly opened — inverse of the fixed sections).
     const projectsCollapsed = effectiveCollapsedSections.includes("Projects");
     const projectVisible = (name: string, list: readonly Conversation[]) =>
-      !projectsCollapsed && expandedProjects.includes(name) ? list : [];
+      !projectsCollapsed && expandedProjects.includes(name)
+        ? workbench
+          ? visibleBranchRows(list, branches.rows, branches.expanded)
+          : list
+        : [];
     // `sections` is already scoped to the active tab, so the same Pinned /
     // Projects / Sessions walk covers both tabs (Projects is empty on shared).
     return [
@@ -2508,7 +2570,15 @@ function ConversationList({
         ? sessionGroups.flatMap((g) => visible(g.title, g.conversations))
         : visible("Chats", sections.sessions)),
     ].map((c) => c.id);
-  }, [sections, sessionGroups, effectiveCollapsedSections, expandedProjects]);
+  }, [
+    sections,
+    sessionGroups,
+    effectiveCollapsedSections,
+    expandedProjects,
+    workbench,
+    branches.rows,
+    branches.expanded,
+  ]);
   // Getter for the shift-select range, built on demand (at click time). Scopes
   // to whichever section is selectable: the flat Sessions list, or the sessions
   // across expanded project folders (in render order). For projects scope the
@@ -2521,12 +2591,18 @@ function ConversationList({
       return sections.projectGroups.flatMap((g) => {
         if (!expandedProjects.includes(g.name)) return [];
         const rows = folderConversations.get(g.name) ?? g.conversations;
-        return rows.map((c) => c.id);
+        return (workbench ? visibleBranchRows(rows, branches.rows, branches.expanded) : rows).map(
+          (c) => c.id,
+        );
       });
     };
     if (selectionScope === "projects") return projectIds();
     const visibleIds = (title: string, list: readonly Conversation[]) =>
-      effectiveCollapsedSections.includes(title) ? [] : list.map((c) => c.id);
+      effectiveCollapsedSections.includes(title)
+        ? []
+        : (workbench ? visibleBranchRows(list, branches.rows, branches.expanded) : list).map(
+            (c) => c.id,
+          );
     return [
       ...(unifiedSelection ? projectIds() : []),
       ...visibleIds("Shared", sections.shared),
@@ -2607,7 +2683,11 @@ function ConversationList({
     sessionsSelecting && !unifiedSelection ? (
       <BulkActionBar
         selectedIds={selectedIds}
-        allConversations={displayPagination.rows}
+        allConversations={
+          workbench
+            ? visibleBranchRows(displayPagination.rows, branches.rows, branches.expanded)
+            : displayPagination.rows
+        }
         onDeselectAll={onDeselectAll}
         onExit={onExitSelectionMode}
         onProjectAssigned={expandProject}
@@ -2695,6 +2775,7 @@ function ConversationList({
   // rules between groups.
   return (
     <SidebarRowDataProvider
+      branches={workbench ? branches : null}
       projectNamesById={projectNamesById}
       projectIconsById={projectIconsById}
       hostsById={hostsById}
@@ -3285,6 +3366,7 @@ function SectionHeader({
         icon
           ? cn(
               SIDEBAR_ROW,
+              "density-row",
               "group flex w-full items-center border-0 text-left text-foreground transition-colors",
               SIDEBAR_HOVER_HIGHLIGHT,
               contextMenu && SIDEBAR_OPEN_MENU_HIGHLIGHT,
@@ -3838,6 +3920,8 @@ function ConversationSection({
   onProjectAssigned?: (projectName: string) => void;
 }) {
   const groupingEmptyState = isFeatureEnabled(useContext(ServerInfoContext), "sidebar_grouping_ui");
+  const branches = useContext(SidebarBranchContext);
+  const roots = branches ? branchRoots(conversations) : conversations;
   const grids = useGridSessions();
   const gridMembers = new Set(grids?.activeGrid ? gridSessionIds(grids.activeGrid.layout) : []);
   // An untitled section is always open — there's no header to collapse it.
@@ -3921,6 +4005,7 @@ function ConversationSection({
                 <div
                   className={cn(
                     SIDEBAR_ROW,
+                    "density-row",
                     "relative flex w-full flex-col justify-center text-left text-muted-foreground",
                     groupingEmptyState && "items-center text-center",
                   )}
@@ -3939,9 +4024,13 @@ function ConversationSection({
             )
           ) : (
             // Indent project chats a step under the project-folder name above.
-            <ul className={cn("flex flex-col gap-px", indentRows && "pl-6")}>
-              {conversations.map((conv) => (
-                <ConversationRow
+            <ul
+              className={cn("density-list flex flex-col", indentRows && "pl-[var(--tree-indent)]")}
+            >
+              {roots.map((conv) => (
+                <ConversationBranchRow
+                  selectedIds={selectedIds}
+                  pinnedIds={pinnedConversationIds}
                   key={conv.id}
                   conversation={conv}
                   isActive={conv.id === activeConversationId}
@@ -4715,7 +4804,121 @@ function SessionTooltipContent({
 // Browsers pair clicks within ~500ms; the margin absorbs event-loop delay.
 const DOUBLE_CLICK_PAIR_WINDOW_MS = 750;
 
+const NO_BRANCH_ANCESTORS: readonly string[] = [];
+
+/** Reuse the complete row so branch views retain pin, archive, menus and selection. */
+function ConversationBranchRow({
+  ancestors = NO_BRANCH_ANCESTORS,
+  selectedIds,
+  pinnedIds,
+  ...props
+}: Parameters<typeof ConversationRowImpl>[0] & {
+  ancestors?: readonly string[];
+  selectedIds: ReadonlySet<string>;
+  pinnedIds: readonly string[];
+}) {
+  const branches = useContext(SidebarBranchContext);
+  const grids = useGridSessions();
+  const groupId = useId();
+  if (!branches) return <ConversationRow {...props} />;
+  const id = props.conversation.id;
+  const path = [...ancestors, id];
+  const expanded = branches.expanded.has(id);
+  const children =
+    path.length < 64
+      ? branchChildren(branches.rows, id).filter((row) => !path.includes(row.id))
+      : [];
+  const gridMembers = new Set(grids?.activeGrid ? gridSessionIds(grids.activeGrid.layout) : []);
+  const label = props.conversation.title ?? id;
+  return (
+    <>
+      <ConversationRow
+        {...props}
+        treeDepth={ancestors.length}
+        openElsewhere={!props.isActive && branches.openIds.includes(id)}
+        treeControl={
+          !props.conversation.provisional && (
+            <TooltipButton
+              type="button"
+              title={`${expanded ? "Collapse" : "Expand"} subchats`}
+              aria-label={`${expanded ? "Collapse" : "Expand"} subchats of ${label}`}
+              aria-expanded={expanded}
+              aria-controls={groupId}
+              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+              onMouseDown={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                branches.toggle(id);
+              }}
+            >
+              <ChevronRightIcon className={cn("size-3.5", expanded && "rotate-90")} />
+            </TooltipButton>
+          )
+        }
+      />
+      {expanded && (
+        <li className="list-none">
+          <ul
+            id={groupId}
+            aria-label={`Subchats of ${label}`}
+            className="density-list flex flex-col"
+          >
+            {children.map((child) => (
+              <ConversationBranchRow
+                {...props}
+                key={child.id}
+                conversation={child}
+                ancestors={path}
+                selectedIds={selectedIds}
+                pinnedIds={pinnedIds}
+                isActive={child.id === branches.activeId}
+                isSelected={selectedIds.has(child.id)}
+                isPinned={pinnedIds.includes(child.id)}
+                inActiveGrid={gridMembers.has(child.id)}
+                gridSelected={child.id === grids?.selectedSessionId}
+              />
+            ))}
+            {branches.loading && (
+              <li role="status" className="px-4 text-xs text-muted-foreground">
+                Loading subchats…
+              </li>
+            )}
+            {branches.error && (
+              <li role="alert" className="px-4 text-xs text-destructive">
+                Could not load subchats.{" "}
+                <button type="button" onClick={branches.retry}>
+                  Retry
+                </button>
+              </li>
+            )}
+            {branches.hasMore && (
+              <li>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={branches.loadMore}
+                  disabled={branches.loading}
+                >
+                  Load more subchats
+                </Button>
+              </li>
+            )}
+            {!children.length && !branches.loading && !branches.error && !branches.hasMore && (
+              <li className="px-4 text-xs text-muted-foreground">No subchats</li>
+            )}
+          </ul>
+        </li>
+      )}
+    </>
+  );
+}
+
 function ConversationRowImpl({
+  treeDepth = 0,
+  treeControl,
+  openElsewhere = false,
   conversation,
   isActive,
   inActiveGrid,
@@ -4729,6 +4932,9 @@ function ConversationRowImpl({
   onToggleSelected,
   onProjectAssigned,
 }: {
+  treeDepth?: number;
+  treeControl?: ReactNode;
+  openElsewhere?: boolean;
   conversation: Conversation;
   // Computed by the list owner against the resolved top-level root (so a
   // sub-agent view keeps its owning row highlighted). A prop, not a per-row
@@ -5150,11 +5356,13 @@ function ConversationRowImpl({
     <Link
       to={selectionMode ? "#" : `/c/${conversation.id}`}
       componentId="sidebar.conversation_switcher"
+      aria-current={isActive ? "page" : undefined}
       draggable={gridsEnabled ? false : undefined}
       onDragStart={gridsEnabled ? (event) => event.preventDefault() : undefined}
       className={cn(
         SIDEBAR_ROW,
-        "relative flex flex-col justify-center text-left text-foreground transition-colors",
+        "density-row",
+        "density-row density-tree-row relative flex flex-col justify-center text-left text-foreground transition-colors",
         SIDEBAR_HOVER_HIGHLIGHT,
         // Full width (not 100%+1rem) so the highlight stays inset from the
         // right edge, aligning with the project/folder rows above.
@@ -5226,7 +5434,12 @@ function ConversationRowImpl({
     >
       {/* Row 1: the session name. Working, needs-approval, unseen, and draft
           markers render in the shared trailing indicator slot below. */}
-      <div className="flex w-full items-center">
+      <div className="flex w-full items-center gap-1">
+        {openElsewhere && (
+          <span role="img" aria-label="Open elsewhere" className="shrink-0">
+            <Maximize2Icon className="size-3 text-muted-foreground" />
+          </span>
+        )}
         <span
           className={cn(
             "relative min-w-0 truncate",
@@ -5262,6 +5475,8 @@ function ConversationRowImpl({
     <li
       ref={setRowRef}
       data-sidebar-session-id={conversation.id}
+      data-open-elsewhere={openElsewhere || undefined}
+      style={{ "--tree-depth": treeControl ? treeDepth + 1 : treeDepth } as CSSProperties}
       onMouseDown={(event) => {
         // Portaled dialogs bubble through this row but must not start a drag.
         if (event.currentTarget.contains(event.target as Node)) {
@@ -5275,6 +5490,14 @@ function ConversationRowImpl({
       }}
       className={cn("group relative", isDragging && "opacity-40")}
     >
+      {treeControl && (
+        <div
+          className="absolute top-1 z-10"
+          style={{ left: `calc(${treeDepth} * var(--tree-indent) + 2px)` }}
+        >
+          {treeControl}
+        </div>
+      )}
       {pinInsertion && pinOrder?.draggingId !== conversation.id && (
         <span
           data-testid="pin-order-insertion"
@@ -5807,6 +6030,9 @@ function conversationRenderEqual(a: Conversation, b: Conversation): boolean {
 // are stabilized at the list owner so they don't defeat it.
 const ConversationRow = memo(ConversationRowImpl, (prev, next) => {
   return (
+    prev.treeDepth === next.treeDepth &&
+    prev.treeControl === next.treeControl &&
+    prev.openElsewhere === next.openElsewhere &&
     prev.isActive === next.isActive &&
     prev.inActiveGrid === next.inActiveGrid &&
     prev.gridSelected === next.gridSelected &&

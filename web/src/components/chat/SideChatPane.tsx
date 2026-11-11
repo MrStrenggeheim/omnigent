@@ -1,3 +1,9 @@
+import { ComposerMentionMenu } from "@/components/composer/ComposerMentionMenu";
+import { ComposerMentionChips } from "@/components/composer/ComposerMentionChips";
+import { useMentionBrowser } from "@/hooks/useMentionBrowser";
+import { detectMentionAt, buildMentionPreamble, type MentionState } from "@/lib/composerMentions";
+import { registerQuoteDestination, appendDraftText } from "@/lib/quoteDraftDestinations";
+import { getSessionDraft, setSessionDraft } from "@/lib/sessionDrafts";
 import { SelectionPopup } from "./SelectionPopup";
 import {
   useCallback,
@@ -484,7 +490,7 @@ function SideChatComposer({
     [allQueuedMessages, childId],
   );
   // Grid sessions keep waiting for the turn to end; side chats queue like the main composer.
-  const queues = !pending && !fullSession;
+  const queues = !pending;
   useEffect(() => {
     if (queues && queuedMessages.length > 0) maybeFlushQueuedHead(childId);
   }, [queues, queuedMessages, busy, agentId, childId, maybeFlushQueuedHead]);
@@ -569,6 +575,45 @@ function SideChatComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tailTextareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [mention, setMention] = useState<MentionState | null>(null);
+  const mentionBrowser = useMentionBrowser({
+    mention,
+    setMention,
+    mentionEntries: [],
+    text,
+    setText,
+    textareaRef,
+    referenceDraftKey: pending ? undefined : childId,
+  });
+  useEffect(
+    () =>
+      registerQuoteDestination(childId, (addition) => {
+        updateComposer(childId, (current) => ({
+          ...current,
+          text: appendDraftText(current.text, addition),
+        }));
+        tailTextareaRef.current?.focus();
+      }),
+    [childId, updateComposer],
+  );
+  useEffect(() => {
+    if (useChatStore.getState().sideChatComposers[childId]) return;
+    const saved = getSessionDraft(childId);
+    if (saved)
+      updateComposer(childId, () => ({
+        ...restoreReplyDraft(saved.text, saved.replyDraft),
+        files: saved.files,
+      }));
+  }, [childId, updateComposer]);
+  useEffect(() => {
+    if (!composer || pending) return;
+    const saved = { ...composer, quotes: composer.quotes ?? [] };
+    setSessionDraft(childId, {
+      text: serializeReplyDraft(saved),
+      replyDraft: snapshotReplyDraft(saved),
+      files: saved.files,
+    });
+  }, [childId, composer, pending]);
   const voiceEditsRef = useRef(
     new Map<string | null, { before: string; after: string; quoteIds: Set<string> }>(),
   );
@@ -651,7 +696,9 @@ function SideChatComposer({
 
   const ready = pending ? !starting : agentId !== null;
   const canSend =
-    serializeReplyDraft({ quotes, text }).trim().length > 0 || (!pending && files.length > 0);
+    serializeReplyDraft({ quotes, text }).trim().length > 0 ||
+    (!pending && files.length > 0) ||
+    mentionBrowser.mentionedItems.length > 0;
   const addFiles = (incoming: File[]) => {
     const { accepted, errors } = validateAttachments(incoming, attachmentPolicy);
     errors.forEach((message) => toast.error(message));
@@ -770,7 +817,7 @@ function SideChatComposer({
     clearText: () => setText(""),
   });
   // Like the main composer, a draft turns Interrupt into Send.
-  const showInterrupt = !pending && busy && (fullSession || !canSend);
+  const showInterrupt = !pending && busy && !canSend;
 
   const interruptSideChat = () => {
     if (interrupting || !interruptReady) return;
@@ -788,11 +835,15 @@ function SideChatComposer({
       void onStart(serializeReplyDraft({ quotes, text: trimmed }));
       return;
     }
-    if ((busy && fullSession) || !canSend || agentId === null) return;
+    if (!canSend || agentId === null) return;
     // On in-process harnesses /help and skills resolve locally; native TUIs
     // (claude-native, codex-native) read the text themselves, and a quote or
     // attachment is always an ordinary message.
-    const routeLocally = !nativeSession && quotes.length === 0 && files.length === 0;
+    const routeLocally =
+      !nativeSession &&
+      quotes.length === 0 &&
+      files.length === 0 &&
+      mentionBrowser.mentionedItems.length === 0;
     // A lone command token with skill discovery in flight has nothing to run
     // yet; only hold when the submission would route locally.
     if (routeLocally && slashCompletion.pendingCompletion) return;
@@ -825,7 +876,9 @@ function SideChatComposer({
       return;
     }
     const outgoing = files.length > 0 ? files : undefined;
-    const message = serializeReplyDraft({ quotes, text: trimmed });
+    const message =
+      buildMentionPreamble(mentionBrowser.mentionedItems, harness ?? null) +
+      serializeReplyDraft({ quotes, text: trimmed });
     const child = conversationRegistry.peek(childId)?.getState();
     if (
       queues &&
@@ -841,12 +894,16 @@ function SideChatComposer({
       )
     ) {
       clearComposer(childId);
+      mentionBrowser.setMentionedItems([]);
+      setSessionDraft(childId, { text: "", files: [] });
       enqueueMessage(message, outgoing, snapshotReplyDraft({ quotes, text: trimmed }), childId);
       return;
     }
     // A running Codex chat refuses a steered /compact; keep the draft as the main composer does.
     if (isCompactControl(harness, message, outgoing) && rejectBusyCompact(childId)) return;
     clearComposer(childId);
+    mentionBrowser.setMentionedItems([]);
+    setSessionDraft(childId, { text: "", files: [] });
     void send(message, agentId, outgoing, { pinnedConversationId: childId }).finally(refreshLabels);
   };
 
@@ -858,6 +915,17 @@ function SideChatComposer({
       steerAllQueuedMessages(childId);
       return;
     }
+    if (mention && !intent.shouldPreferSendOverCompletion) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMention(null);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        return;
+      }
+    }
     if (slashCompletion.handleKey(event, intent)) return;
     // A grid pane is a whole session, so only side chats let Escape stop the turn.
     if (event.key === "Escape" && queues && busy) {
@@ -867,6 +935,13 @@ function SideChatComposer({
     }
     if (intent.shouldSubmitFromKeyboard) {
       event.preventDefault();
+      if (!canSend && queues && !event.repeat && ready) {
+        const head = useChatStore
+          .getState()
+          .queuedMessages.find((message) => message.conversationId === childId);
+        if (head) steerMessage(head.queueId);
+        return;
+      }
       submit();
     }
   };
@@ -926,6 +1001,8 @@ function SideChatComposer({
             if (commandNotice !== null) setCommandNotice(null);
             slashCompletion.onSelectionChange(event.target);
             setText(event.target.value);
+            if (!pending)
+              setMention(detectMentionAt(event.target.value, event.target.selectionStart));
           },
           onSelect: (event) => slashCompletion.onSelectionChange(event.currentTarget),
           onFocus: (event) => {
@@ -933,7 +1010,14 @@ function SideChatComposer({
             focusText(null, event.currentTarget);
           },
           // Menu rows preventDefault on mousedown so selecting one keeps focus.
-          onBlur: () => setInputFocused(false),
+          onBlur: (event) => {
+            setInputFocused(false);
+            if (!(
+              event.relatedTarget instanceof Element &&
+              event.relatedTarget.closest("[data-context-reference-picker]")
+            ))
+              setMention(null);
+          },
           placeholder: fullSession ? "Reply to this session..." : "Ask a side question...",
           disabled: !ready,
           "data-testid": "side-chat-input",
@@ -942,7 +1026,18 @@ function SideChatComposer({
           className: quotes.length ? "max-h-none overflow-y-hidden" : undefined,
         }}
         slots={{
-          beforeInput: slashCompletion.open ? (
+          beforeInput: mention ? (
+            <ComposerMentionMenu
+              query={mention.query}
+              destinationId={childId}
+              onReference={mentionBrowser.attachReference}
+              currentDir=""
+              activeIndex={-1}
+              entries={[]}
+              onOpenDir={() => {}}
+              onAttach={() => {}}
+            />
+          ) : slashCompletion.open ? (
             <SlashCommandMenu
               query={slashCompletion.query}
               activeIndex={slashCompletion.index}
@@ -977,13 +1072,20 @@ function SideChatComposer({
                 }}
               />
             ),
-          attachments:
-            !pending && files.length > 0 ? (
-              <ComposerAttachments
-                files={files}
-                onRemove={(index) => setFiles((prev) => prev.filter((_, i) => i !== index))}
+          attachments: (
+            <>
+              <ComposerMentionChips
+                items={mentionBrowser.mentionedItems}
+                onRemove={mentionBrowser.removeMentionedItem}
               />
-            ) : undefined,
+              {!pending && files.length > 0 ? (
+                <ComposerAttachments
+                  files={files}
+                  onRemove={(index) => setFiles((prev) => prev.filter((_, i) => i !== index))}
+                />
+              ) : undefined}
+            </>
+          ),
         }}
         actions={{
           leading: pending ? null : (

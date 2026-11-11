@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { ContextReferencePreview } from "./ContextReferencePreview";
+import { referenceScopeLabels, type ContextReference } from "@/lib/contextReferences";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { FileTextIcon, FolderIcon, XIcon } from "lucide-react";
 
@@ -25,6 +28,7 @@ export function ComposerMentionChips({
   showLineRange?: boolean;
   className?: string;
 }) {
+  const [preview, setPreview] = useState<ContextReference | null>(null);
   if (items.length === 0) return null;
   return (
     <ComposerChipRow className={cn("gap-1.5", className)}>
@@ -38,10 +42,20 @@ export function ComposerMentionChips({
           ) : (
             <FileTextIcon className="size-3 shrink-0" />
           )}
-          <span className="max-w-[200px] truncate" title={mentionItemPath(item)}>
-            @{item.path}
-            {item.isDir ? "/" : ""}
-          </span>
+          {item.reference ? (
+            <button
+              type="button"
+              className="max-w-[240px] truncate"
+              onClick={() => setPreview(item.reference!)}
+            >
+              @{item.reference.source_title} · {referenceScopeLabels[item.reference.scope]}
+            </button>
+          ) : (
+            <span className="max-w-[200px] truncate" title={mentionItemPath(item)}>
+              @{item.path}
+              {item.isDir ? "/" : ""}
+            </span>
+          )}
           {showLineRange && item.lineRange && (
             <span className="shrink-0">
               :{item.lineRange.start}-{item.lineRange.end}
@@ -57,6 +71,7 @@ export function ComposerMentionChips({
           </TooltipButton>
         </span>
       ))}
+      {preview && <ContextReferencePreview reference={preview} onClose={() => setPreview(null)} />}
     </ComposerChipRow>
   );
 }

@@ -12,6 +12,7 @@ import { attachmentsFromContent } from "./chatAttachments";
 
 import {
   type AnyBlock,
+  type MessageContentBlock,
   type BlockContext,
   type CompactionBlock,
   type CompactionInProgressBlock,
@@ -709,6 +710,15 @@ function* processEvent(state: ReducerState, event: StreamEvent): Generator<AnyBl
 
     // ── Message done ────────────────────────────────
     case "message_done": {
+      if (event.communication) {
+        yield {
+          type: "user_message",
+          ctx: ctx(state, event.itemId, event.responseId),
+          communication: event.communication,
+          content: event.content as MessageContentBlock[],
+        } satisfies UserMessageBlock;
+        return;
+      }
       const attachments = attachmentsFromContent(event.content);
       const isResponseSwitch = !!event.responseId && event.responseId !== state.responseId;
       const hadOpenText = state.inText;

@@ -1,8 +1,18 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
+import * as TooltipPrimitive from "radix-ui/tooltip";
 
 import { CommandPalette } from "./CommandPalette";
+import { SearchIcon } from "lucide-react";
+import { FALLBACK_SERVER_INFO } from "@/lib/capabilities";
+import type { WorkbenchWorkspace } from "@/lib/workbenchWorkspace";
+
+const useWorkspaceFileSearch = vi.fn();
+vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceFileSearch: (...args: unknown[]) => useWorkspaceFileSearch(...args),
+}));
+vi.mock("@/hooks/useIsAdmin", () => ({ useIsAdmin: () => false }));
 
 const navigate = vi.fn();
 vi.mock("@/lib/routing", () => ({
@@ -78,6 +88,9 @@ function renderPalette(overrides: Partial<ComponentProps<typeof CommandPalette>>
 
 beforeEach(() => {
   navigate.mockClear();
+  useWorkspaceFileSearch
+    .mockReset()
+    .mockReturnValue({ data: { files: [], truncated: false }, isFetching: false });
   useConversations.mockReset();
   useSessionSearch.mockReset();
   serverInfo.mockReturnValue({ session_search_scope: true });
@@ -105,24 +118,41 @@ describe("CommandPalette — sessions", () => {
     },
   );
 
-  it("fuzzy-matches session names without showing unrelated actions", () => {
-    setSessions([
-      conv("parser", "Fix the parser"),
-      conv("deploy", "Deploy API"),
-      conv("content", "Unrelated", null, "Fix the parser"),
-    ]);
-    const { onOpenChange } = renderPalette({ sessionsOnly: true });
-    fireEvent.change(screen.getByTestId("command-palette-input"), { target: { value: "fxprs" } });
-    expect(screen.getByText("Fix the parser")).toBeTruthy();
-    expect(screen.queryByText("Deploy API")).toBeNull();
-    expect(screen.queryByText("Unrelated")).toBeNull();
-    expect(screen.queryByText("Go to Inbox")).toBeNull();
-    fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Enter" });
-    expect(navigate).toHaveBeenCalledWith("/c/parser");
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+  it("searches subchat and delegate titles on the server without a content group", () => {
+    vi.useFakeTimers();
+    try {
+      setSessions([conv("recent", "Recent parent")]);
+      setSearchGroups({
+        title: searchPages([conv("child", "Parser subchat"), conv("delegate", "Parser delegate")]),
+        content: searchPages([conv("body-only", "Unrelated", null, "Parser")]),
+      });
+      const { onOpenChange } = renderPalette({ sessionsOnly: true });
+      expect(screen.getByText("Recent parent")).toBeTruthy();
+      fireEvent.change(screen.getByTestId("command-palette-input"), {
+        target: { value: "Parser" },
+      });
+      expect(screen.queryByText("Recent parent")).toBeNull();
+      expect(navigate).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(300));
+      expect(useSessionSearch).toHaveBeenCalledWith("Parser", "title", SEARCH_GROUP_OPTIONS);
+      expect(useSessionSearch).toHaveBeenCalledWith("Parser", "content", {
+        enabled: false,
+        limit: 8,
+      });
+      expect(labelRow("Parser subchat")).toBeTruthy();
+      expect(labelRow("Parser delegate")).toBeTruthy();
+      expect(screen.queryByText("Unrelated")).toBeNull();
+      expect(screen.queryByText("In messages")).toBeNull();
+      expect(screen.queryByText("Go to Inbox")).toBeNull();
+      fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Enter" });
+      expect(navigate).toHaveBeenCalledWith("/c/child");
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("loads later pages for fuzzy matching and stops loading while closed", () => {
+  it("loads later recent pages while idle and stops loading while closed", () => {
     const fetchNextPage = vi.fn();
     useConversations.mockReturnValue({
       data: { pages: [{ data: [] }] },
@@ -208,20 +238,25 @@ describe("CommandPalette — sessions", () => {
     expect(fetchNextPage).toHaveBeenCalledOnce();
   });
 
-  it("bounds rendered rows while searching every loaded session", () => {
-    setSessions(Array.from({ length: 100 }, (_, i) => conv(`c${i}`, `Session ${i}`)));
-    renderPalette({ sessionsOnly: true });
-    expect(screen.getAllByRole("option")).toHaveLength(50);
-    expect(screen.getByRole("status").textContent).toContain("Showing 50 of 100 matches.");
-    fireEvent.change(screen.getByTestId("command-palette-input"), { target: { value: "Session" } });
-    expect(screen.getAllByRole("option")).toHaveLength(50);
-    expect(document.querySelector("mark")?.textContent).toBe("Session");
-    fireEvent.change(screen.getByTestId("command-palette-input"), {
-      target: { value: "Session 99" },
-    });
-    expect(labelRow("Session 99")).toBeTruthy();
-    fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Enter" });
-    expect(navigate).toHaveBeenCalledWith("/c/c99");
+  it("bounds idle rows but uses server results rather than the loaded cache for typed titles", () => {
+    vi.useFakeTimers();
+    try {
+      setSessions(Array.from({ length: 100 }, (_, i) => conv(`c${i}`, `Session ${i}`)));
+      setSearchGroups({ title: searchPages([conv("remote-child", "Session 99 subchat")]) });
+      renderPalette({ sessionsOnly: true });
+      expect(screen.getAllByRole("option")).toHaveLength(50);
+      expect(screen.getByRole("status").textContent).toContain("Showing 50 of 100 matches.");
+      fireEvent.change(screen.getByTestId("command-palette-input"), {
+        target: { value: "Session 99" },
+      });
+      act(() => vi.advanceTimersByTime(300));
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+      expect(labelRow("Session 99 subchat")).toBeTruthy();
+      fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Enter" });
+      expect(navigate).toHaveBeenCalledWith("/c/remote-child");
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("lists sessions by display label with their agent type", () => {
     setSessions([conv("c1", "Fix the parser", "research-agent"), conv("c2", null)]);
@@ -844,3 +879,353 @@ describe("CommandPalette — empty state", () => {
     expect(screen.getByText("No results found")).toBeTruthy();
   });
 });
+
+describe("CommandPalette — explicit file targets and workflow commands", () => {
+  const workspace: WorkbenchWorkspace = {
+    id: "workspace-a",
+    root: "/root",
+    host_id: "host-a",
+    target_kind: "host",
+    capabilities: ["files"],
+  };
+  const file = (path: string) => ({
+    path,
+    name: path.split("/").at(-1),
+    type: "file",
+    bytes: 1,
+    modified_at: 1,
+  });
+  const type = (value: string) =>
+    fireEvent.change(screen.getByTestId("command-palette-input"), { target: { value } });
+  const settle = () =>
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("locates files only in the supplied workspace/folder and opens only on selection", () => {
+    useWorkspaceFileSearch.mockReturnValue({ data: { files: [file("src/parser.ts")] } });
+    const onOpenFile = vi.fn(),
+      onFileSearch = vi.fn();
+    const target = { workspace, conversationId: "captured-chat", folder: "/root/project" };
+    const props = renderPalette({ fileTarget: target, onOpenFile, onFileSearch });
+    type("parser");
+    expect(screen.queryByText("src/parser.ts")).toBeNull();
+    expect(onOpenFile).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    settle();
+    expect(useWorkspaceFileSearch).toHaveBeenLastCalledWith(
+      "captured-chat",
+      "parser",
+      undefined,
+      undefined,
+      { enabled: true, workspace },
+      "/root/project",
+    );
+    expect(onFileSearch).not.toHaveBeenCalled();
+    fireEvent.click(labelRow("src/parser.ts"));
+    expect(onOpenFile).toHaveBeenCalledExactlyOnceWith("src/parser.ts", target);
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("passes null workspace for explicit chat resources and never inherits an ambient target", () => {
+    renderPalette({ fileTarget: { conversationId: "chat-a" }, onOpenFile: vi.fn() });
+    type("readme");
+    settle();
+    expect(useWorkspaceFileSearch).toHaveBeenLastCalledWith(
+      "chat-a",
+      "readme",
+      undefined,
+      undefined,
+      { enabled: true, workspace: null },
+      "",
+    );
+  });
+
+  it.each([undefined, {}, { conversationId: "temp:creating" }])(
+    "does not search without an authoritative target: %o",
+    (fileTarget) => {
+      renderPalette({ fileTarget, onOpenFile: vi.fn() });
+      type("readme");
+      settle();
+      expect(useWorkspaceFileSearch.mock.lastCall?.[4]).toEqual({
+        enabled: false,
+        workspace: null,
+      });
+    },
+  );
+
+  it("never opens stale rows while the query, folder or target is changing", () => {
+    useWorkspaceFileSearch.mockReturnValue({ data: { files: [file("old.ts")] } });
+    const props = {
+      open: true,
+      onOpenChange: vi.fn(),
+      onToggleLeftSidebar: vi.fn(),
+      onToggleRightSidebar: vi.fn(),
+      onOpenFile: vi.fn(),
+      fileTarget: { workspace, folder: "/first" },
+    };
+    const { rerender } = render(<CommandPalette {...props} />);
+    type("old");
+    settle();
+    expect(labelRow("old.ts")).toBeTruthy();
+    type("new");
+    expect(screen.queryByText("old.ts")).toBeNull();
+    fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Enter" });
+    expect(props.onOpenFile).not.toHaveBeenCalled();
+    useWorkspaceFileSearch.mockReturnValue({
+      data: { files: [file("old.ts")] },
+      isPlaceholderData: true,
+      isFetching: true,
+    });
+    settle();
+    rerender(
+      <CommandPalette
+        {...props}
+        fileTarget={{ workspace: { ...workspace, id: "workspace-b" }, folder: "/second" }}
+      />,
+    );
+    expect(screen.queryByText("old.ts")).toBeNull();
+    useWorkspaceFileSearch.mockReturnValue({ data: { files: [file("new.ts")] } });
+    rerender(
+      <CommandPalette
+        {...props}
+        fileTarget={{ workspace: { ...workspace, id: "workspace-b" }, folder: "/second" }}
+      />,
+    );
+    fireEvent.click(labelRow("new.ts"));
+    expect(props.onOpenFile).toHaveBeenCalledExactlyOnceWith("new.ts", {
+      workspace: { ...workspace, id: "workspace-b" },
+      folder: "/second",
+    });
+  });
+
+  it("opens advanced search with the authoritative typed query without executing while typing", () => {
+    const onFileSearch = vi.fn(),
+      onOpenFile = vi.fn();
+    const target = { workspace, folder: "/project" };
+    renderPalette({ fileTarget: target, onFileSearch, onOpenFile });
+    type("old");
+    settle();
+    type("current **query**");
+    expect(onFileSearch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Search file contents…"));
+    expect(onFileSearch).toHaveBeenCalledExactlyOnceWith("current **query**", target);
+    expect(onOpenFile).not.toHaveBeenCalled();
+  });
+
+  it("exposes truncation, errors and explicit retry without claiming complete results", () => {
+    const refetch = vi.fn();
+    useWorkspaceFileSearch.mockReturnValue({ data: { files: [], truncated: true }, refetch });
+    const props = {
+      open: true,
+      onOpenChange: vi.fn(),
+      onToggleLeftSidebar: vi.fn(),
+      onToggleRightSidebar: vi.fn(),
+      fileTarget: { workspace },
+      onOpenFile: vi.fn(),
+    };
+    const { rerender } = render(<CommandPalette {...props} />);
+    type("rare");
+    settle();
+    expect(screen.getByText(/File results are limited/)).toBeTruthy();
+    expect(screen.queryByText("No results found")).toBeNull();
+    useWorkspaceFileSearch.mockReturnValue({ isError: true, refetch });
+    rerender(<CommandPalette {...props} />);
+    expect(refetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Retry file search"));
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it("retains supplied view actions and message-search callbacks alongside the inventory", () => {
+    const run = vi.fn(),
+      onMessageSearch = vi.fn(),
+      onOpenProjects = vi.fn();
+    const action = {
+      id: "captured-view",
+      label: "Captured view action",
+      icon: SearchIcon,
+      keywords: ["captured"],
+      run,
+    };
+    setSearchGroups({ content: searchPages([conv("source", "Notes", null, "match snippet")]) });
+    serverInfo.mockReturnValue({
+      ...FALLBACK_SERVER_INFO,
+      session_search_scope: true,
+      login_url: "/login",
+      enabled_connections: ["github"],
+      features: { custom_agents_settings_ui: true },
+      agent_install: true,
+    });
+    renderPalette({ actions: [action], onMessageSearch, onOpenProjects });
+    for (const label of [
+      "Settings: Appearance",
+      "Settings: Custom agents",
+      "Settings: Sandbox Integrations",
+      "Settings: Account",
+      "Go to Automations",
+      "Open Projects",
+    ])
+      expect(screen.getByText(label)).toBeTruthy();
+    expect(run).not.toHaveBeenCalled();
+    expect(onOpenProjects).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Captured view action"));
+    expect(run).toHaveBeenCalledOnce();
+    type("match");
+    settle();
+    fireEvent.click(labelRow("Notes"));
+    expect(onMessageSearch).toHaveBeenCalledExactlyOnceWith("source", "match");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it.each([{ open: false }, { sessionsOnly: true }])(
+    "disables filename requests outside the global open palette: %o",
+    (override) => {
+      const props = {
+        open: true,
+        onOpenChange: vi.fn(),
+        onToggleLeftSidebar: vi.fn(),
+        onToggleRightSidebar: vi.fn(),
+        fileTarget: { workspace },
+        onOpenFile: vi.fn(),
+      };
+      const { rerender } = render(<CommandPalette {...props} />);
+      type("file");
+      settle();
+      rerender(<CommandPalette {...props} {...override} />);
+      expect(useWorkspaceFileSearch.mock.lastCall?.[4].enabled).toBe(false);
+    },
+  );
+});
+
+it("does not activate a message result from the previous query", () => {
+  vi.useFakeTimers();
+  try {
+    const onMessageSearch = vi.fn();
+    setSearchGroups({ content: searchPages([conv("old-chat", "Old match", null, "older-query")]) });
+    renderPalette({ onMessageSearch });
+    fireEvent.change(screen.getByTestId("command-palette-input"), {
+      target: { value: "older-query" },
+    });
+    act(() => vi.advanceTimersByTime(300));
+    expect(labelRow("Old match")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("command-palette-input"), {
+      target: { value: "authoritative-new-query" },
+    });
+    expect(screen.queryByText("Old match")).toBeNull();
+    fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Enter" });
+    expect(onMessageSearch).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+describe("CommandPalette — Escape ownership", () => {
+  function PaletteWithComposer({ tooltip, onClose }: { tooltip: boolean; onClose: () => void }) {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <textarea aria-label="Composer draft" defaultValue="Keep this unsent draft" />
+        <button type="button" onClick={() => setOpen(true)}>
+          Open palette
+        </button>
+        <CommandPalette
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (!next) onClose();
+          }}
+          onToggleLeftSidebar={vi.fn()}
+          onToggleRightSidebar={vi.fn()}
+        />
+        <TooltipPrimitive.Provider>
+          <TooltipPrimitive.Root open={tooltip}>
+            <TooltipPrimitive.Trigger>Underlying composer control</TooltipPrimitive.Trigger>
+            <TooltipPrimitive.Portal>
+              <TooltipPrimitive.Content>Composer control tooltip</TooltipPrimitive.Content>
+            </TooltipPrimitive.Portal>
+          </TooltipPrimitive.Root>
+        </TooltipPrimitive.Provider>
+      </>
+    );
+  }
+
+  it.each([false, true])(
+    "closes the real dialog from its input without leaking Escape (tooltip above: %s)",
+    (tooltip) => {
+      const onClose = vi.fn();
+      const backgroundEscape = vi.fn((event: KeyboardEvent) => {
+        if (event.key === "Escape") navigate("background-chat-shortcut");
+      });
+      const props = { tooltip: false, onClose };
+      const { rerender } = render(<PaletteWithComposer {...props} />);
+      fireEvent.focus(screen.getByLabelText("Composer draft"));
+      fireEvent.click(screen.getByText("Open palette"));
+      const input = screen.getByTestId("command-palette-input");
+      fireEvent.change(input, { target: { value: "Activity" } });
+      // A tooltip opening after the dialog becomes Radix's highest dismissal layer.
+      rerender(<PaletteWithComposer {...props} tooltip={tooltip} />);
+      if (tooltip) expect(screen.getByText("Composer control tooltip")).toBeTruthy();
+      fireEvent.keyDown(input, { key: "Escape", code: "Escape", isComposing: true });
+      expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+      expect(onClose).not.toHaveBeenCalled();
+      document.addEventListener("keydown", backgroundEscape);
+      try {
+        fireEvent.keyDown(input, { key: "Escape", code: "Escape" });
+        expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(backgroundEscape).not.toHaveBeenCalled();
+        expect(navigate).not.toHaveBeenCalled();
+        expect(screen.getByLabelText("Composer draft")).toHaveValue("Keep this unsent draft");
+      } finally {
+        document.removeEventListener("keydown", backgroundEscape);
+      }
+    },
+  );
+});
+
+it.each(["loading", {}] as const)(
+  "sessions-only title lookup does not depend on grouped-search capabilities: %o",
+  (info) => {
+    vi.useFakeTimers();
+    try {
+      serverInfo.mockReturnValue(info);
+      const fetchRecent = vi.fn(),
+        fetchTitles = vi.fn();
+      useConversations.mockReturnValue({
+        data: { pages: [{ data: [conv("parent", "Recent parent")] }] },
+        hasNextPage: true,
+        fetchNextPage: fetchRecent,
+      });
+      setSearchGroups({
+        title: {
+          ...searchPages([conv("child", "Delegate target")]),
+          hasNextPage: true,
+          fetchNextPage: fetchTitles,
+        },
+        content: { isError: true },
+      });
+      renderPalette({ sessionsOnly: true });
+      fetchRecent.mockClear();
+      fireEvent.change(screen.getByTestId("command-palette-input"), {
+        target: { value: "Delegate" },
+      });
+      act(() => vi.advanceTimersByTime(300));
+      expect(useSessionSearch).toHaveBeenCalledWith("Delegate", "title", SEARCH_GROUP_OPTIONS);
+      expect(useSessionSearch).toHaveBeenCalledWith("Delegate", "content", {
+        enabled: false,
+        limit: 8,
+      });
+      expect(fetchRecent).not.toHaveBeenCalled();
+      expect(screen.queryByText("Couldn't load sessions.")).toBeNull();
+      fireEvent.click(screen.getByText("Show more"));
+      expect(fetchTitles).toHaveBeenCalledOnce();
+      expect(fetchRecent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);

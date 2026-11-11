@@ -14,6 +14,7 @@ export interface TextSelectionAction {
   label: string;
   icon: ReactNode;
   onSelect: () => void;
+  closeOnSelect?: boolean;
 }
 
 export function TextSelectionMenu({
@@ -130,7 +131,7 @@ export function TextSelectionMenu({
           onFocus={() => setActiveIndex(index)}
           onClick={() => {
             action.onSelect();
-            onClose();
+            if (action.closeOnSelect !== false) onClose();
           }}
         >
           {action.icon}

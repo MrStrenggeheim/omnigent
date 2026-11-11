@@ -13,6 +13,7 @@
 // translator can skip them without crashing.
 
 import type { MessageContentBlock } from "./blocks";
+import type { MessageCommunication } from "./messageCommunication";
 
 export interface BaseItem {
   id: string;
@@ -25,6 +26,7 @@ export interface BaseItem {
 }
 
 export interface MessageItem extends BaseItem {
+  communication?: MessageCommunication;
   type: "message";
   role: "user" | "assistant";
   content: MessageContentBlock[];

@@ -28,8 +28,12 @@ import { useBrowserAgentRelay } from "./useBrowserAgentRelay";
 import legacyActions from "../../electron/test/fixtures/browserActions-v0.18.json";
 
 const CONV = "conv_relay";
-const renderRelay = (visibleId: string | null | undefined = CONV, client = new QueryClient()) => {
-  return renderHook(({ id }) => useBrowserAgentRelay(id), {
+const renderRelay = (
+  visibleId: string | null | undefined = CONV,
+  client = new QueryClient(),
+  scoped = false,
+) => {
+  return renderHook(({ id }) => useBrowserAgentRelay(id, scoped), {
     initialProps: { id: visibleId },
     wrapper: ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -126,6 +130,16 @@ afterEach(() => {
 });
 
 describe("useBrowserAgentRelay — claim-first protocol", () => {
+  it("lets only the owning docked conversation claim its browser action", async () => {
+    installBridge();
+    authenticatedFetch.mockResolvedValueOnce(jsonResponse({ claimed: false }));
+    renderRelay("first", new QueryClient(), true);
+    renderRelay("second", new QueryClient(), true);
+    emitBrowserActionRequest(actionEvent("screenshot"), "second");
+    await vi.waitFor(() => expect(authenticatedFetch).toHaveBeenCalledOnce());
+    expect(String(authenticatedFetch.mock.calls[0][0])).toContain("/second/");
+  });
+
   it("drops the action when the claim is lost (no dispatch, no result POST)", async () => {
     const bridge = installBridge();
     authenticatedFetch.mockResolvedValueOnce(jsonResponse({ claimed: false }));

@@ -1,3 +1,4 @@
+import type { MessageCommunication } from "./messageCommunication";
 import type { ChatAttachmentContent } from "./chatAttachments";
 import type { NativePermissionDelivery } from "./nativePermissionDelivery";
 // Block walker — converts a flat `AnyBlock[]` into a list of bubble
@@ -170,6 +171,7 @@ export type RenderItem =
 export type Bubble =
   | {
       kind: "user";
+      communication?: MessageCommunication;
       itemId: string;
       /** Queued input that does not yet have a persisted transcript item. */
       pending?: boolean;
@@ -882,6 +884,7 @@ function walkBubbles(
           : bubbles.length;
       bubbles.push({
         kind: "user",
+        ...(b.type === "user_message" && b.communication ? { communication: b.communication } : {}),
         itemId: b.ctx.itemId ?? `user_${i}`,
         content:
           b.type === "user_message" ? b.content : [{ type: "input_text", text: `!${b.input}` }],
@@ -1999,6 +2002,7 @@ export function bubblesEqual(a: Bubble, b: Bubble): boolean {
       Boolean(a.pending) !== Boolean(b.pending) ||
       Boolean(a.awaitingAgent) !== Boolean(b.awaitingAgent) ||
       a.createdBy !== b.createdBy ||
+      a.communication !== b.communication ||
       a.createdAtS !== b.createdAtS ||
       a.stableKey !== b.stableKey ||
       a.shellCommand !== b.shellCommand ||

@@ -1,3 +1,4 @@
+import { readMessageCommunication } from "./messageCommunication";
 import { attachmentsFromContent } from "./chatAttachments";
 // Translate persisted `ConversationItem`s into a flat `AnyBlock[]` —
 // the same shape the live `BlockStream` reducer produces during
@@ -271,6 +272,14 @@ function itemToBlock(item: ConversationItem, agentName?: string | null): AnyBloc
       data,
     };
   }
+  if (isMessageItem(item) && readMessageCommunication(item.communication)) {
+    return {
+      type: "user_message",
+      ctx: ctxFor(item),
+      content: item.content,
+      communication: item.communication,
+    };
+  }
   if (isMessageItem(item) && item.role === "user") {
     if (!item.is_meta && (item.created_by || item.user_authored === true)) {
       return userMessageToBlock(item);
@@ -352,6 +361,7 @@ function isCompactionSummaryMessage(item: MessageItem): boolean {
 
 function userMessageToBlock(item: MessageItem): UserMessageBlock {
   return {
+    ...(item.communication ? { communication: item.communication } : {}),
     type: "user_message",
     ctx: ctxFor(item),
     // Forward the full content array verbatim so the renderer can

@@ -32,6 +32,7 @@ import type {
 } from "@/lib/blocks";
 import type { ConversationItem, MessageItem } from "@/lib/conversationItems";
 import { itemsToBlocks } from "@/lib/itemsToBlocks";
+import type { MessageCommunication } from "@/lib/messageCommunication";
 import { buildBubbles } from "@/lib/renderItems";
 import { getSessionSlim, INITIAL_WINDOW_ITEMS, SESSION_HISTORY_PAGE_SIZE } from "@/lib/sessionsApi";
 import { SSE_STALL_TIMEOUT_MS } from "@/lib/sse";
@@ -272,7 +273,12 @@ let sessionItems: Map<string, ConversationItem[]>;
 let sessionPendingElicitations: Map<string, Record<string, unknown>[]>;
 let sessionPendingInputs: Map<
   string,
-  { pending_id: string; content: unknown[]; created_by?: string }[]
+  {
+    pending_id: string;
+    content: unknown[];
+    created_by?: string;
+    communication?: MessageCommunication;
+  }[]
 >;
 // Per-session cost-control switch the snapshot/PATCH handlers serve;
 // absent key = unset (the wire field comes back null).
@@ -587,7 +593,12 @@ function seedPendingElicitations(id: string, events: Record<string, unknown>[]):
 
 function seedPendingInputs(
   id: string,
-  inputs: { pending_id: string; content: unknown[]; created_by?: string }[],
+  inputs: {
+    pending_id: string;
+    content: unknown[];
+    created_by?: string;
+    communication?: MessageCommunication;
+  }[],
 ): void {
   sessionPendingInputs.set(id, inputs);
 }
@@ -20819,4 +20830,154 @@ it("holds a restored queue when the workspace changed while this client was away
       ([url, init]) => String(url).endsWith("/events") && init?.method === "POST",
     ),
   ).toEqual([]);
+});
+
+describe("pending peer communication", () => {
+  const communication: MessageCommunication = {
+    kind: "peer",
+    message_id: "peer-stable-id",
+    source_conversation_id: "reviewer",
+    destination_conversation_id: "conv_peer",
+    delivery_state: "unknown",
+    receipt: "accepted",
+  };
+  const content = [{ type: "input_text" as const, text: "Same text" }];
+
+  it("preserves pending peers on reload and settles only their live receipt beside a human queue", async () => {
+    seedSession("conv_peer", []);
+    sessionLabels.set("conv_peer", { "omnigent.startup": "ready" });
+    seedPendingInputs("conv_peer", [
+      { pending_id: "pending_human", content, created_by: "human" },
+      { pending_id: "pending_peer", content, created_by: "owner", communication },
+    ]);
+    await useChatStore.getState().switchTo("conv_peer");
+    const before = useChatStore.getState();
+    expect(before.startupPending).toBe(true);
+    expect(before.pendingUserMessages[1]).toMatchObject({ communication, tempId: "pending_peer" });
+    const human = before.pendingUserMessages[0];
+    const receipt: SessionInputConsumedEvent = {
+      type: "session_input_consumed",
+      itemType: "message",
+      itemId: communication.message_id,
+      clearedPendingId: "pending_peer",
+      data: { role: "user", content, communication },
+    };
+    handleSessionEvent(receipt, "conv_peer");
+    handleSessionEvent(receipt, "conv_peer");
+    const after = useChatStore.getState();
+    expect(after.startupPending).toBe(false);
+    expect(after.pendingUserMessages).toEqual([human]);
+    expect(after.blocks).toHaveLength(1);
+    expect(after.blocks[0]).toMatchObject({ communication, stableKey: "pending_peer" });
+  });
+
+  it.each(["tempId", "pendingId", "communicationId"] as const)(
+    "settles an exact %s receipt even when the item already committed",
+    (identity) => {
+      bindConversationForTest("conv_peer");
+      const human: PendingUserMessage = { tempId: "human", content, author: "human" };
+      const peer: PendingUserMessage = {
+        tempId: identity === "tempId" ? communication.message_id : "peer-temp",
+        ...(identity === "pendingId" ? { pendingId: communication.message_id } : {}),
+        content,
+        communication:
+          identity === "communicationId"
+            ? communication
+            : { ...communication, message_id: "native-source-id" },
+      };
+      const committed = itemsToBlocks([
+        {
+          ...userMessage("peer-response", "Same text"),
+          id: communication.message_id,
+          communication,
+        } as MessageItem,
+      ]);
+      useChatStore.setState({
+        blocks: committed,
+        pendingUserMessages: [human, peer],
+        startupPending: true,
+      });
+      handleSessionEvent({
+        type: "session_input_consumed",
+        itemType: "message",
+        itemId: communication.message_id,
+        data: { role: "user", content, communication: peer.communication },
+      });
+      expect(useChatStore.getState().pendingUserMessages).toEqual([human]);
+      expect(useChatStore.getState().blocks).toEqual(committed);
+      expect(useChatStore.getState().startupPending).toBe(false);
+    },
+  );
+
+  it("does not consume any pending message for an unmatched peer receipt with identical text", () => {
+    bindConversationForTest("conv_peer");
+    const pending: PendingUserMessage[] = [
+      { tempId: "human", content },
+      { tempId: "peer", content, communication },
+    ];
+    useChatStore.setState({ blocks: [], pendingUserMessages: pending });
+    handleSessionEvent({
+      type: "session_input_consumed",
+      itemType: "message",
+      itemId: "different-item",
+      clearedPendingId: "unknown-pending",
+      data: {
+        role: "user",
+        content,
+        communication: { ...communication, message_id: "different-item" },
+      },
+    });
+    expect(useChatStore.getState().pendingUserMessages).toEqual(pending);
+    expect(useChatStore.getState().blocks).toHaveLength(1);
+  });
+
+  it("keeps a pending peer out of the ordinary human FIFO fallback", () => {
+    bindConversationForTest("conv_peer");
+    const peer: PendingUserMessage = { tempId: "peer", content, communication };
+    useChatStore.setState({
+      blocks: [],
+      pendingUserMessages: [peer, { tempId: "human", content }],
+    });
+    handleSessionEvent({
+      type: "session_input_consumed",
+      itemType: "message",
+      itemId: "human-item",
+      data: { role: "user", content },
+    });
+    expect(useChatStore.getState().pendingUserMessages).toEqual([peer]);
+    expect(useChatStore.getState().blocks[0]).toMatchObject({ stableKey: "human" });
+    expect(useChatStore.getState().blocks[0]).not.toHaveProperty("communication");
+  });
+
+  it("does not match a pending peer to identical human history on reload", async () => {
+    seedSession("conv_peer", [userMessage("old-human", "Same text")]);
+    seedPendingInputs("conv_peer", [{ pending_id: "pending_peer", content, communication }]);
+    await useChatStore.getState().switchTo("conv_peer");
+    expect(useChatStore.getState().pendingUserMessages).toEqual([
+      { tempId: "pending_peer", content, communication },
+    ]);
+  });
+
+  it.each([true, false])(
+    "deduplicates only the exact committed peer on reload (same id=%s)",
+    async (sameId) => {
+      seedSession("conv_peer", [
+        {
+          ...userMessage("old-peer", "Same text"),
+          communication: {
+            ...communication,
+            message_id: sameId ? communication.message_id : "another-peer",
+          },
+        } as MessageItem,
+      ]);
+      seedPendingInputs("conv_peer", [
+        { pending_id: "pending_human", content },
+        { pending_id: "pending_peer", content, communication },
+      ]);
+      await useChatStore.getState().switchTo("conv_peer");
+      expect(useChatStore.getState().pendingUserMessages.map((p) => p.tempId)).toEqual(
+        sameId ? ["pending_human"] : ["pending_human", "pending_peer"],
+      );
+    },
+  );
 });

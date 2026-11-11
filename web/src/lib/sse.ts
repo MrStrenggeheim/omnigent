@@ -1,3 +1,4 @@
+import { readMessageCommunication } from "./messageCommunication";
 import { parseNativePermissionDelivery } from "./nativePermissionDelivery";
 // Mirrors sdks/python-client/omnigent_client/_sse.py.
 //
@@ -1257,6 +1258,15 @@ function parseOutputItem(data: Record<string, unknown>): StreamEvent | null {
   }
 
   if (itemType === "message") {
+    const communication = readMessageCommunication(rec.communication);
+    if (communication)
+      return {
+        type: "message_done",
+        content: Array.isArray(rec.content) ? rec.content : [],
+        communication,
+        itemId,
+        responseId,
+      } satisfies MessageDone;
     if (rec.is_meta === true) return null;
     const content = rec.content;
     return {

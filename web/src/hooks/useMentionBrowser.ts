@@ -1,4 +1,11 @@
-import { type KeyboardEvent, type RefObject, useRef, useState } from "react";
+import {
+  readReferenceDraft,
+  writeReferenceDraft,
+  subscribeReferenceDraft,
+} from "@/lib/contextReferenceDrafts";
+import type { ContextReference } from "@/lib/contextReferences";
+import { toast } from "@/lib/notifications";
+import { type KeyboardEvent, type RefObject, useRef, useState, useEffect } from "react";
 
 import type { MentionItem, MentionState } from "@/lib/composerMentions";
 import { composerAttachmentKey } from "@/store/chatStore";
@@ -13,6 +20,7 @@ import type { WorkspaceFile } from "@/hooks/useWorkspaceChangedFiles";
  */
 export interface MentionBrowserParams {
   /** Active mention token, owned by the composer (recomputed on text change). */
+  referenceDraftKey?: string;
   mention: MentionState | null;
   /** Clear or replace the active token (e.g. on attach, drill, or dismiss). */
   setMention: (next: MentionState | null) => void;
@@ -32,6 +40,7 @@ export interface MentionBrowser {
   mentionedItems: MentionItem[];
   setMentionedItems: React.Dispatch<React.SetStateAction<MentionItem[]>>;
   /** Attach a file (isDir=false) or whole folder (isDir=true) as a chip. */
+  attachReference: (reference: ContextReference) => void;
   attachMention: (path: string, isDir: boolean) => void;
   /** Drill into a folder: rewrite the token to ``@<dir>/`` and keep browsing. */
   openMentionDir: (path: string) => void;
@@ -59,8 +68,72 @@ export function useMentionBrowser(params: MentionBrowserParams): MentionBrowser 
     isMobile = false,
   } = params;
   const [mentionIndex, setMentionIndex] = useState(-1);
-  const [mentionedItems, setMentionedItems] = useState<MentionItem[]>([]);
-  const mentionOpen = mentionEntries.length > 0;
+  const [mentionedItems, setMentionedItems] = useState<MentionItem[]>(() =>
+    params.referenceDraftKey
+      ? readReferenceDraft(params.referenceDraftKey).map((reference) => ({
+          path: reference.source_title,
+          isDir: false,
+          reference,
+        }))
+      : [],
+  );
+  const mentionOpen = mention != null;
+  const referenceKey = params.referenceDraftKey;
+  const loadedKey = useRef(referenceKey);
+  if (loadedKey.current !== referenceKey) {
+    loadedKey.current = referenceKey;
+    setMentionedItems(
+      referenceKey
+        ? readReferenceDraft(referenceKey).map((reference) => ({
+            path: reference.source_title,
+            isDir: false,
+            reference,
+          }))
+        : [],
+    );
+  }
+  useEffect(() => {
+    if (!referenceKey || loadedKey.current !== referenceKey) return;
+    try {
+      writeReferenceDraft(
+        referenceKey,
+        mentionedItems.flatMap((item) => (item.reference ? [item.reference] : [])),
+      );
+    } catch {
+      toast.error("Could not save chat references for reload. Keep this draft open.");
+    }
+  }, [referenceKey, mentionedItems]);
+  useEffect(() => {
+    if (!referenceKey) return;
+    return subscribeReferenceDraft(referenceKey, () => {
+      const references = readReferenceDraft(referenceKey);
+      setMentionedItems((current) => {
+        const existing = current.flatMap((item) =>
+          item.reference ? [item.reference.snapshot_id] : [],
+        );
+        if (existing.join() === references.map((reference) => reference.snapshot_id).join())
+          return current;
+        return [
+          ...current.filter((item) => !item.reference),
+          ...references.map((reference) => ({
+            path: reference.source_title,
+            isDir: false,
+            reference,
+          })),
+        ];
+      });
+    });
+  }, [referenceKey]);
+  const attachReference = (reference: ContextReference) => {
+    if (!mention) return;
+    setText(text.slice(0, mention.start) + text.slice(mention.end));
+    setMentionedItems((current) => [
+      ...current.filter((item) => item.reference?.snapshot_id !== reference.snapshot_id),
+      { path: reference.source_title, isDir: false, reference },
+    ]);
+    setMention(null);
+    queueMicrotask(() => textareaRef.current?.focus());
+  };
 
   // Pre-select the top row whenever the listing changes — lets Enter/Tab act on
   // the top hit without arrowing first. Keyed by type+path so a file and a dir
@@ -115,14 +188,24 @@ export function useMentionBrowser(params: MentionBrowserParams): MentionBrowser 
   const removeMentionedItem = (index: number) =>
     setMentionedItems((prev) => prev.filter((_, i) => i !== index));
 
+  const enteringPicker = useRef(false);
+  useEffect(() => {
+    const onFocusOut = (event: FocusEvent) => {
+      enteringPicker.current =
+        event.relatedTarget instanceof Element &&
+        !!event.relatedTarget.closest("[data-context-reference-picker]");
+    };
+    document.addEventListener("focusout", onFocusOut, true);
+    return () => document.removeEventListener("focusout", onFocusOut, true);
+  }, []);
   const dismiss = () => {
-    if (!mention) return;
+    if (!mention || enteringPicker.current) return;
     setMention(null);
     setMentionIndex(-1);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
-    if (!mentionOpen) return false;
+    if (!mentionOpen || mentionEntries.length === 0) return false;
     const active = mentionIndex >= 0 ? mentionEntries[mentionIndex] : undefined;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -161,6 +244,7 @@ export function useMentionBrowser(params: MentionBrowserParams): MentionBrowser 
     mentionedItems,
     setMentionedItems,
     attachMention,
+    attachReference,
     openMentionDir,
     removeMentionedItem,
     handleKeyDown,

@@ -1,3 +1,4 @@
+import { useConversationChatStore } from "@/workbench/ScopedChatStore";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { useNotificationNotice } from "@/hooks/useNotificationNotice";
 import { Loader2Icon, WifiOffIcon } from "lucide-react";
@@ -9,7 +10,6 @@ import { SANDBOX_STAGE_LABELS } from "@/lib/sandboxStatus";
 import type { SandboxStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTerminalFirst } from "@/shell/TerminalFirstContext";
-import { useChatStore } from "@/store/chatStore";
 import { CHAT_COLUMN_WIDTH } from "./chatLayout";
 
 /**
@@ -17,6 +17,7 @@ import { CHAT_COLUMN_WIDTH } from "./chatLayout";
  * warning: the launch keeps going, and the banner leaves when it moves on.
  */
 export function SandboxActionBanner() {
+  const useChatStore = useConversationChatStore();
   const asking = useChatStore((s) =>
     s.sandboxStatus?.stage === "action_required" && s.sandboxStatus.details
       ? s.sandboxStatus.details
@@ -67,6 +68,7 @@ export function ConnectionIndicator({
   liveness: SessionLiveness;
   onShowReconnectHelp: () => void;
 }) {
+  const useChatStore = useConversationChatStore();
   const terminalFirst = useTerminalFirst();
   const sandboxStatus = useChatStore((s) => s.sandboxStatus);
   // Genuinely-unreachable states get the reconnect banner, for
@@ -168,6 +170,7 @@ export function ConnectionIndicator({
  * there).
  */
 export function RunnerStartingIndicator({ variant }: { variant: "hero" | "row" }) {
+  const useChatStore = useConversationChatStore();
   const sandboxStatus = useChatStore((s) => s.sandboxStatus);
   // `ready` never reaches the store (cleared) and `failed` renders the
   // destructive band in ConnectionIndicator — only in-flight stages
@@ -240,6 +243,7 @@ export function mcpStartingLine(starting: string[], total: number): string {
  * rather than adding an item to the chat viewport.
  */
 export function McpStartupIndicator() {
+  const useChatStore = useConversationChatStore();
   const mcpStartup = useChatStore((s) => s.mcpStartup);
   if (mcpStartup === null) return null;
   const names = Object.keys(mcpStartup).sort();

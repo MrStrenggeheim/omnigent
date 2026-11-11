@@ -1,3 +1,4 @@
+import { readResourceViewState, writeResourceViewState } from "@/lib/resourceViewStorage";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import type { RefObject, UIEvent } from "react";
 
@@ -11,12 +12,17 @@ const scrollTopCache = new Map<string, number>();
 
 /** Read a saved scroll offset (e.g. to seed a Monaco editor on mount). */
 export function getSavedScrollTop(key: string): number | undefined {
+  if (key.includes('["view",')) {
+    const saved = readResourceViewState<unknown>(`scroll:${key}`);
+    return typeof saved === "number" && Number.isFinite(saved) && saved >= 0 ? saved : undefined;
+  }
   return scrollTopCache.get(key);
 }
 
 /** Record a scroll offset (e.g. from Monaco's onDidScrollChange). */
 export function saveScrollTop(key: string, scrollTop: number): void {
-  scrollTopCache.set(key, scrollTop);
+  if (key.includes('["view",')) writeResourceViewState(`scroll:${key}`, scrollTop);
+  else scrollTopCache.set(key, scrollTop);
 }
 
 /**
@@ -134,7 +140,7 @@ export function useScrollRestore(
       // Keep the deadline stable across readiness changes and StrictMode replay.
       pendingRef.current = key
         ? {
-            target: scrollTopCache.get(key) ?? 0,
+            target: getSavedScrollTop(key) ?? 0,
             deadline: performance.now() + SCROLL_RESTORE_BUDGET_MS,
           }
         : null;
@@ -199,7 +205,7 @@ export function useScrollRestore(
 
   return useCallback((event: UIEvent<HTMLElement>) => {
     if (keyRef.current && pendingRef.current === null) {
-      scrollTopCache.set(keyRef.current, event.currentTarget.scrollTop);
+      saveScrollTop(keyRef.current, event.currentTarget.scrollTop);
     }
   }, []);
 }

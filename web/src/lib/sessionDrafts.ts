@@ -1,3 +1,4 @@
+import { clearReferenceDrafts } from "./contextReferenceDrafts";
 import { useSyncExternalStore } from "react";
 import { readComposerDraft, type ComposerDraft } from "./replyDraft";
 
@@ -149,6 +150,7 @@ export function useSessionDraftIds(enabled = true): string {
 
 /** Clear all drafts, primarily for logout/reset flows and isolated tests. */
 export function clearSessionDrafts(): void {
+  clearReferenceDrafts();
   sessionDrafts.clear();
   retiredDraftIds.clear();
   saveDraftsToStorage();

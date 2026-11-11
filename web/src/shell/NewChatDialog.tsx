@@ -333,7 +333,7 @@ import {
 import type { SessionListWireItem } from "@/lib/sessionListCache";
 import { nextPushedSession } from "@/lib/sessionUpdatesSocket";
 import { CLIENT_CREATE_TOKEN_LABEL, newTempConversation } from "@/lib/tempConversationId";
-import { FileMentionMenu } from "@/components/FileMentionMenu";
+import { ComposerMentionMenu } from "@/components/composer/ComposerMentionMenu";
 import { FileDropOverlay } from "@/components/FileDropOverlay";
 import { useMentionBrowser } from "@/hooks/useMentionBrowser";
 import {
@@ -5072,7 +5072,7 @@ export function NewChatLandingScreen() {
     mentionFilter,
     workspaceRoot,
   ]);
-  const mentionOpen = mentionEntries.length > 0;
+  const mentionOpen = mention !== null;
   // Closed-but-loading window: don't let Enter send the half-typed "@dir/".
   // ``isPlaceholderData`` covers the drill-down window where react-query is
   // still serving the previous directory's rows (``isLoading`` stays false).
@@ -5087,6 +5087,7 @@ export function NewChatLandingScreen() {
     mentionIndex,
     mentionedItems,
     attachMention,
+    attachReference,
     openMentionDir,
     removeMentionedItem,
     handleKeyDown: handleMentionKeyDown,
@@ -6409,12 +6410,10 @@ export function NewChatLandingScreen() {
                   // Recompute the active "@"-mention from the caret each keystroke
                   // (native terminal agents with a workspace — ``mentionEnabled``).
                   setMention(
-                    mentionEnabled
-                      ? detectMentionAt(
-                          e.target.value,
-                          e.target.selectionStart ?? e.target.value.length,
-                        )
-                      : null,
+                    detectMentionAt(
+                      e.target.value,
+                      e.target.selectionStart ?? e.target.value.length,
+                    ),
                   );
                 },
                 onFocus: () => {
@@ -6423,10 +6422,13 @@ export function NewChatLandingScreen() {
                   // dictation inserts there instead of at the end of the draft.
                   dictation.noteFocus();
                 },
-                onBlur: () => {
-                  // Menu rows preventDefault on mousedown so selecting one keeps focus.
+                onBlur: (event) => {
                   setInputFocused(false);
-                  dismissMention();
+                  if (!(
+                    event.relatedTarget instanceof Element &&
+                    event.relatedTarget.closest("[data-context-reference-picker]")
+                  ))
+                    dismissMention();
                 },
                 onKeyDown: (e, { shouldSubmitFromKeyboard, shouldPreferSendOverCompletion }) => {
                   // "@"-mention menu navigation (shared useMentionBrowser) —
@@ -6473,7 +6475,10 @@ export function NewChatLandingScreen() {
                     )}
                     {/* "@"-file-mention browser — native terminal agents with a workspace */}
                     {(mentionOpen || mentionListingPending) && (
-                      <FileMentionMenu
+                      <ComposerMentionMenu
+                        query={mention?.query ?? ""}
+                        destinationId={null}
+                        onReference={attachReference}
                         currentDir={mentionDir}
                         activeIndex={mentionIndex}
                         entries={mentionEntries}

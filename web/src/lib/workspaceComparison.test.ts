@@ -131,3 +131,14 @@ describe("independent Explorer selections", () => {
     );
   });
 });
+
+it("isolates two view instances on the same authorized workspace", () => {
+  const first = { workspaceId: "same-location", viewId: "left", view: "files" as const };
+  const second = { ...first, viewId: "right" };
+  setWorkspaceComparison(first, { source: "range", base: "old", target: "new" });
+  expect(getWorkspaceComparison(second)).toBe(DEFAULT_WORKSPACE_COMPARISON);
+  expect(getWorkspaceComparison({ ...first, conversationId: "focus-changed" }).base).toBe("old");
+  expect(getWorkspaceComparison({ ...first, workspaceId: "new-location" })).toBe(
+    DEFAULT_WORKSPACE_COMPARISON,
+  );
+});

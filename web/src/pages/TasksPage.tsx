@@ -1,3 +1,4 @@
+import "../listDensity.css";
 import { TooltipButton } from "@/components/ui/tooltip";
 /**
  * Scheduled tasks page (`/tasks`) — the list of the user's recurring agent
@@ -241,7 +242,10 @@ export function TasksPage() {
         // Card list — each row is a bordered card (see ScheduledTaskRow), stacked
         // with a gap so there's vertical spacing between cards. The only divider
         // on the page is the one before the Suggestions section.
-        <div className="flex flex-col gap-2" data-testid="tasks-list">
+        <div
+          className="density-list flex flex-col [&>div]:min-h-[var(--list-row-min-height)] [&>div]:py-[var(--list-row-padding-block)]"
+          data-testid="tasks-list"
+        >
           {filtered.map((task) => (
             <ScheduledTaskRow
               key={task.id}

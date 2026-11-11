@@ -1,3 +1,5 @@
+import { readThemePalette } from "./themePalette";
+import { DEFAULT_CUSTOM_THEME, readCustomTheme } from "./customTheme";
 import { beforeEach, describe, expect, it } from "vitest";
 import { COMPOSER_SEND_SHORTCUT_STORAGE_KEY } from "./composerSendShortcutPreferences";
 import { FOLD_ASSISTANT_NARRATION_STORAGE_KEY } from "./foldNarrationPreferences";
@@ -124,3 +126,18 @@ describe.each([
     expect(localStorage.getItem(storageKey)).toBe("true");
   });
 });
+
+it.each(["omni", "github", "custom"])(
+  "retains explicit %s colors through settings export and import",
+  (palette) => {
+    const custom = { ...DEFAULT_CUSTOM_THEME, accent: "#345678", darkAccent: "#abcdef" };
+    localStorage.setItem("omnigent:ui-theme-palette", JSON.stringify(palette));
+    localStorage.setItem("omnigent:custom-theme", JSON.stringify(custom));
+    const exported = collectSettings()!;
+    localStorage.clear();
+    expect(readThemePalette()).toBe("violet");
+    applyImportedSettings(exported);
+    expect(readThemePalette()).toBe(palette);
+    expect(readCustomTheme()).toEqual(custom);
+  },
+);

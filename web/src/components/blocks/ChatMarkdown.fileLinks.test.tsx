@@ -103,7 +103,7 @@ function renderMarkdown(
   changed: string[] = [],
   viewer: typeof FILE_VIEWER = FILE_VIEWER,
   sourceItemId?: string,
-): void {
+): QueryClient {
   changedPaths = changed;
   openFile.mockClear();
   const client = new QueryClient({
@@ -122,7 +122,92 @@ function renderMarkdown(
       </FileViewerContext.Provider>
     </QueryClientProvider>,
   );
+  return client;
 }
+
+describe("implicit captured file references", () => {
+  it.each([
+    [400, "Not a file"],
+    [403, "Owner access required"],
+    [404, "File not found"],
+    [409, "This message has no captured workspace"],
+    [503, "Original host is offline"],
+  ])("keeps an example/directory as code after a %s resolver response", async (status, detail) => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ detail }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const client = renderMarkdown(
+      "Use `/projects/frontend` as an example.",
+      [],
+      FILE_VIEWER_WITH_SESSION,
+      "captured-item",
+    );
+    expect(screen.getByText("/projects/frontend").tagName).toBe("CODE");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(screen.getByText("/projects/frontend").tagName).toBe("CODE");
+    expect(screen.queryByTestId("chat-attachment")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(openFile).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/sessions/conv_1/attachments/references/captured-item?path=%2Fprojects%2Ffrontend",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("waits for a captured real file and never substitutes the currently viewed workspace", async () => {
+    let resolve!: (response: Response) => void;
+    fetchMock.mockReturnValue(
+      new Promise<Response>((done) => {
+        resolve = done;
+      }),
+    );
+    renderMarkdown(
+      "Read `/original/workspace/guide.txt:12`.",
+      [],
+      {
+        ...FILE_VIEWER_WITH_SESSION,
+        conversationId: "different-chat",
+        workspaceRoot: "/different/workspace",
+      },
+      "original-item",
+    );
+    expect(screen.getByText("/original/workspace/guide.txt:12").tagName).toBe("CODE");
+    expect(screen.queryByRole("button")).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    resolve(new Response("Original file contents", { headers: { "Content-Type": "text/plain" } }));
+    const chip = await screen.findByRole("button", { name: "guide.txt" });
+    fireEvent.click(chip);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Original file contents");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/sessions/conv_1/attachments/references/original-item?path=%2Foriginal%2Fworkspace%2Fguide.txt",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("retains actionable errors for an explicit captured Markdown link", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Owner access required" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    renderMarkdown(
+      "[Open file](/projects/frontend)",
+      [],
+      FILE_VIEWER_WITH_SESSION,
+      "captured-item",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "frontend" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Owner access required");
+  });
+});
 
 describe("markdown links to workspace files", () => {
   it.each([
@@ -135,10 +220,10 @@ describe("markdown links to workspace files", () => {
         new Response("# Captured instructions", { headers: { "Content-Type": "text/markdown" } }),
       );
       renderMarkdown(markdown, [], FILE_VIEWER_WITH_SESSION, "original-item");
-      const chip = screen.getByRole("button", { name: "AGENTS.md" });
+      const chip = await screen.findByRole("button", { name: "AGENTS.md" });
       expect(chip).toHaveTextContent(/^AGENTS\.md$/);
       expect(chip.querySelectorAll("svg")).toHaveLength(1);
-      expect(fetchMock).not.toHaveBeenCalled();
+      if (!markdown.includes("`")) expect(fetchMock).not.toHaveBeenCalled();
       fireEvent.focus(chip);
       expect(await screen.findByRole("tooltip")).toHaveTextContent("/original/workspace/AGENTS.md");
       fireEvent.click(chip);
@@ -323,7 +408,7 @@ describe("markdown links to workspace files", () => {
     renderMarkdown("[docs](https://example.com/page) and `docs/notes.md`", ["docs/notes.md"]);
 
     expect(screen.getByRole("link", { name: "docs" })).not.toHaveAttribute("node");
-    expect(screen.getByRole("button", { name: "docs/notes.md" })).not.toHaveAttribute("node");
+    expect(screen.getByText("docs/notes.md")).not.toHaveAttribute("node");
   });
 
   it("renders a path that names no workspace file as plain text, not a dead link", () => {
@@ -337,11 +422,12 @@ describe("markdown links to workspace files", () => {
     expect(screen.queryByText(/\[blocked\]/)).toBeNull();
   });
 
-  it("still linkifies an inline-code path", () => {
+  it("keeps inline paths without captured-message provenance as code even when currently changed", () => {
     renderMarkdown("see `docs/notes.md` for detail", ["docs/notes.md"]);
-
-    fireEvent.click(screen.getByRole("button", { name: "docs/notes.md" }));
-    expect(openFile).toHaveBeenCalledWith("docs/notes.md");
+    expect(screen.getByText("docs/notes.md").tagName).toBe("CODE");
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(openFile).not.toHaveBeenCalled();
   });
 });
 
@@ -411,12 +497,12 @@ describe("cited positions", () => {
       18,
     ],
   ])(
-    "opens an inline-code %s citation at its first line",
-    (_label, markdown, name, path, line, column?: number) => {
+    "keeps an uncaptured inline-code %s citation intact",
+    (_label, markdown, name, path, _line, _column?: number) => {
       renderMarkdown(markdown, [path]);
-
-      fireEvent.click(screen.getByRole("button", { name }));
-      expect(openFile).toHaveBeenCalledWith(path, { line, ...(column ? { column } : {}) });
+      expect(screen.getByText(name).tagName).toBe("CODE");
+      expect(screen.queryByRole("button")).toBeNull();
+      expect(openFile).not.toHaveBeenCalled();
     },
   );
 
@@ -435,8 +521,8 @@ describe("cited positions", () => {
     },
   );
 
-  it("opens a path without a position as a plain open", () => {
-    renderMarkdown("see `docs/notes.md` for detail", ["docs/notes.md"]);
+  it("opens an explicit path without a position as a plain open", () => {
+    renderMarkdown("see [docs/notes.md](docs/notes.md) for detail", ["docs/notes.md"]);
 
     fireEvent.click(screen.getByRole("button", { name: "docs/notes.md" }));
     expect(openFile).toHaveBeenCalledWith("docs/notes.md");
@@ -445,7 +531,7 @@ describe("cited positions", () => {
   it.each(["docs/notes.md:0", "docs/notes.md#L0"])(
     "degrades an invalid zero position to a plain open: %s",
     (citation) => {
-      renderMarkdown(`\`${citation}\``, ["docs/notes.md"]);
+      renderMarkdown(`[${citation}](${citation})`, ["docs/notes.md"]);
       fireEvent.click(screen.getByRole("button", { name: citation }));
       expect(openFile).toHaveBeenCalledWith("docs/notes.md");
     },
@@ -457,7 +543,7 @@ describe("cited positions", () => {
     "docs/notes.md#Lx",
     "docs/notes.md?line=12",
   ])("leaves an unsupported suffix inert: %s", (citation) => {
-    renderMarkdown(`\`${citation}\``, ["docs/notes.md"]);
+    renderMarkdown(`[${citation}](${citation})`, ["docs/notes.md"]);
     expect(screen.queryByRole("button", { name: citation })).toBeNull();
   });
 });
@@ -471,11 +557,11 @@ describe("cited line ranges", () => {
     ["colon", `${SCALA}:68-72`],
     ["hash", `${SCALA}#L68-L72`],
     ["absolute colon", `${WORKSPACE}/${SCALA}:68-72`],
-  ])("opens an inline-code %s range with its first and last line", (_label, citation) => {
+  ])("keeps an uncaptured inline-code %s range intact", (_label, citation) => {
     renderMarkdown(`see \`${citation}\``, [SCALA]);
-
-    fireEvent.click(screen.getByRole("button", { name: citation }));
-    expect(openFile).toHaveBeenCalledWith(SCALA, { line: 68, endLine: 72 });
+    expect(screen.getByText(citation).tagName).toBe("CODE");
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(openFile).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -492,7 +578,7 @@ describe("cited line ranges", () => {
   });
 
   it("keeps a backwards range openable at its first line", () => {
-    renderMarkdown("`docs/notes.md:30-22`", ["docs/notes.md"]);
+    renderMarkdown("[docs/notes.md:30-22](docs/notes.md:30-22)", ["docs/notes.md"]);
 
     fireEvent.click(screen.getByRole("button", { name: "docs/notes.md:30-22" }));
     expect(openFile).toHaveBeenCalledWith("docs/notes.md", { line: 30 });
@@ -503,9 +589,17 @@ describe("cited line ranges", () => {
 describe("file link labels", () => {
   it("labels an inline-code file link by its filename and exposes its full path on focus", async () => {
     const citation = `${WORKSPACE}/sql/core/SQLFunctionExpression.scala:68-72`;
-    renderMarkdown(`see \`${citation}\``, ["sql/core/SQLFunctionExpression.scala"]);
+    fetchMock.mockResolvedValue(
+      new Response("class Example", { headers: { "Content-Type": "text/plain" } }),
+    );
+    renderMarkdown(
+      `see \`${citation}\``,
+      ["sql/core/SQLFunctionExpression.scala"],
+      FILE_VIEWER_WITH_SESSION,
+      "original-item",
+    );
 
-    const link = screen.getByRole("button", { name: citation });
+    const link = await screen.findByRole("button", { name: "SQLFunctionExpression.scala" });
     expect(link).toHaveTextContent(/^SQLFunctionExpression\.scala$/);
     expect(link).not.toHaveAttribute("title");
     fireEvent.focus(link);
@@ -517,9 +611,8 @@ describe("file link labels", () => {
   it("leaves a bare file name and a non-openable path as written", () => {
     renderMarkdown("`README.md` and `docs/ghost.md`", ["README.md"]);
 
-    const link = screen.getByRole("button", { name: "README.md" });
-    expect(link).toHaveTextContent(/^README\.md$/);
-    expect(link).not.toHaveAttribute("title");
+    expect(screen.getByText("README.md").tagName).toBe("CODE");
+    expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText("docs/ghost.md").tagName).toBe("CODE");
   });
 
@@ -594,12 +687,12 @@ describe("links to files outside the workspace", () => {
     expect(openFile).toHaveBeenCalledWith("/etc/hosts");
   });
 
-  it("linkifies an outside-workspace inline-code path", async () => {
-    fetchMock.mockResolvedValue(dirListing(["/etc/hosts"]));
+  it("does not probe an uncaptured inline-code path against the currently active host", () => {
     renderMarkdown("see `/etc/hosts` for the mapping", [], FILE_VIEWER_WITH_SESSION);
-
-    fireEvent.click(await screen.findByRole("button", { name: "/etc/hosts" }));
-    expect(openFile).toHaveBeenCalledWith("/etc/hosts");
+    expect(screen.getByText("/etc/hosts").tagName).toBe("CODE");
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(openFile).not.toHaveBeenCalled();
   });
 
   it("resolves an outside-workspace home-relative path through the runner home", async () => {

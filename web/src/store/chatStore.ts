@@ -1,4 +1,5 @@
 import { persistMessageQueue } from "@/lib/queuedMessagePersistence";
+import { readMessageCommunication, type MessageCommunication } from "@/lib/messageCommunication";
 import { getBasePath } from "@/lib/basePath";
 // Module-scope Zustand store for the active chat session.
 //
@@ -568,6 +569,7 @@ export function removeLocalConversation(tempConvId: string): boolean {
 export interface PendingUserMessage {
   tempId: string;
   content: MessageContentBlock[];
+  communication?: MessageCommunication;
   /** Unsent draft awaiting session/model readiness, including unuploaded files. */
   initialDraft?: { text: string; files: File[] };
   /** Client epoch seconds stamped ONCE at send time — the optimistic
@@ -681,6 +683,8 @@ export function composerAttachmentKey(a: ComposerAttachment): string {
  * sense for a conversation the user is NOT looking at.
  */
 export interface ConversationState {
+  /** Supersession waits for this conversation to receive focus before navigation. */
+  redirectToConversationId: string | null;
   /**
    * Flat block list (history + streaming). Renderer walks this.
    *
@@ -1097,6 +1101,15 @@ export interface ConversationState {
    * cursor into the new one.
    */
   historyGeneration: number;
+  /** Bubble that should pulse briefly (highlight on nav jump). */
+  flashItemId: string | null;
+  /**
+   * Workspace files/folders queued to drop into the active composer's
+   * "@"-mention chips from outside the composer — e.g. the file viewer's
+   * "Attach to agent" button, which lives far from the composer in the tree.
+   * The composer drains this on change and clears it.
+   */
+  pendingComposerAttachments: ComposerAttachment[];
 }
 
 /**
@@ -1121,16 +1134,6 @@ export const EMPTY_SIDE_CHAT_COMPOSER: SideChatComposerDraft = { text: "", files
 export interface AppChatState {
   /** The conversation currently on screen. `null` on `/`. */
   conversationId: string | null;
-  /**
-   * Set when a live `session.superseded` event asks the client to follow
-   * the active conversation to another one (e.g. after a Claude `/clear`).
-   * `ChatPage` observes this, navigates to `/c/<id>` (replacing history so
-   * Back doesn't return to the cleared session), then clears it. Null when
-   * no redirect is pending. The store can't call react-router directly, so
-   * it hands the target to the page via this field. Live-only — a reload of
-   * the old conversation renders the persisted notice instead.
-   */
-  redirectToConversationId: string | null;
   /**
    * Side-chat child to open as a soft tab in the Workspace rail, or null.
    * `AppShell` observes it, opens/selects that child's side-chat tab on the
@@ -1175,15 +1178,6 @@ export interface AppChatState {
    * away from.
    */
   queuedMessages: QueuedMessage[];
-  /** Bubble that should pulse briefly (highlight on nav jump). */
-  flashItemId: string | null;
-  /**
-   * Workspace files/folders queued to drop into the active composer's
-   * "@"-mention chips from outside the composer — e.g. the file viewer's
-   * "Attach to agent" button, which lives far from the composer in the tree.
-   * The composer drains this on change and clears it.
-   */
-  pendingComposerAttachments: ComposerAttachment[];
   /**
    * True when this tab could not take an origin-wide stream slot for a
    * conversation it needed to open: every slot is held by other tabs and this
@@ -1301,7 +1295,7 @@ export interface ChatActions {
     agentId: string,
     opts?: SendOptions,
   ) => Promise<void>;
-  stop: () => void;
+  stop: (conversationId?: string) => void;
   switchTo: (conversationId: string | null) => Promise<void>;
   submitApproval: (
     elicitationId: string,
@@ -1316,7 +1310,7 @@ export interface ChatActions {
   /**
    * Set the active session's effort. ``null`` clears the override.
    */
-  setEffort: (effort: string | null) => Promise<void>;
+  setEffort: (effort: string | null, conversationId?: string) => Promise<void>;
   /**
    * Set the active session's model. For claude-native, the server also injects
    * ``/model`` into the tmux pane so the in-binary picker tracks the change.
@@ -1325,21 +1319,25 @@ export interface ChatActions {
    * report (or a not-applied error) settles it — pass it for sessions
    * whose chip renders the reported model (claude-/codex-native).
    */
-  setModel: (model: string | null, opts?: { expectConfirmation?: boolean }) => Promise<void>;
+  setModel: (
+    model: string | null,
+    opts?: { expectConfirmation?: boolean },
+    conversationId?: string,
+  ) => Promise<void>;
   /**
    * Set the active session's cost-control switch — optimistic local
    * flip, then PATCH; the server's canonical value (or a rollback on
    * failure) settles the state. ``null`` clears back to the spec
    * default. No-ops when there is no active conversation.
    */
-  setCostControlMode: (mode: "on" | "off" | null) => Promise<void>;
+  setCostControlMode: (mode: "on" | "off" | null, conversationId?: string) => Promise<void>;
   /**
    * Set the active session's sub-agent routing switch — optimistic local
    * write, then PATCH; the server's canonical value (or a rollback on
    * failure) settles the state. Two-state: ``"off"`` is the way back to
    * unrouted sub-agents. No-ops when there is no active conversation.
    */
-  setSubagentRouting: (mode: "on" | "off") => Promise<void>;
+  setSubagentRouting: (mode: "on" | "off", conversationId?: string) => Promise<void>;
   /**
    * Re-read the active session's routing switches (cost control + sub-agent
    * routing) from the server and apply them.
@@ -1352,26 +1350,26 @@ export interface ChatActions {
    * switches. Best-effort: a failed fetch or a session switch mid-flight
    * leaves the current state alone.
    */
-  refreshSessionOverrides: () => Promise<void>;
+  refreshSessionOverrides: (conversationId?: string) => Promise<void>;
   /**
    * Toggle Codex Plan mode for the active session. No-ops when there is no
    * active conversation.
    */
-  setCodexPlanMode: (enabled: boolean) => Promise<void>;
+  setCodexPlanMode: (enabled: boolean, conversationId?: string) => Promise<void>;
   /**
    * Switch a running claude-native session's permission mode (e.g. to
    * ``"auto"``). Rejects when the live TUI could not reach the mode, so
    * callers surface the error rather than assuming the switch landed.
    * No-ops when there is no active conversation.
    */
-  setClaudePermissionMode: (mode: string) => Promise<void>;
+  setClaudePermissionMode: (mode: string, conversationId?: string) => Promise<void>;
   /**
    * Switch a running codex-native session's approval/sandbox mode (e.g. to
    * ``"full-access"``). Rejects when the live Codex thread could not accept the
    * update, so callers surface the error rather than assuming it landed.
    * No-ops when there is no active conversation.
    */
-  setCodexApprovalMode: (mode: string) => Promise<void>;
+  setCodexApprovalMode: (mode: string, conversationId?: string) => Promise<void>;
   /**
    * Fetch the next page of older messages and prepend them to `blocks`.
    *
@@ -1380,22 +1378,22 @@ export interface ChatActions {
    */
   loadMoreHistory: (sessionId?: string) => Promise<void>;
   /** Flash a bubble briefly; rapid calls reschedule so the latest target wins. */
-  flashUserMessage: (itemId: string) => void;
+  flashUserMessage: (itemId: string, conversationId?: string) => void;
   /** Queue an "@"-mention chip into the active composer from outside it. */
-  addComposerAttachment: (attachment: ComposerAttachment) => void;
+  addComposerAttachment: (attachment: ComposerAttachment, conversationId?: string) => void;
   /** Drain the queued composer attachments (called by the composer). */
-  clearPendingComposerAttachments: () => void;
+  clearPendingComposerAttachments: (conversationId?: string) => void;
   /** Stamp {@link ChatState.runnerLaunchedAt} now — call right after a
    *  successful `launchRunner` for the open session. */
-  markRunnerLaunched: () => void;
+  markRunnerLaunched: (conversationId?: string) => void;
   /**
    * Compact the active session's context. Posts a ``compact`` event to the
    * server, which summarises the conversation history in-place. No-ops when
    * there is no active conversation.
    */
-  compact: () => Promise<void>;
+  compact: (conversationId?: string) => Promise<void>;
   /** Run the native harness's /clear in the session terminal. */
-  clearContext: () => Promise<void>;
+  clearContext: (conversationId?: string) => Promise<void>;
   /**
    * Refetch runner-backed session state for the active conversation.
    *
@@ -1408,12 +1406,12 @@ export interface ChatActions {
   /** Dismiss the too-many-tabs banner for the current over-budget episode. */
   dismissStreamBudgetBanner: () => void;
   /** Hide the launch's `action_required` banner while the launch keeps asking for *details*. */
-  dismissSandboxAction: (details: string) => void;
+  dismissSandboxAction: (details: string, conversationId?: string) => void;
   /**
    * Dismiss the /btw sidechat overlay.
    * TODO: reconcile with terminal Escape on native sessions.
    */
-  dismissBtwSidechat: () => void;
+  dismissBtwSidechat: (conversationId?: string) => void;
 }
 
 /**
@@ -1808,7 +1806,7 @@ function enterSendChain(conversationId: string | null): {
     },
   };
 }
-let flashTimer: ReturnType<typeof setTimeout> | null = null;
+const flashTimers = new Map<string | null, ReturnType<typeof setTimeout>>();
 const workspaceInvalidationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Background-flush throttle, kept OUT of store state so it can't re-trigger the
@@ -3232,15 +3230,16 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  stop: () => {
-    const state = get();
+  stop: (targetId) => {
+    const target = actionTarget(get, targetId);
+    const state = target.state;
     const sessionId = state.conversationId;
     if (!sessionId) return;
     const initialDraft = state.pendingUserMessages.find((p) => p.initialDraft)?.initialDraft;
     if (initialDraft) {
       const draft = getSessionDraft(sessionId) ?? initialDraft;
       setSessionDraft(sessionId, draft);
-      setActive({
+      target.write({
         pendingUserMessages: [],
         status: "idle",
         sendLatchedAt: null,
@@ -3269,7 +3268,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       // user's cancel won't reach the server, but the local UI already
       // reflects the user's stop request below.
     });
-    setActive((s) => {
+    target.write((s) => {
       if (s.conversationId !== sessionId) return {};
       const patch: Partial<ChatState> = {
         pendingUserMessages: [],
@@ -3510,32 +3509,43 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  flashUserMessage: (itemId) => {
-    if (flashTimer !== null) clearTimeout(flashTimer);
-    setActive({ flashItemId: itemId });
-    flashTimer = setTimeout(() => {
-      flashTimer = null;
-      setActive({ flashItemId: null });
-    }, FLASH_DURATION_MS);
+  flashUserMessage: (itemId, targetId) => {
+    const target = actionTarget(get, targetId);
+    const id = target.state.conversationId;
+    const timer = flashTimers.get(id);
+    if (timer !== undefined) clearTimeout(timer);
+    target.write({ flashItemId: itemId });
+    flashTimers.set(
+      id,
+      setTimeout(() => {
+        flashTimers.delete(id);
+        if (id !== null) setterFor(id)({ flashItemId: null });
+        else if (get().conversationId === null) setActive({ flashItemId: null });
+      }, FLASH_DURATION_MS),
+    );
   },
 
-  addComposerAttachment: (attachment) => {
-    setActive((s) => {
+  addComposerAttachment: (attachment, targetId) => {
+    const target = actionTarget(get, targetId);
+    target.write((s) => {
       const k = composerAttachmentKey(attachment);
       if (s.pendingComposerAttachments.some((a) => composerAttachmentKey(a) === k)) return s;
       return { pendingComposerAttachments: [...s.pendingComposerAttachments, attachment] };
     });
   },
 
-  clearPendingComposerAttachments: () => setActive({ pendingComposerAttachments: [] }),
+  clearPendingComposerAttachments: (targetId) =>
+    actionTarget(get, targetId).write({ pendingComposerAttachments: [] }),
 
   dismissStreamBudgetBanner: () => rootSetState({ streamBudgetBannerDismissed: true }),
 
-  dismissSandboxAction: (details) => setActive({ sandboxActionDismissed: details }),
+  dismissSandboxAction: (details, targetId) =>
+    actionTarget(get, targetId).write({ sandboxActionDismissed: details }),
 
-  dismissBtwSidechat: () => {
-    const { conversationId } = get();
-    setActive({ btwSidechat: null });
+  dismissBtwSidechat: (targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
+    target.write({ btwSidechat: null });
     // Mirror the close to the terminal so its own /btw overlay (a separate
     // surface) shuts in lockstep. Best-effort and fire-and-forget: the pane
     // overlay also auto-dismisses on the next injected message, so a failed
@@ -3545,15 +3555,18 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  markRunnerLaunched: () => setActive({ runnerLaunchedAt: Date.now() }),
+  markRunnerLaunched: (targetId) =>
+    actionTarget(get, targetId).write({ runnerLaunchedAt: Date.now() }),
 
-  compact: async () => {
-    const { conversationId } = get();
+  compact: async (targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
     await postEvent(conversationId, { type: "compact", data: {} });
   },
-  clearContext: async () => {
-    const { conversationId } = get();
+  clearContext: async (targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
     await postEvent(conversationId, { type: "clear", data: {} });
   },
@@ -3567,9 +3580,10 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     });
   },
 
-  setEffort: async (effort) => {
-    const { conversationId, sessionReasoningEffort: previous } = get();
-    setActive({ sessionReasoningEffort: effort });
+  setEffort: async (effort, targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId, sessionReasoningEffort: previous } = target.state;
+    target.write({ sessionReasoningEffort: effort });
     if (conversationId) {
       if (queryClient === null) {
         throw new Error("chatStore.setEffort: queryClient not initialized");
@@ -3605,9 +3619,10 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setModel: async (model, opts) => {
-    const { conversationId, sessionModelOverride: previous } = get();
-    setActive({ sessionModelOverride: model });
+  setModel: async (model, opts, targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId, sessionModelOverride: previous } = target.state;
+    target.write({ sessionModelOverride: model });
     if (conversationId) {
       const expectConfirmation = opts?.expectConfirmation === true && model !== null;
       if (expectConfirmation) {
@@ -3656,10 +3671,11 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setCostControlMode: async (mode) => {
-    const { conversationId } = get();
+  setCostControlMode: async (mode, targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
-    const previous = get().costControlModeOverride;
+    const previous = target.state.costControlModeOverride;
     // Routing and a pinned model are mutually exclusive: the server's routing
     // guard skips whenever model_override is set, so turning routing ON must
     // also clear this session's pinned model (in the SAME PATCH) — otherwise
@@ -3667,7 +3683,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     // would never run. Mirrors the new-chat dialog's mutual exclusion. Only
     // clear when a model is actually pinned, so toggling routing on a
     // model-less (e.g. SDK) session doesn't emit a spurious model-cleared change.
-    const previousModel = get().sessionModelOverride;
+    const previousModel = target.state.sessionModelOverride;
     const clearModel = mode === "on" && previousModel != null;
     // Pin the target: these are this conversation's switches, and the PATCH can
     // outlive a switch away. Resolving the target afterwards would leave a
@@ -3701,10 +3717,11 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setSubagentRouting: async (mode) => {
-    const { conversationId } = get();
+  setSubagentRouting: async (mode, targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
-    const previous = get().subagentRoutingOverride;
+    const previous = target.state.subagentRoutingOverride;
     // Optimistic write so the select responds instantly; the PATCH response
     // (or the rollback below) is the settled truth. Unlike the session's own
     // routing switch this never touches `model_override` — it governs the
@@ -3721,8 +3738,9 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  refreshSessionOverrides: async () => {
-    const { conversationId } = get();
+  refreshSessionOverrides: async (targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
     let session: Session;
     try {
@@ -3737,17 +3755,18 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       // resetting the switches to their defaults.
       return;
     }
-    if (get().conversationId !== conversationId) return;
-    setActive({
+    if (targetId === undefined && get().conversationId !== conversationId) return;
+    target.write({
       costControlModeOverride: session.costControlModeOverride ?? null,
       subagentRoutingOverride: session.subagentRoutingOverride ?? null,
     });
   },
 
-  setCodexPlanMode: async (enabled) => {
-    const { conversationId } = get();
+  setCodexPlanMode: async (enabled, targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
-    const previous = get().codexPlanMode;
+    const previous = target.state.codexPlanMode;
     // Pinned for the same reason as `setCostControlMode` — see there.
     const patchSet = setterFor(conversationId);
     patchSet({ codexPlanMode: enabled });
@@ -3760,10 +3779,11 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setClaudePermissionMode: async (mode) => {
-    const { conversationId } = get();
+  setClaudePermissionMode: async (mode, targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
-    const previous = get().claudePermissionMode;
+    const previous = target.state.claudePermissionMode;
     // Pinned for the same reason as `setCostControlMode` — see there.
     const patchSet = setterFor(conversationId);
     // Optimistic, then reconciled against the mode the server confirms the
@@ -3778,10 +3798,11 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setCodexApprovalMode: async (mode) => {
-    const { conversationId } = get();
+  setCodexApprovalMode: async (mode, targetId) => {
+    const target = actionTarget(get, targetId);
+    const { conversationId } = target.state;
     if (!conversationId) return;
-    const previous = get().codexApprovalMode;
+    const previous = target.state.codexApprovalMode;
     // Pinned for the same reason as `setCostControlMode` — see there.
     const patchSet = setterFor(conversationId);
     // Optimistic, then reconciled against the mode the server confirms the
@@ -4155,6 +4176,14 @@ function queueTarget(
   return state === null ? null : { state, write: setterFor(conversationId) };
 }
 
+/** Preserve legacy active-chat calls while allowing a docked pane to pin its target. */
+function actionTarget(get: Getter, conversationId?: string): { state: ChatState; write: Setter } {
+  if (conversationId === undefined) return { state: get(), write: setActive };
+  const state = setterForState(conversationId);
+  if (state === null) throw new Error("Conversation is not loaded");
+  return { state, write: setterFor(conversationId) };
+}
+
 type LiveSettingField = "reasoningEffort" | "modelOverride";
 
 /** One live pick of a session setting, sharing the confirmed value with overlapping picks. */
@@ -4370,7 +4399,11 @@ useChatStore.setState = ((partial: unknown, replace?: boolean) => {
     if (nextId !== useChatStore.getState().conversationId) {
       rootSetState({ conversationId: nextId } as Parameters<typeof rootSetState>[0]);
       conversationRegistry.setActive(nextId);
-      if (nextId !== null) conversationRegistry.acquire(nextId);
+      if (nextId !== null) {
+        conversationRegistry.acquire(nextId);
+        // A default-valued patch may not notify; project the new entry even then.
+        mirrorActiveEntry();
+      }
     }
   }
   const active = conversationRegistry.getActive();
@@ -5024,6 +5057,7 @@ async function bindStream(
       const toPending = (p: PendingInput): PendingUserMessage => ({
         tempId: p.pendingId,
         content: p.content,
+        ...(p.communication ? { communication: p.communication } : {}),
         ...(p.createdBy !== undefined ? { author: p.createdBy } : {}),
       });
       let candidatePending: PendingUserMessage[];
@@ -5034,9 +5068,16 @@ async function bindStream(
         // One-to-one consumption so two identical queued sends still match
         // pairwise. Content (not text) equality so image-only messages
         // correlate too.
-        const unmatchedServer = serverPending.map((p) => contentKeyOf(p.content));
+        const unmatchedServer = [...serverPending];
         const unknownToServer = state.pendingUserMessages.filter((p) => {
-          const i = unmatchedServer.indexOf(contentKeyOf(p.content));
+          const i = unmatchedServer.findIndex(
+            (candidate) =>
+              candidate.tempId === p.tempId ||
+              candidate.tempId === p.pendingId ||
+              (!candidate.communication &&
+                !p.communication &&
+                contentKeyOf(candidate.content) === contentKeyOf(p.content)),
+          );
           if (i === -1) return true;
           unmatchedServer.splice(i, 1);
           return false;
@@ -5066,6 +5107,19 @@ async function bindStream(
         texts.reduce((n, c) => (c.endsWith(suffix) ? n + 1 : n), 0);
       const snapshotPending: PendingUserMessage[] = dedupePending
         ? candidatePending.filter((p) => {
+            if (p.communication) {
+              const origin = p.communication;
+              return !allBlocks.some(
+                (block) =>
+                  block.ctx.itemId === p.tempId ||
+                  (p.pendingId !== undefined && block.ctx.itemId === p.pendingId) ||
+                  (block.type === "user_message" &&
+                    block.communication?.message_id === origin.message_id &&
+                    block.communication.source_conversation_id === origin.source_conversation_id &&
+                    block.communication.destination_conversation_id ===
+                      origin.destination_conversation_id),
+              );
+            }
             const text = messageContentText(p.content);
             if (text === "") return true;
             return countEndsWith(committedUserTexts, text) === 0;
@@ -7805,7 +7859,7 @@ const MAX_SETTLED_SHELL_INPUTS = 64;
  */
 function committedUserTextsOf(blocks: AnyBlock[]): string[] {
   return blocks
-    .filter((b): b is UserMessageBlock => b.type === "user_message")
+    .filter((b): b is UserMessageBlock => b.type === "user_message" && !b.communication)
     .map((b) => messageContentText(b.content))
     .filter((text) => text.length > 0);
 }
@@ -8495,6 +8549,56 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
       return;
     }
     case "session_input_consumed":
+      if (readMessageCommunication(event.data.communication)) {
+        const communication = readMessageCommunication(event.data.communication)!;
+        const raw = event.data.content;
+        const content = Array.isArray(raw)
+          ? raw.filter(
+              (block): block is MessageContentBlock =>
+                typeof block === "object" &&
+                block !== null &&
+                ["input_text", "input_image", "input_file"].includes(block.type),
+            )
+          : [];
+        applyToConversation((state) => {
+          const matchesReceipt = (pending: PendingUserMessage) =>
+            pending.tempId === event.itemId ||
+            pending.pendingId === event.itemId ||
+            (!!event.clearedPendingId &&
+              (pending.tempId === event.clearedPendingId ||
+                pending.pendingId === event.clearedPendingId)) ||
+            (pending.communication?.message_id === event.itemId &&
+              pending.communication.source_conversation_id ===
+                communication.source_conversation_id &&
+              pending.communication.destination_conversation_id ===
+                communication.destination_conversation_id);
+          const matched = state.pendingUserMessages.find(matchesReceipt);
+          return {
+            startupPending: false,
+            pendingUserMessages: state.pendingUserMessages.filter(
+              (pending) => !matchesReceipt(pending),
+            ),
+            ...(hasCommittedItem(state.blocks, event.itemId)
+              ? {}
+              : {
+                  blocks: [
+                    ...state.blocks,
+                    {
+                      ...committedUserBlock(
+                        event.itemId,
+                        content,
+                        matched?.tempId,
+                        event.createdBy ?? matched?.author,
+                        matched?.createdAtS,
+                      ),
+                      communication,
+                    },
+                  ],
+                }),
+          };
+        });
+        return;
+      }
       applyToConversation({ startupPending: false });
       // This committed item may be a send whose POST failed client-side —
       // its arrival proves that send was delivered, so retract the draft
@@ -8545,7 +8649,10 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
       //      client).
       applyToConversation((s) => {
         const eventContent = userContentFromEvent(event);
-        const pendingHead = s.pendingUserMessages[0];
+        const pendingHeadIndex = s.pendingUserMessages.findIndex(
+          (pending) => !pending.communication,
+        );
+        const pendingHead = s.pendingUserMessages[pendingHeadIndex];
         // Bare envelopes typed in the terminal must not consume unrelated web input.
         const unmatchedEnvelope =
           eventContent !== null &&
@@ -8594,9 +8701,12 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
           if (unmatchedEnvelope || (eventContent !== null && isSystemUserContent(eventContent))) {
             return {};
           }
-          if (s.pendingUserMessages.length === 0 || s.pendingUserMessages[0]?.initialDraft)
-            return {};
-          return { pendingUserMessages: s.pendingUserMessages.slice(1) };
+          if (!pendingHead || pendingHead.initialDraft) return {};
+          return {
+            pendingUserMessages: s.pendingUserMessages.filter(
+              (_, index) => index !== pendingHeadIndex,
+            ),
+          };
         }
 
         // 1. Drop by id when the server names the drained entry.
@@ -8642,14 +8752,16 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
           settledShell ||
           unmatchedEnvelope ||
           (eventContent !== null && isSystemUserContent(eventContent)) ||
-          s.pendingUserMessages[0]?.initialDraft
+          pendingHead?.initialDraft
             ? undefined
-            : s.pendingUserMessages[0];
+            : pendingHead;
         if (head) {
           const content = committedContentFor(event, head.content);
           if (content === null) return {};
           return {
-            pendingUserMessages: s.pendingUserMessages.slice(1),
+            pendingUserMessages: s.pendingUserMessages.filter(
+              (_, index) => index !== pendingHeadIndex,
+            ),
             // stableKey = the popped optimistic bubble's temp id so the
             // promoted bubble keeps the same React key (no remount/flink).
             blocks: [
@@ -8688,9 +8800,9 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
       // send; observing clients and drafts still held locally cannot
       // acknowledge a send, so they just render the block.
       applyToConversation((s) => {
-        if (s.pendingUserMessages.length === 0 || s.pendingUserMessages[0]?.initialDraft) return {};
-        const [, ...rest] = s.pendingUserMessages;
-        return { pendingUserMessages: rest };
+        const at = s.pendingUserMessages.findIndex((pending) => !pending.communication);
+        if (at < 0 || s.pendingUserMessages[at]?.initialDraft) return {};
+        return { pendingUserMessages: s.pendingUserMessages.filter((_, index) => index !== at) };
       });
       return;
     case "terminal_command": {
@@ -8699,7 +8811,9 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
       if (command === null) return;
       applyToConversation((s) => {
         if (s.settledShellInputs.some((entry) => entry.itemId === event.itemId)) return {};
-        const at = s.pendingUserMessages.findIndex((p) => isShellCommandBubble(p, command));
+        const at = s.pendingUserMessages.findIndex(
+          (p) => !p.communication && isShellCommandBubble(p, command),
+        );
         const popped = s.pendingUserMessages[at];
         return {
           pendingUserMessages: popped
@@ -8769,27 +8883,13 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
       }
       return;
     case "session_superseded":
-      // The conversation we're viewing was rotated away (e.g. Claude
-      // `/clear`): follow it to the new one. Guard on the active
-      // conversation id so a late event from a stream we've already
-      // switched away from can't yank the user, and ignore a self-target
-      // no-op. `ChatPage` observes `redirectToConversationId` and performs
-      // the actual react-router navigation.
-      // Writes app-global state (`redirectToConversationId`) alongside
-      // conversation state, so it keeps its own guard rather than going through
-      // `applyToConversation`: the redirect only makes sense for the
-      // conversation on screen, and a background conversation that gets
-      // superseded should redirect when the user switches to it, not before.
-      useChatStore.setState((s) => {
-        if (s.conversationId !== event.conversationId) return {};
-        if (event.targetConversationId === s.conversationId) return {};
-        return { redirectToConversationId: event.targetConversationId };
+      // Keep the successor with its originating conversation; background panes wait for focus.
+      applyToNamedConversation(event.conversationId, {
+        ...(event.targetConversationId !== event.conversationId
+          ? { redirectToConversationId: event.targetConversationId }
+          : {}),
+        pendingUserMessages: [],
       });
-      // The rotation happened mid-input: the `/clear` (or whatever the user just
-      // sent) never gets a `session.input.consumed` on THIS conversation — the
-      // runner moved to the new one — so its optimistic bubble would otherwise
-      // spin forever. Drop it; resuming starts a fresh turn.
-      applyToNamedConversation(event.conversationId, { pendingUserMessages: [] });
       return;
     case "session_btw_sidechat":
       // Transient /btw sidechat overlay: show the question + answer in a

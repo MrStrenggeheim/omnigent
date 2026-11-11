@@ -1,3 +1,4 @@
+import { readResourceViewState, writeResourceViewState } from "./resourceViewStorage";
 import { workspaceComparisonKey, type WorkspaceComparisonIdentity } from "./workspaceComparison";
 
 export interface ExplorerGitScope {
@@ -16,6 +17,15 @@ export function getExplorerGitScope(identity: WorkspaceComparisonIdentity): Expl
   const key = workspaceComparisonKey(
     typeof identity === "object" ? { ...identity, view: "changes" } : identity,
   );
+  if (key && typeof identity === "object" && identity.viewId) {
+    const saved = readResourceViewState<ExplorerGitScope>(`git-scope:${key}`);
+    return saved &&
+      typeof saved.path === "string" &&
+      Array.isArray(saved.directories) &&
+      saved.directories.every((path) => typeof path === "string")
+      ? saved
+      : DEFAULT_SCOPE;
+  }
   return (key && scopes.get(key)) || DEFAULT_SCOPE;
 }
 
@@ -37,7 +47,10 @@ export function setExplorerGitScope(
     return;
   scopes.delete(key);
   Object.freeze(directories);
-  scopes.set(key, Object.freeze({ path: scope.path, directories }));
+  const next = Object.freeze({ path: scope.path, directories });
+  scopes.set(key, next);
+  if (typeof identity === "object" && identity.viewId)
+    writeResourceViewState(`git-scope:${key}`, next);
   if (scopes.size > MAX_SCOPES) scopes.delete(scopes.keys().next().value!);
   for (const listener of listeners) listener();
 }

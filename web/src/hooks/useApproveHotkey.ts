@@ -27,6 +27,7 @@ import { schemaFields } from "@/components/blocks/ElicitationSchemaForm";
 import { hasCommandModifier, isMacPlatform } from "@/lib/hotkeys";
 import type { ElicitationBlock } from "@/lib/blocks";
 import { useChatStore } from "@/store/chatStore";
+import { conversationRegistry } from "@/store/conversationRegistry";
 
 /**
  * Whether the keystroke landed in a text field that holds a draft — the
@@ -53,8 +54,9 @@ export function isDraftingTarget(target: EventTarget | null): boolean {
   return target.isContentEditable && (target.textContent ?? "").trim().length > 0;
 }
 
-export function useApproveHotkey(isMac = isMacPlatform()): void {
+export function useApproveHotkey(isMac = isMacPlatform(), conversationId?: string | null): void {
   useEffect(() => {
+    if (conversationId === null) return;
     const handler = (e: globalThis.KeyboardEvent): void => {
       // Platform command modifier, not Alt/Shift (mirrors the session-switch guard):
       // only ⌘↵ on macOS and only Ctrl+↵ on Win/Linux.
@@ -66,7 +68,11 @@ export function useApproveHotkey(isMac = isMacPlatform()): void {
       // send path is separately gated while a prompt is pending).
       if (isDraftingTarget(e.target)) return;
 
-      const { blocks, submitApproval } = useChatStore.getState();
+      const store = useChatStore.getState();
+      const blocks = conversationId
+        ? (conversationRegistry.peek(conversationId)?.getState().blocks ?? [])
+        : store.blocks;
+      const { submitApproval } = store;
       // Select the newest pending prompt before checking eligibility, so a
       // form or an unconfirmed delivery cannot expose an older approval.
       const newest = [...blocks]
@@ -82,10 +88,12 @@ export function useApproveHotkey(isMac = isMacPlatform()): void {
       // Intercept before the composer's Enter-to-send handler runs.
       e.preventDefault();
       e.stopPropagation();
-      void submitApproval(pending.elicitationId, "accept");
+      if (conversationId)
+        void submitApproval(pending.elicitationId, "accept", undefined, undefined, conversationId);
+      else void submitApproval(pending.elicitationId, "accept");
     };
 
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [isMac]);
+  }, [isMac, conversationId]);
 }

@@ -90,6 +90,30 @@ afterEach(() => {
 });
 
 describe("chat search navigation", () => {
+  it("keeps an active exact match when another conversation mounts, updates and unmounts", () => {
+    renderHook(() => useChatSearchHighlights(options));
+    const active = highlights.get(CHAT_SEARCH_ACTIVE_HIGHLIGHT)?.ranges[0];
+    expect(active?.toString()).toBe("echo");
+    const other = document.createElement("div");
+    other.innerHTML = markup();
+    document.body.append(other);
+    const inactive = {
+      ...options,
+      conversationId: "other",
+      query: "",
+      target: null,
+      container: other,
+    };
+    const { rerender, unmount } = renderHook((value) => useChatSearchHighlights(value), {
+      initialProps: inactive,
+    });
+    rerender({ ...inactive, bubbles: [user("old", "echo changed")] });
+    expect(highlights.get(CHAT_SEARCH_ACTIVE_HIGHLIGHT)?.ranges[0]).toBe(active);
+    unmount();
+    expect(highlights.get(CHAT_SEARCH_ACTIVE_HIGHLIGHT)?.ranges[0]).toBe(active);
+    expect(onResolved).toHaveBeenCalledOnce();
+  });
+
   it("scrolls the exact repeated occurrence once and preserves focus/manual scroll through refreshes", () => {
     const input = document.createElement("input");
     document.body.append(input);

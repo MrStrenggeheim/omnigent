@@ -1,4 +1,6 @@
+import { RetainedWorkbench } from "@/workbench/RetainedWorkbench";
 import { useContextSearchController } from "@/hooks/useContextSearchController";
+import { WorkbenchShell } from "@/workbench/WorkbenchShell";
 import { useContextualFindHotkey } from "@/hooks/useContextualFindHotkey";
 import { ContextSearchProvider } from "./ContextSearchContext";
 import { ContextSearchBar } from "./ContextSearchBar";
@@ -258,9 +260,17 @@ function resolveTerminalViewKey(stored: string | null, agentKey: string): string
 }
 
 export function AppShell() {
+  const location = useLocation();
+  const rebase = useRebasePath();
+  const legacyLayout =
+    location.pathname.startsWith(rebase("/canvas")) ||
+    location.pathname.startsWith(rebase("/grid/"));
   return (
     <GridSessionsProvider>
-      <AppShellImpl />
+      <RetainedWorkbench active={!legacyLayout}>
+        <WorkbenchShell active={!legacyLayout} />
+      </RetainedWorkbench>
+      {legacyLayout && <AppShellImpl />}
     </GridSessionsProvider>
   );
 }

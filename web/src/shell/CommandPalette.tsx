@@ -4,9 +4,18 @@ import { TooltipButton } from "@/components/ui/tooltip";
 // cmdk filtering is off and the static actions are filtered here.
 
 import type React from "react";
-import { defaultFilter } from "cmdk";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { XIcon } from "lucide-react";
+import { FileIcon, SearchIcon, XIcon } from "lucide-react";
+import { useWorkspaceFileSearch } from "@/hooks/useWorkspaceChangedFiles";
+import { queryIdentity } from "@/lib/workbenchWorkspace";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { isElectronShell } from "@/lib/nativeBridge";
+import {
+  mergePaletteCommands,
+  paletteWorkflowActions,
+  type CommandPaletteFileTarget,
+} from "@/workbench/paletteCommands";
+
 import { searchActions, filterSearchActions, type ActionCommand } from "./contextSearch/actions";
 import { useNavigate } from "@/lib/routing";
 import {
@@ -18,6 +27,7 @@ import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { BOOT_PROBE_TIMEOUT_MS } from "@/lib/bootCapabilities";
 import { useServerInfo } from "@/lib/CapabilitiesContext";
 import { cn } from "@/lib/utils";
+import { isImeCompositionKeyEvent } from "@/lib/ime";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -30,7 +40,18 @@ import {
 } from "@/components/ui/command";
 import { conversationDisplayLabel, getConversationAgentType } from "./sidebarNav";
 
+export type { CommandPaletteFileTarget } from "@/workbench/paletteCommands";
+
 export interface CommandPaletteProps {
+  /** Captured resource scope; never inferred from active chat or surrounding context. */
+  fileTarget?: CommandPaletteFileTarget;
+  /** File paths are relative to target.folder, matching Explorer quick search. */
+  onOpenFile?: (path: string, target: CommandPaletteFileTarget) => void;
+  onFileSearch?: (query: string, target: CommandPaletteFileTarget) => void;
+  onOpenProjects?: () => void;
+  /** Captured actions supplied by the currently focused workbench view. */
+  actions?: ActionCommand[];
+  onMessageSearch?: (sessionId: string, query: string) => void;
   sessionsOnly?: boolean;
   onNavigate?: (path: string) => void;
   open: boolean;
@@ -114,6 +135,12 @@ function paletteSessions(
 }
 
 export function CommandPalette({
+  fileTarget,
+  onOpenFile,
+  onFileSearch,
+  onOpenProjects,
+  actions: suppliedActions,
+  onMessageSearch,
   sessionsOnly = false,
   onNavigate,
   open,
@@ -143,10 +170,90 @@ export function CommandPalette({
   }, [query]);
 
   const close = (): void => onOpenChange(false);
+  const dismissOnEscape = (event: KeyboardEvent | React.KeyboardEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nativeEvent = "nativeEvent" in event ? event.nativeEvent : event;
+    if (!isImeCompositionKeyEvent({ nativeEvent })) close();
+  };
+  const serverInfo = useServerInfo();
+  const isAdmin = useIsAdmin();
+  const querySettled = query === debouncedQuery;
+  const target = useMemo(
+    () =>
+      fileTarget
+        ? {
+            ...fileTarget,
+            workspace: fileTarget.workspace ? { ...fileTarget.workspace } : undefined,
+          }
+        : undefined,
+    [fileTarget],
+  );
+  const fileIdentity = queryIdentity(target?.workspace ?? null, target?.conversationId);
+  const filesEnabled =
+    open && !sessionsOnly && !!fileIdentity && !!onOpenFile && !!debouncedQuery.trim();
+  const fileSearch = useWorkspaceFileSearch(
+    target?.conversationId,
+    debouncedQuery,
+    undefined,
+    undefined,
+    { enabled: filesEnabled, workspace: target?.workspace ?? null },
+    target?.folder ?? "",
+  );
+  const fileResults =
+    filesEnabled && querySettled && !fileSearch.isPlaceholderData && !fileSearch.isError
+      ? [
+          ...new Map(
+            (fileSearch.data?.files ?? [])
+              .filter((file) => file.type === "file")
+              .map((file) => [file.path, file]),
+          ).values(),
+        ]
+      : [];
+  const visibleFiles = fileResults.slice(0, 50);
+  const workflowActions = useMemo(
+    () =>
+      paletteWorkflowActions({
+        navigate,
+        info: serverInfo,
+        isAdmin,
+        isDesktop: isElectronShell(),
+        isMobile,
+        onOpenProjects,
+      }),
+    [navigate, serverInfo, isAdmin, isMobile, onOpenProjects],
+  );
 
   const actions = useMemo(
-    () => searchActions({ navigate, onToggleLeftSidebar, onToggleRightSidebar }),
-    [navigate, onToggleLeftSidebar, onToggleRightSidebar],
+    () =>
+      mergePaletteCommands(
+        suppliedActions ?? searchActions({ navigate, onToggleLeftSidebar, onToggleRightSidebar }),
+        [
+          ...workflowActions,
+          ...(target && fileIdentity && onFileSearch
+            ? [
+                {
+                  id: "search-files",
+                  label: "Advanced file search",
+                  icon: SearchIcon,
+                  keywords: ["files", "contents", "search", "include", "exclude", "glob"],
+                  run: () => onFileSearch(query, target),
+                },
+              ]
+            : []),
+        ],
+      ),
+    [
+      suppliedActions,
+      navigate,
+      onToggleLeftSidebar,
+      onToggleRightSidebar,
+      workflowActions,
+      target,
+      fileIdentity,
+      onFileSearch,
+      query,
+    ],
   );
   const filteredActions = useMemo(
     () => (sessionsOnly ? [] : filterSearchActions(actions, query)),
@@ -155,10 +262,9 @@ export function CommandPalette({
 
   const { data, isFetching, isError, refetch, hasNextPage, fetchNextPage, isFetchNextPageError } =
     useConversations("", false, { enabled: open });
-  const serverInfo = useServerInfo();
   // Older servers ignore `search_scope`, so they get one mixed group instead.
   const groupedSearch = serverInfo !== "loading" && serverInfo.session_search_scope === true;
-  const searching = !sessionsOnly && debouncedQuery !== "";
+  const searching = debouncedQuery !== "";
   // Wait briefly for server info so a supporting server never gets the mixed
   // request; if it stalls, fall back to that request rather than never searching.
   const serverInfoLoading = serverInfo === "loading";
@@ -168,25 +274,26 @@ export function CommandPalette({
     const timer = setTimeout(() => setServerInfoWaitExpired(true), BOOT_PROBE_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [serverInfoLoading, searching, serverInfoWaitExpired]);
-  const awaitingServerInfo = serverInfoLoading && !serverInfoWaitExpired;
+  const awaitingServerInfo = !sessionsOnly && serverInfoLoading && !serverInfoWaitExpired;
   const searchOptions = {
     enabled: open && searching && !awaitingServerInfo,
     limit: SEARCH_GROUP_PAGE_SIZE,
   };
   const titleSearch = useSessionSearch(
     debouncedQuery,
-    groupedSearch ? "title" : "all",
+    sessionsOnly || groupedSearch ? "title" : "all",
     searchOptions,
   );
   const contentSearch = useSessionSearch(debouncedQuery, "content", {
     ...searchOptions,
-    enabled: searchOptions.enabled && groupedSearch,
+    enabled: searchOptions.enabled && groupedSearch && !sessionsOnly,
   });
   const loadedPages = data?.pages.length ?? 0;
   useEffect(() => {
     if (
       open &&
       sessionsOnly &&
+      !query &&
       hasNextPage &&
       loadedPages < pageLimit &&
       !isFetching &&
@@ -198,6 +305,7 @@ export function CommandPalette({
   }, [
     open,
     sessionsOnly,
+    query,
     hasNextPage,
     loadedPages,
     pageLimit,
@@ -208,29 +316,41 @@ export function CommandPalette({
   ]);
 
   const sessions = useMemo(() => {
-    if (searching) return paletteSessions(titleSearch.data?.pages ?? []);
+    if (!querySettled) return [];
+    if (searching)
+      return titleSearch.isPlaceholderData ? [] : paletteSessions(titleSearch.data?.pages ?? []);
     const out = paletteSessions(data?.pages ?? []);
-    if (sessionsOnly) {
-      if (!query.trim()) return out;
-      return out
-        .map((session) => ({ ...session, score: defaultFilter(session.label, query.trim()) }))
-        .filter((session) => session.score > 0)
-        .sort((first, second) => second.score - first.score);
-    }
+    if (sessionsOnly) return out;
     // The full first page would push Actions below the fold.
     return out.slice(0, IDLE_SESSION_LIMIT);
-  }, [data, titleSearch.data, query, searching, sessionsOnly]);
+  }, [
+    data,
+    titleSearch.data,
+    titleSearch.isPlaceholderData,
+    querySettled,
+    searching,
+    sessionsOnly,
+  ]);
   // Excludes title matches again in case a rename moved a session between the
   // two groups' requests: cmdk needs each item value to be unique.
   const contentSessions = useMemo(
     () =>
-      searching
+      !sessionsOnly && searching && querySettled && !contentSearch.isPlaceholderData
         ? paletteSessions(contentSearch.data?.pages ?? [], new Set(sessions.map((s) => s.id)))
         : [],
-    [contentSearch.data, searching, sessions],
+    [
+      contentSearch.data,
+      contentSearch.isPlaceholderData,
+      querySettled,
+      searching,
+      sessionsOnly,
+      sessions,
+    ],
   );
-  const visibleSessions = sessionsOnly ? sessions.slice(0, SESSION_SEARCH_RESULT_LIMIT) : sessions;
-  const searchGroups = [titleSearch, contentSearch];
+  const visibleSessions =
+    sessionsOnly && !searching ? sessions.slice(0, SESSION_SEARCH_RESULT_LIMIT) : sessions;
+  const searchGroups = sessionsOnly ? [titleSearch] : [titleSearch, contentSearch];
+  const recentFetching = sessionsOnly && !query && isFetching;
   const loadError = searching
     ? searchGroups.some((group) => group.isError)
     : isError || isFetchNextPageError;
@@ -259,6 +379,7 @@ export function CommandPalette({
   const firstItemValue =
     visibleSessions[0]?.id ??
     contentSessions[0]?.id ??
+    (visibleFiles[0] ? `file:${visibleFiles[0].path}` : undefined) ??
     (filteredActions[0] ? `action:${filteredActions[0].id}` : "");
   const [selectedValue, setSelectedValue] = useState("");
   const userMovedSelection = useRef(false);
@@ -272,7 +393,9 @@ export function CommandPalette({
   const paletteLabel = sessionsOnly ? "Switch session" : "Command palette";
   const placeholder = sessionsOnly
     ? "Search sessions by name…"
-    : "Search sessions or run a command";
+    : fileIdentity
+      ? "Search chats, files or commands…"
+      : "Search sessions or run a command";
 
   const runAction = (action: ActionCommand): void => {
     close();
@@ -284,13 +407,19 @@ export function CommandPalette({
     navigate(`/c/${id}`);
   };
 
-  const renderSession = (s: PaletteSession): React.ReactNode => (
+  const renderSession = (s: PaletteSession, messageResult = false): React.ReactNode => (
     // pl-6 indents the label to line up with the icon-prefixed Action rows
     // below (their 16px icon + 8px gap), so the groups read as one column.
     <CommandItem
       key={s.id}
       value={s.id}
-      onSelect={() => goToSession(s.id)}
+      onSelect={() => {
+        if (!querySettled) return;
+        if (messageResult && onMessageSearch) {
+          close();
+          onMessageSearch(s.id, debouncedQuery);
+        } else goToSession(s.id);
+      }}
       className="items-start pl-6"
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -337,6 +466,13 @@ export function CommandPalette({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         aria-describedby={undefined}
+        onEscapeKeyDown={dismissOnEscape}
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Escape" || !(event.target instanceof Element)) return;
+          if (event.target.closest('[role="dialog"]') !== event.currentTarget) return;
+          // A tooltip can consume Radix's document Escape before this dialog sees it.
+          dismissOnEscape(event);
+        }}
         // Mobile: a top-anchored full-screen sheet sized to --omnigent-viewport-height,
         // so the input and results sit above the soft keyboard. sm:max-w-full
         // overrides DialogContent's sm:max-w-sm between 640px and md.
@@ -417,7 +553,7 @@ export function CommandPalette({
               }
             }}
           >
-            {(loadError || (sessionsOnly && isFetching)) && (
+            {(loadError || recentFetching) && (
               <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
                 {loadError
                   ? loadMoreError
@@ -436,28 +572,103 @@ export function CommandPalette({
                 )}
               </p>
             )}
-            {!loadError && !(sessionsOnly && isFetching) && (
-              <CommandEmpty>{searchFetching ? "Searching…" : "No results found"}</CommandEmpty>
-            )}
+            {!loadError &&
+              !recentFetching &&
+              !(
+                filesEnabled &&
+                querySettled &&
+                !fileSearch.isPlaceholderData &&
+                (fileSearch.isError || fileSearch.data?.truncated)
+              ) && (
+                <CommandEmpty>
+                  {searchFetching ||
+                  (filesEnabled && (fileSearch.isFetching || fileSearch.isPlaceholderData))
+                    ? "Searching…"
+                    : "No results found"}
+                </CommandEmpty>
+              )}
             {sessions.length > 0 && (
               <CommandGroup heading="Sessions">
-                {visibleSessions.map(renderSession)}
+                {visibleSessions.map((session) => renderSession(session))}
                 {searching && renderShowMore("title", titleSearch, visibleSessions)}
               </CommandGroup>
             )}
             {contentSessions.length > 0 && (
               <CommandGroup heading="In messages">
-                {contentSessions.map(renderSession)}
+                {contentSessions.map((session) => renderSession(session, true))}
                 {renderShowMore("content", contentSearch, contentSessions)}
               </CommandGroup>
             )}
+            {filesEnabled && querySettled && fileSearch.isError && (
+              <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
+                Couldn’t search files.
+                <TooltipButton
+                  type="button"
+                  className="ml-2 underline"
+                  disabled={fileSearch.isFetching}
+                  onClick={() => void fileSearch.refetch()}
+                >
+                  Retry file search
+                </TooltipButton>
+              </p>
+            )}
+            {filesEnabled &&
+              (fileSearch.isFetching || fileSearch.isPlaceholderData) &&
+              visibleFiles.length === 0 && (
+                <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
+                  Searching files…
+                </p>
+              )}
+            {(visibleFiles.length > 0 ||
+              (!sessionsOnly && target && fileIdentity && onFileSearch && query.trim())) && (
+              <CommandGroup heading="Files">
+                {visibleFiles.map((file) => (
+                  <CommandItem
+                    key={file.path}
+                    value={`file:${file.path}`}
+                    onSelect={() => {
+                      if (!querySettled || !target || !onOpenFile || fileSearch.isPlaceholderData)
+                        return;
+                      close();
+                      onOpenFile(file.path, target);
+                    }}
+                  >
+                    <FileIcon />
+                    <span className="truncate text-left">
+                      <HighlightedText text={file.path} query={debouncedQuery} />
+                    </span>
+                  </CommandItem>
+                ))}
+                {target && onFileSearch && (
+                  <CommandItem
+                    value="file:advanced"
+                    onSelect={() => {
+                      close();
+                      onFileSearch(query, target);
+                    }}
+                  >
+                    <SearchIcon />
+                    Search file contents…
+                  </CommandItem>
+                )}
+              </CommandGroup>
+            )}
+            {filesEnabled &&
+              querySettled &&
+              !fileSearch.isPlaceholderData &&
+              (fileSearch.data?.truncated || fileResults.length > visibleFiles.length) && (
+                <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
+                  File results are limited. Narrow the query
+                  {onFileSearch ? " or use advanced file search" : ""}.
+                </p>
+              )}
             {sessionsOnly && sessions.length > visibleSessions.length && (
               <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
                 Showing {visibleSessions.length} of {sessions.length} matches. Type more to narrow
                 your search.
               </p>
             )}
-            {sessionsOnly && hasNextPage && loadedPages >= pageLimit && !loadError && (
+            {sessionsOnly && !query && hasNextPage && loadedPages >= pageLimit && !loadError && (
               <Button
                 variant="ghost"
                 className="w-full"

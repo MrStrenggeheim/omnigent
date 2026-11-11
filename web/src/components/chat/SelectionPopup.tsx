@@ -1,3 +1,6 @@
+import { useScopedConversationId } from "./conversationScope";
+import { QuoteDestinationMenu } from "./QuoteDestinationMenu";
+import type { QuoteSource } from "@/lib/contextReferences";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CornerUpLeftIcon, MessagesSquareIcon } from "lucide-react";
 import { TextSelectionMenu, type TextSelectionAction } from "./TextSelectionMenu";
@@ -13,6 +16,11 @@ export function SelectionPopup({
   // "Ask in side chat" action beside Reply.
   onAskInSideChat?: (text: string) => void;
 }) {
+  const sourceId = useScopedConversationId();
+  const sourceRef = useRef<QuoteSource | null>(null);
+  const [destinationSource, setDestinationSource] = useState<
+    (QuoteSource & { x: number; y: number }) | null
+  >(null);
   const [popupPos, setPopupPos] = useState<{ x: number; y: number } | null>(null);
   const selectedTextRef = useRef<string>("");
 
@@ -53,7 +61,27 @@ export function SelectionPopup({
       y: rect.top - 6,
     });
     selectedTextRef.current = text;
-  }, [containerRef]);
+    const start =
+      range.startContainer instanceof Element
+        ? range.startContainer
+        : range.startContainer.parentElement;
+    const end =
+      range.endContainer instanceof Element ? range.endContainer : range.endContainer.parentElement;
+    const boundary = end?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
+    const first = start?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
+    const messageIds = Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]"))
+      .filter((node) => range.intersectsNode(node))
+      .map((node) => node.dataset.messageId!);
+    sourceRef.current =
+      sourceId && boundary && first
+        ? {
+            conversationId: sourceId,
+            boundaryId: boundary,
+            messageIds: [...new Set(messageIds)],
+            text,
+          }
+        : null;
+  }, [containerRef, sourceId]);
 
   useEffect(() => {
     document.addEventListener("mouseup", updatePopup);
@@ -64,6 +92,15 @@ export function SelectionPopup({
     };
   }, [updatePopup]);
 
+  if (destinationSource)
+    return (
+      <QuoteDestinationMenu
+        source={destinationSource}
+        x={destinationSource.x}
+        y={destinationSource.y}
+        onClose={() => setDestinationSource(null)}
+      />
+    );
   if (!popupPos) return null;
 
   const close = () => {
@@ -78,7 +115,15 @@ export function SelectionPopup({
   const actions: TextSelectionAction[] = [
     { label: "Reply ↵", icon: <CornerUpLeftIcon />, onSelect: select(onReply) },
   ];
-  if (onAskInSideChat)
+  if (sourceRef.current)
+    actions.push({
+      label: "Use in chat…",
+      icon: <MessagesSquareIcon />,
+      onSelect: () => {
+        if (sourceRef.current) setDestinationSource({ ...sourceRef.current, ...popupPos });
+      },
+    });
+  else if (onAskInSideChat)
     actions.push({
       label: "Ask in side chat",
       icon: <MessagesSquareIcon />,

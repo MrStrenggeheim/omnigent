@@ -1,3 +1,12 @@
+import { SidebarServerPicker as ServerConnectionPicker } from "@/shell/SidebarServerPicker";
+import {
+  DEFAULT_LIST_DENSITY,
+  LIST_DENSITY_STORAGE_KEY,
+  listDensities,
+  useListDensity,
+  writeListDensity,
+} from "@/lib/listDensityPreferences";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { toast } from "@/lib/notifications";
 import { DefaultModelSettings } from "./settings/DefaultModelSettings";
@@ -954,6 +963,34 @@ function FoldAssistantNarrationControl() {
   );
 }
 
+function ListDensityControl() {
+  const density = useListDensity();
+  const labelId = useId();
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <SettingsLabel
+        label="List density"
+        labelId={labelId}
+        description="Adjust navigation and list spacing without changing text size."
+      />
+      <SegmentedControl aria-labelledby={labelId} className="h-auto min-h-11">
+        {listDensities.map((value) => (
+          <SegmentedControlItem
+            key={value}
+            label={value === "compact" ? "Compact" : "Comfortable"}
+            active={density === value}
+            className="min-h-11"
+            onClick={() => writeListDensity(value)}
+            data-testid={`list-density-${value}`}
+          >
+            {value === "compact" ? "Compact" : "Comfortable"}
+          </SegmentedControlItem>
+        ))}
+      </SegmentedControl>
+    </div>
+  );
+}
+
 function AppearanceSection() {
   // Embedded: the host owns light/dark, so the Mode picker would be a no-op —
   // replace it with a note (plus a link to the host's own theme settings when
@@ -975,6 +1012,7 @@ function AppearanceSection() {
     setTheme("system");
 
     writeTerminalThemeMode(TERMINAL_THEME_DEFAULT);
+    writeListDensity(DEFAULT_LIST_DENSITY);
 
     writeThemePalette(DEFAULT_PALETTE);
     applyThemePalette(DEFAULT_PALETTE);
@@ -1004,6 +1042,7 @@ function AppearanceSection() {
     if (typeof window !== "undefined") {
       try {
         for (const key of [
+          LIST_DENSITY_STORAGE_KEY,
           "omnigent:ui-font-size",
           "omnigent:ui-font-family",
           "omnigent:code-font-size",
@@ -1135,6 +1174,10 @@ function AppearanceSection() {
             <div className="mt-4 border-t border-border pt-4">
               <WorkspaceTabsControl />
             </div>
+          </SettingsGroup>
+
+          <SettingsGroup title="List spacing" testId="settings-group-density">
+            <ListDensityControl />
           </SettingsGroup>
 
           <SettingsGroup title="Interface typography" testId="settings-group-interface-type">
@@ -1906,6 +1949,7 @@ function GeneralSection() {
   return (
     <Section title="General" description="Configure general Omnigent behavior.">
       <div className="flex flex-col gap-6">
+        <ServerConnectionPicker />
         <SettingsGroup title="Composer" testId="settings-group-composer">
           <ComposerSendShortcutControl />
           <div className="mt-4 border-t border-border pt-4">

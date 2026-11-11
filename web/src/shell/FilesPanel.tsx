@@ -1,4 +1,13 @@
-import { subscribePanelFolder, readPanelFolder, setPanelFolder } from "@/lib/panelFolder";
+import type { ReactNode } from "react";
+import {
+  ResourceViewIdContext,
+  subscribePanelFolder,
+  readPanelFolder,
+  setPanelFolder,
+  panelFolderKey,
+  useResourceViewId,
+  useResourceViewState,
+} from "@/lib/panelFolder";
 import {
   EyeIcon,
   EyeOffIcon,
@@ -61,6 +70,10 @@ import { setExplorerGitScope } from "@/lib/explorerGitScope";
 export { readBrowseLocation } from "@/lib/panelFolder";
 
 interface FilesPanelProps {
+  viewId?: string;
+  active?: boolean;
+  hideLocation?: boolean;
+  locationControls?: ReactNode;
   conversationId?: string;
   workspaceId?: string;
   /** Comparison selection owned by this Explorer surface. */
@@ -170,9 +183,22 @@ function subscribeDirectories(onChange: () => void) {
  * Uploaded/attached files are rendered inline in the message thread and are
  * intentionally not listed here.
  */
-export function FilesPanel({
+export function FilesPanel(props: FilesPanelProps) {
+  const viewId = useResourceViewId(props.viewId);
+  return (
+    <ResourceViewIdContext.Provider value={viewId}>
+      <FilesPanelContent {...props} viewId={viewId} />
+    </ResourceViewIdContext.Provider>
+  );
+}
+
+function FilesPanelContent({
   conversationId: sessionId,
   workspaceId: explicitWorkspaceId,
+  viewId: explicitViewId,
+  hideLocation = false,
+  locationControls,
+  active = true,
   view: requestedView,
   onFileSelect,
   flatView,
@@ -185,9 +211,10 @@ export function FilesPanel({
 }: FilesPanelProps) {
   const { conversationId: routeId } = useParams<{ conversationId: string }>();
   const workspace = useWorkbenchWorkspace();
+  const viewId = useResourceViewId(explicitViewId);
   const workspaceId = explicitWorkspaceId ?? workspace?.id;
-  const conversationId = sessionId ?? routeId;
-  const browseOwner = workspaceId ?? conversationId;
+  const conversationId = sessionId ?? (viewId ? undefined : routeId);
+  const browseOwner = panelFolderKey(workspaceId ?? conversationId, viewId);
   const sourceChatId = workspace ? (workspace.chatSessionId ?? undefined) : conversationId;
   const resourceIdentity = queryIdentity(workspaceId, conversationId);
   // The runner went offline (e.g. its host restarted): `sessionStatus`
@@ -212,16 +239,36 @@ export function FilesPanel({
   const runnerOnline = useSessionRunnerOnline(conversationId);
   const hostOnline = useSessionHostOnline(conversationId);
   const servedFromHost = !workspace && runnerOnline === false && hostOnline === true;
-  const [changedSearch, setChangedSearch] = useState("");
-  const [treeSearch, setTreeSearch] = useState("");
+  const [changedSearch, setChangedSearch] = useResourceViewState(
+    browseOwner,
+    viewId,
+    "changedSearch",
+    "",
+  );
+  const [treeSearch, setTreeSearch] = useResourceViewState(browseOwner, viewId, "treeSearch", "");
   const [debouncedTreeSearch, setDebouncedTreeSearch] = useState("");
   // "files to include" / "files to exclude" glob filters (VSCode-style),
   // revealed by the filters toggle in the Explore search bar.
-  const [treeInclude, setTreeInclude] = useState("");
+  const [treeInclude, setTreeInclude] = useResourceViewState(
+    browseOwner,
+    viewId,
+    "treeInclude",
+    "",
+  );
   const [debouncedTreeInclude, setDebouncedTreeInclude] = useState("");
-  const [treeExclude, setTreeExclude] = useState("");
+  const [treeExclude, setTreeExclude] = useResourceViewState(
+    browseOwner,
+    viewId,
+    "treeExclude",
+    "",
+  );
   const [debouncedTreeExclude, setDebouncedTreeExclude] = useState("");
-  const [showSearchFilters, setShowSearchFilters] = useState(false);
+  const [showSearchFilters, setShowSearchFilters] = useResourceViewState(
+    browseOwner,
+    viewId,
+    "showSearchFilters",
+    false,
+  );
   const queryClient = useQueryClient();
   const refreshInFlight = useRef(false);
   const [refreshingFiles, setRefreshingFiles] = useState(false);
@@ -235,9 +282,10 @@ export function FilesPanel({
     workspaceId,
     conversationId: sourceChatId,
     view,
+    viewId,
   });
   const envQuery = useWorkspaceEnvironment(conversationId, {
-    enabled: true,
+    enabled: active,
   });
   const workspaceRoot = envQuery.data?.root ?? null;
   // The picker browses the host's filesystem, the same source the new-session
@@ -292,17 +340,18 @@ export function FilesPanel({
   );
   useEffect(() => {
     setExplorerGitScope(
-      { workspaceId, conversationId },
+      { workspaceId, conversationId, viewId },
       { path: locationParam, directories: gitDirectories },
     );
-  }, [workspaceId, conversationId, locationParam, gitDirectories]);
+  }, [workspaceId, conversationId, viewId, locationParam, gitDirectories]);
   const comparisonQuery = useWorkspaceComparisonChanges(conversationId, {
     workspaceId,
     view,
+    viewId,
     ...(workspace && !sourceChatId ? { agentEnabled: false } : {}),
     path: locationParam,
     directories: gitDirectories,
-    enabled: true,
+    enabled: active,
   });
   const changedFiles = useMemo(
     () =>
@@ -334,7 +383,7 @@ export function FilesPanel({
       if (absolutePath === workingDir) return;
       // Revision hashes belong to the selected repository and cannot follow a new folder.
       for (const comparisonView of ["files", "changes"] as const) {
-        const scope = { workspaceId, conversationId, view: comparisonView };
+        const scope = { workspaceId, conversationId, viewId, view: comparisonView };
         if (isRevisionComparison(getWorkspaceComparison(scope)))
           setWorkspaceComparison(scope, DEFAULT_WORKSPACE_COMPARISON);
       }
@@ -346,12 +395,13 @@ export function FilesPanel({
           detail: {
             conversationId,
             ...(workspaceId ? { workspaceId } : {}),
+            ...(viewId ? { viewId } : {}),
             location: relativizeToWorkspace(next, workspaceRoot),
           },
         }),
       );
     },
-    [workspaceRoot, workspaceId, conversationId, browseOwner, workingDir],
+    [workspaceRoot, workspaceId, conversationId, viewId, browseOwner, workingDir],
   );
 
   const navigateToChild = useCallback(
@@ -379,7 +429,11 @@ export function FilesPanel({
     [onFileSelect, locationParam],
   );
 
-  const allFilesQuery = useWorkspaceAllFiles(conversationId, { enabled: !flatView }, locationParam);
+  const allFilesQuery = useWorkspaceAllFiles(
+    conversationId,
+    { enabled: !flatView && active },
+    locationParam,
+  );
   // A refused location must say so on the bar. Rendering an empty tree instead
   // would read as "this directory is empty", which is a different fact.
   const unreachable =
@@ -402,7 +456,7 @@ export function FilesPanel({
       setTreeExclude("");
       setDebouncedTreeExclude("");
     }
-  }, [flatView]);
+  }, [flatView, setChangedSearch, setTreeSearch, setTreeInclude, setTreeExclude]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -422,7 +476,7 @@ export function FilesPanel({
   const exitTreeSearch = useCallback(() => {
     setTreeSearch("");
     setDebouncedTreeSearch("");
-  }, []);
+  }, [setTreeSearch]);
 
   // Only fire search queries on the Explore tab. The include/exclude globs
   // narrow an active text query; globs alone do not search.
@@ -432,7 +486,7 @@ export function FilesPanel({
     debouncedTreeInclude,
     debouncedTreeExclude,
     {
-      enabled: !flatView && debouncedTreeSearch.trim().length > 0,
+      enabled: active && !flatView && debouncedTreeSearch.trim().length > 0,
     },
     locationParam,
   );
@@ -510,6 +564,7 @@ export function FilesPanel({
   const liveRefresh = useRef(refreshFiles);
   liveRefresh.current = refreshFiles;
   useEffect(() => {
+    if (!active) return;
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void liveRefresh.current(true);
     };
@@ -521,7 +576,7 @@ export function FilesPanel({
       window.removeEventListener("focus", refreshVisible);
       document.removeEventListener("visibilitychange", refreshVisible);
     };
-  }, [conversationId, locationParam]);
+  }, [active, conversationId, locationParam]);
 
   const hiddenFilesToggle = (
     <Tooltip>
@@ -575,17 +630,18 @@ export function FilesPanel({
       >
         {/* Shared folder scope and actions for Files and Changes. */}
         <div className="workspace-control-header flex items-center gap-[2px] border-b border-border px-2">
-          {workingDir && workspaceRoot && (
-            <BrowseLocationBar
-              current={workingDir}
-              workspace={workspaceRoot}
-              hostId={hostId}
-              canBrowseOutside={isOwnerLevel(permissionLevel)}
-              reach={envQuery.data?.reachable ?? null}
-              onNavigate={navigateTo}
-              error={locationError}
-            />
-          )}
+          {locationControls ??
+            (!hideLocation && workingDir && workspaceRoot && (
+              <BrowseLocationBar
+                current={workingDir}
+                workspace={workspaceRoot}
+                hostId={hostId}
+                canBrowseOutside={isOwnerLevel(permissionLevel)}
+                reach={envQuery.data?.reachable ?? null}
+                onNavigate={navigateTo}
+                error={locationError}
+              />
+            ))}
           <div className="ml-auto flex items-center gap-[2px]">
             <DiffComparisonControls
               value={comparison}
@@ -794,6 +850,7 @@ export function FilesPanel({
           )}
           {!showAsleepHint && !flatView && (
             <FolderTree
+              viewId={viewId}
               files={allFilesQuery.data?.data}
               isLoading={allFilesQuery.isLoading}
               isError={allFilesQuery.isError}

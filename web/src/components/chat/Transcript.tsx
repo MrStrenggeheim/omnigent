@@ -1,3 +1,4 @@
+import { useConversationChatStore, useConversationChatFocused } from "@/workbench/ScopedChatStore";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
@@ -22,7 +23,6 @@ import {
   createBubbleCache,
   liveCandidateAssistantIndex,
 } from "@/lib/renderItems";
-import { useChatStore } from "@/store/chatStore";
 import { TranscriptScrollbar } from "@/pages/TranscriptScrollbar";
 import { TurnRail, type Turn } from "@/pages/TurnRail";
 import { StreamBudgetBanner } from "@/components/StreamBudgetBanner";
@@ -128,6 +128,8 @@ function TranscriptImpl({
   sandboxLaunching,
   spacerMeasureRef,
 }: TranscriptProps) {
+  const useChatStore = useConversationChatStore();
+  const focused = useConversationChatFocused();
   const blocks = useChatStore((s) => s.blocks);
   const pendingUserMessages = useChatStore((s) => s.pendingUserMessages);
   const activeResponse = useChatStore((s) => s.activeResponse);
@@ -224,6 +226,7 @@ function TranscriptImpl({
   const [nativeFindConversationId, setNativeFindConversationId] = useState<string | null>(null);
   useEffect(() => setNativeFindConversationId(null), [conversationId]);
   useEffect(() => {
+    if (!focused) return;
     const handleFind = (event: globalThis.KeyboardEvent) => {
       if (!display.conversationId || !isNativeFindShortcut(event)) return;
       // Native find runs after keydown dispatch. Commit every row before the
@@ -232,7 +235,7 @@ function TranscriptImpl({
     };
     window.addEventListener("keydown", handleFind);
     return () => window.removeEventListener("keydown", handleFind);
-  }, [display.conversationId]);
+  }, [display.conversationId, focused]);
   const disableVirtualization = nativeFindConversationId === display.conversationId;
   const [searchParams] = useSearchParams();
   const messageId = searchParams.get(MESSAGE_QUERY_PARAM);
@@ -275,7 +278,10 @@ function TranscriptImpl({
   const searchTarget = contextSearch?.highlightTarget ?? null;
   useChatSearchHighlights({
     conversationId: conversationId ?? null,
-    query: contextSearch?.open ? contextSearch.settledQuery : "",
+    query:
+      contextSearch?.open && contextSearch.activeSessionId === conversationId
+        ? contextSearch.settledQuery
+        : "",
     target: searchTarget,
     onResolved: contextSearch?.onHighlightResolved,
     container: containerEl,
@@ -321,6 +327,7 @@ function TranscriptImpl({
 
   // Cmd+Alt+↑/↓ (Ctrl+Alt on win/linux) user-turn navigation.
   useEffect(() => {
+    if (!focused) return;
     const handler = (e: globalThis.KeyboardEvent) => {
       if (!hasCommandModifier(e) || !e.altKey) return;
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
@@ -331,7 +338,7 @@ function TranscriptImpl({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [nav]);
+  }, [nav, focused]);
 
   const showWorkingIndicator = shouldShowWorkingIndicator(display.showsWorking, display.bubbles);
   const arcaWarning = useArcaShutdownBanner();
@@ -606,6 +613,7 @@ export function VirtualBubbleList({
   /** Publishes virtualizer-derived geometry up to the rail/spacer. */
   onGeometryChange: (geometry: TranscriptGeometry) => void;
 }) {
+  const useChatStore = useConversationChatStore();
   const ctx = useStickToBottomContext() as ReturnType<typeof useStickToBottomContext> & {
     stopScroll: () => void;
     state: { isAtBottom: boolean; escapedFromLock: boolean; scrollTop: number };

@@ -1,3 +1,10 @@
+import { useScrollRestore } from "./useScrollRestore";
+import {
+  ResourceViewIdContext,
+  panelFolderKey,
+  useResourceViewId,
+  useResourceViewState,
+} from "@/lib/panelFolder";
 import { PanelFolderBar } from "./PanelFolderBar";
 import { usePullRequestWorkspace, pullRequestIdentity } from "@/lib/pullRequestScope";
 import { isEditorLevel } from "@/lib/permissionsApi";
@@ -1026,21 +1033,52 @@ function pullRequestLabel(pr: PullRequestAssociation, sessionProvider?: string |
   return title ? `${identity} — ${title}` : identity;
 }
 
-export function PullRequestPanel({ conversationId }: { conversationId: string }) {
+export function PullRequestPanel({
+  conversationId,
+  viewId: explicitViewId,
+  active = true,
+  hideLocation = false,
+  locationControls,
+}: {
+  conversationId: string;
+  viewId?: string;
+  active?: boolean;
+  hideLocation?: boolean;
+  locationControls?: React.ReactNode;
+}) {
+  const viewId = useResourceViewId(explicitViewId);
   const workspace = usePullRequestWorkspace(conversationId);
   return (
-    <PullRequestPanelContent
-      key={pullRequestIdentity(workspace, conversationId)}
-      conversationId={conversationId}
-    />
+    <ResourceViewIdContext.Provider value={viewId}>
+      <PullRequestPanelContent
+        key={panelFolderKey(pullRequestIdentity(workspace, conversationId), viewId)}
+        conversationId={conversationId}
+        active={active}
+        hideLocation={hideLocation}
+        locationControls={locationControls}
+      />
+    </ResourceViewIdContext.Provider>
   );
 }
 
-function PullRequestPanelContent({ conversationId }: { conversationId: string }) {
+function PullRequestPanelContent({
+  conversationId,
+  active,
+  hideLocation,
+  locationControls,
+}: {
+  conversationId: string;
+  active: boolean;
+  hideLocation: boolean;
+  locationControls?: React.ReactNode;
+}) {
   const workspace = usePullRequestWorkspace(conversationId);
   const identity = pullRequestIdentity(workspace, conversationId)!;
   const isMobileViewport = useIsMobileViewport();
-  const [selection, setSelection] = useState<{ sessionId: string; url?: string }>();
+  const viewId = useResourceViewId();
+  const [selection, setSelection] = useResourceViewState<
+    { sessionId: string; url?: string } | undefined
+  >(identity, viewId, "pr-selection", undefined);
   const [prPickerOpen, setPrPickerOpen] = useState(false);
   const [prPickerTooltipOpen, setPrPickerTooltipOpen] = useState(false);
   // Select focuses rows on both pointer hover and keyboard navigation.
@@ -1048,7 +1086,7 @@ function PullRequestPanelContent({ conversationId }: { conversationId: string })
   const [linking, setLinking] = useState(false);
   const [url, setUrl] = useState("");
   const selected = selection?.sessionId === identity ? selection.url : undefined;
-  const info = usePullRequestInfo(conversationId, { poll: true, prUrl: selected });
+  const info = usePullRequestInfo(conversationId, { poll: active, prUrl: selected });
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const refresh = async () => {
@@ -1103,7 +1141,7 @@ function PullRequestPanelContent({ conversationId }: { conversationId: string })
     if (!selected && info.data?.selected_pr_url) {
       setSelection({ sessionId: identity, url: info.data.selected_pr_url });
     }
-  }, [identity, selected, info.data?.selected_pr_url]);
+  }, [identity, selected, info.data?.selected_pr_url, setSelection]);
   const changeSelection = (next?: string) => setSelection({ sessionId: identity, url: next });
   const prs = associations?.prs ?? [];
   const selectedPr = prs.find((pr) => pr.url === (selected ?? associations?.selected_pr_url));
@@ -1183,10 +1221,13 @@ function PullRequestPanelContent({ conversationId }: { conversationId: string })
     <div className="flex h-full min-h-0 flex-col">
       {showTrackingControls ? (
         <div className="workspace-control-header flex items-center gap-2 border-b border-border px-2">
-          <PanelFolderBar
-            conversationId={conversationId}
-            fallback={<PanelTitle copy={copy} showTitle={prs.length === 0} />}
-          />
+          {locationControls ??
+            (!hideLocation && (
+              <PanelFolderBar
+                conversationId={conversationId}
+                fallback={<PanelTitle copy={copy} showTitle={prs.length === 0} />}
+              />
+            ))}
           <div className="ml-auto flex min-w-0 flex-1 items-center gap-2">
             {prs.length > 0 && (
               <TooltipProvider>
@@ -1285,7 +1326,7 @@ function PullRequestPanelContent({ conversationId }: { conversationId: string })
         </div>
       ) : panelState.kind !== "ready" ? (
         <div className="workspace-control-header flex items-center justify-between gap-2 border-b border-border px-2">
-          <PanelTitle copy={copy} showTitle />
+          {locationControls ?? <PanelTitle copy={copy} showTitle />}
           {refreshButton}
         </div>
       ) : null}
@@ -1304,6 +1345,8 @@ function PullRequestPanelContent({ conversationId }: { conversationId: string })
       ) : null}
       <div className="min-h-0 flex-1">
         <PullRequestPanelDetails
+          locationControls={locationControls}
+          hideLocation={hideLocation}
           key={`${identity}:${selected ?? ""}`}
           conversationId={conversationId}
           info={info}
@@ -1326,6 +1369,8 @@ function PullRequestPanelContent({ conversationId }: { conversationId: string })
 }
 
 function PullRequestPanelDetails({
+  hideLocation,
+  locationControls,
   conversationId,
   info,
   showProviderIcon,
@@ -1333,6 +1378,8 @@ function PullRequestPanelDetails({
   emptyStateAction,
 }: {
   conversationId: string;
+  hideLocation: boolean;
+  locationControls?: React.ReactNode;
   info: ReturnType<typeof usePullRequestInfo>;
   showProviderIcon: boolean;
   refreshButton?: React.ReactNode;
@@ -1355,7 +1402,13 @@ function PullRequestPanelDetails({
   // Summary (checks + PR body), Comments, and Changes (the stacked diff).
   // Summary is the landing tab — like GitHub's PR page opening on the
   // Conversation view.
-  const [activeTab, setActiveTab] = useState<"summary" | "comments" | "changes">("summary");
+  const viewId = useResourceViewId();
+  const [activeTab, setActiveTab] = useResourceViewState<"summary" | "comments" | "changes">(
+    identity,
+    viewId,
+    "pr-tab",
+    "summary",
+  );
 
   const themeType = useResolvedThemeMode();
   // Diff layout is the app-global FileViewer preference (unified/split); seed
@@ -1378,18 +1431,31 @@ function PullRequestPanelDetails({
 
   // Per-file collapse is lifted here so the toolbar's "expand/collapse all" can
   // drive every section; a path in the set is collapsed.
-  const [collapsedPaths, setCollapsedPaths] = useState<ReadonlySet<string>>(() => new Set());
+  const [collapsedPaths, setCollapsedPaths] = useResourceViewState<ReadonlySet<string>>(
+    identity,
+    viewId,
+    "pr-collapsed-files",
+    () => new Set(),
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Collapsed folders in the sidebar tree (empty = all expanded).
-  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleDir = useCallback((path: string) => {
-    setCollapsedDirs((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
+  const [collapsedDirs, setCollapsedDirs] = useResourceViewState<ReadonlySet<string>>(
+    identity,
+    viewId,
+    "pr-collapsed-folders",
+    () => new Set(),
+  );
+  const toggleDir = useCallback(
+    (path: string) => {
+      setCollapsedDirs((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+    },
+    [setCollapsedDirs],
+  );
 
   // Drag-to-resize the file sidebar via a handle on its right edge.
   const {
@@ -1398,14 +1464,17 @@ function PullRequestPanelDetails({
     handleProps: sidebarHandleProps,
   } = useResizableColumn(192, 140, 560);
 
-  const toggleOne = useCallback((path: string) => {
-    setCollapsedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
+  const toggleOne = useCallback(
+    (path: string) => {
+      setCollapsedPaths((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+    },
+    [setCollapsedPaths],
+  );
 
   const allCollapsed = files.length > 0 && files.every((f) => collapsedPaths.has(f.path));
   const toggleAll = useCallback(() => {
@@ -1413,7 +1482,7 @@ function PullRequestPanelDetails({
       const everyCollapsed = files.length > 0 && files.every((f) => prev.has(f.path));
       return everyCollapsed ? new Set<string>() : new Set(files.map((f) => f.path));
     });
-  }, [files]);
+  }, [files, setCollapsedPaths]);
 
   // Parse the one whole-PR patch into per-file diffs, keyed by path.
   const { filesByPath, parseError } = useMemo(() => {
@@ -1485,6 +1554,11 @@ function PullRequestPanelDetails({
   // The stacked diff scrolls as one; the sidebar highlights the file at the top
   // of the viewport and jumps to a file on click.
   const scrollRef = useRef<HTMLDivElement>(null);
+  const saveScroll = useScrollRestore(
+    scrollRef,
+    viewId ? `pr:${panelFolderKey(identity, viewId)}` : null,
+    prDiff.data !== undefined && activeTab === "changes",
+  );
   const sectionEls = useRef<Map<string, HTMLElement>>(new Map());
   const [activePath, setActivePath] = useState<string | null>(null);
 
@@ -1519,16 +1593,19 @@ function PullRequestPanelDetails({
   }, [files]);
 
   // Jumping to a collapsed file also expands it, so the click lands on its diff.
-  const jumpTo = useCallback((path: string) => {
-    setActivePath(path);
-    setCollapsedPaths((prev) => {
-      if (!prev.has(path)) return prev;
-      const next = new Set(prev);
-      next.delete(path);
-      return next;
-    });
-    sectionEls.current.get(path)?.scrollIntoView({ block: "start" });
-  }, []);
+  const jumpTo = useCallback(
+    (path: string) => {
+      setActivePath(path);
+      setCollapsedPaths((prev) => {
+        if (!prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+      sectionEls.current.get(path)?.scrollIntoView({ block: "start" });
+    },
+    [setCollapsedPaths],
+  );
 
   // Mutation responses seed the query cache raw, so normalize before reading.
   const normalized = info.data && normalizePullRequestInfo(info.data);
@@ -1706,12 +1783,14 @@ function PullRequestPanelDetails({
         <div className="shrink-0 border-b border-border pb-0.5">
           <div className="px-3 pt-2">
             <div className="flex items-center gap-2">
-              {showProviderIcon && (
-                <PanelFolderBar
-                  conversationId={conversationId}
-                  fallback={<PanelTitle copy={copy} />}
-                />
-              )}
+              {showProviderIcon &&
+                (locationControls ??
+                  (!hideLocation && (
+                    <PanelFolderBar
+                      conversationId={conversationId}
+                      fallback={<PanelTitle copy={copy} />}
+                    />
+                  )))}
               <span className="block min-w-0 truncate text-xs text-muted-foreground">
                 {data.repo?.name_with_owner ?? copy.label}
                 {data.branch && (
@@ -1940,7 +2019,10 @@ function PullRequestPanelDetails({
             )}
             <div
               ref={scrollRef}
-              onScroll={onScroll}
+              onScroll={(event) => {
+                saveScroll(event);
+                onScroll();
+              }}
               className="github-diff-stack min-w-0 flex-1 overflow-y-auto"
             >
               {changes.error || prDiff.error || parseError ? (

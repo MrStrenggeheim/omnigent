@@ -1,3 +1,4 @@
+import { panelFolderKey, useResourceViewId } from "./panelFolder";
 import { useCallback, useSyncExternalStore, type SetStateAction } from "react";
 import type { ExplorerEntry } from "./explorerOperations";
 
@@ -21,7 +22,8 @@ export function resetExplorerSelectionsForTesting() {
 
 /** Scope selection to a resource folder, retaining the anchor when its preview opens. */
 export function useExplorerSelection(owner: string | undefined, folder: string) {
-  const key = JSON.stringify([owner ?? null, folder]);
+  const viewId = useResourceViewId();
+  const key = JSON.stringify([panelFolderKey(owner, viewId) ?? null, folder]);
   let selection = selections.get(key);
   if (!selection) {
     selection = { entries: new Map(), anchor: { current: null } };

@@ -1,0 +1,48 @@
+/* Opt in per row/list; typography and control-header sizing stay independent. */
+:root,
+[data-list-density="comfortable"] {
+  --list-row-min-height: 36px;
+  --list-row-padding-block: 6px;
+  --list-row-padding-inline: 10px;
+  --list-row-gap: 8px;
+  --list-gap: 4px;
+  --tree-indent: 18px;
+}
+
+[data-list-density="compact"] {
+  --list-row-min-height: 28px;
+  --list-row-padding-block: 2px;
+  --list-row-padding-inline: 8px;
+  --list-row-gap: 6px;
+  --list-gap: 2px;
+  --tree-indent: 14px;
+}
+
+.density-row {
+  min-block-size: var(--list-row-min-height);
+  padding-block: var(--list-row-padding-block);
+  padding-inline: var(--list-row-padding-inline);
+  gap: var(--list-row-gap);
+}
+
+.density-list {
+  row-gap: var(--list-gap);
+}
+
+/* Tree rows can supply --tree-depth without changing their text or hit area. */
+.density-tree-row {
+  padding-inline-start: calc(
+    var(--list-row-padding-inline) + var(--tree-depth, 0) * var(--tree-indent)
+  );
+}
+
+@media (max-width: 767.98px), (any-pointer: coarse) {
+  :root,
+  [data-list-density] {
+    --list-row-min-height: 44px;
+  }
+
+  .density-row {
+    min-block-size: max(44px, var(--list-row-min-height));
+  }
+}

@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
-import { usePanelFolder, setPanelFolder } from "@/lib/panelFolder";
+import {
+  usePanelFolder,
+  setPanelFolder,
+  panelFolderKey,
+  useResourceViewId,
+} from "@/lib/panelFolder";
 import { joinBrowseLocation, relativizeToWorkspace } from "@/lib/workspacePaths";
 import { BrowseLocationBar } from "./BrowseLocationBar";
 import {
@@ -19,6 +24,7 @@ export function PanelFolderBar({
   fallback?: ReactNode;
 }) {
   const workspace = useWorkbenchWorkspace();
+  const viewId = useResourceViewId();
   const owner = workspace?.id ?? conversationId;
   const folder = usePanelFolder(owner, workspace?.root ?? null);
   if (!workspace) return fallback;
@@ -31,15 +37,16 @@ export function PanelFolderBar({
       reach={null}
       onNavigate={(path) => {
         for (const view of ["files", "changes"] as const) {
-          const key = { workspaceId: workspace.id, conversationId, view };
+          const key = { workspaceId: workspace.id, conversationId, view, viewId };
           if (isRevisionComparison(getWorkspaceComparison(key)))
             setWorkspaceComparison(key, DEFAULT_WORKSPACE_COMPARISON);
         }
-        setPanelFolder(owner, path === workspace.root ? null : path);
+        setPanelFolder(panelFolderKey(owner, viewId)!, path === workspace.root ? null : path);
         window.dispatchEvent(
           new CustomEvent("omnigent:browse-location-changed", {
             detail: {
               conversationId,
+              viewId,
               workspaceId: workspace.id,
               location: relativizeToWorkspace(path, workspace.root),
             },

@@ -155,26 +155,8 @@ function useWorkspaceFileOpener(text: string, explicitLink = false): WorkspaceFi
 }
 
 /**
- * Inline-`code` renderer that turns workspace file paths (e.g.
- * `` `src/components/App.tsx` ``) into clickable links opening the FileViewer.
- *
- * The span's text is first collapsed to a workspace-relative path: an
- * absolute (`/home/u/ws/foo.md`) or home-relative (`~/ws/foo.md`) path under
- * the workspace root is stripped down to its relative form so it matches the
- * changed-files list and the filesystem API (both speak relative paths);
- * absolute/`~` paths outside the root resolve to null and never linkify.
- *
- * That relative path is then linkified when it is either (a) a known
- * agent-changed file — resolved synchronously, the fast path, and the only
- * path that may be an uncommitted/deleted file — or (b) a path-shaped string
- * that the filesystem API confirms points at a real file in the workspace.
- * Everything else (prose-y inline code, non-existent paths) falls back to a
- * styled `<code>` matching Streamdown's default inline appearance. A link
- * displays only the filename; its full path appears in the shared tooltip.
- *
- * Rendered by Streamdown as a real component (via the `inlineCode` slot), so
- * it may call hooks: the existence query re-renders this span when it settles,
- * independent of whether `MessageResponse` re-renders its parent.
+ * Promote implicit paths only after the source message's authorized resolver
+ * confirms a file; directories, examples and unavailable references stay code.
  */
 function WorkspacePathInlineCode({
   children: codeChildren,
@@ -187,7 +169,15 @@ function WorkspacePathInlineCode({
   // non-openable one just stays styled inline code — only an explicit
   // markdown link (WorkspaceFileLink) earns dead-path feedback.
   const scope = useContext(ChatAttachmentContext);
-  const { open: openWorkspaceFile, copyPath } = useWorkspaceFileOpener(scope.itemId ? "" : text);
+  const fallback = (
+    <code
+      className={cn("rounded bg-muted px-1.5 py-0.5 font-mono text-ui", className)}
+      data-streamdown="inline-code"
+      {...codeProps}
+    >
+      {codeChildren}
+    </code>
+  );
   const citedPath = splitWorkspaceFileCitation(text).path;
   if (
     scope.itemId &&
@@ -200,38 +190,11 @@ function WorkspacePathInlineCode({
         sessionId={scope.sessionId}
         itemId={scope.itemId}
         reference={citedPath}
+        unresolvedFallback={fallback}
       />
     );
   }
-  if (openWorkspaceFile) {
-    return (
-      <InlineFileReference
-        path={copyPath}
-        filename={citedPath.split(/[\\/]/).at(-1)}
-        aria-label={text}
-        data-streamdown="inline-code"
-        onClick={openWorkspaceFile}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openWorkspaceFile();
-          }
-        }}
-        id={codeProps.id}
-      />
-    );
-  }
-  // Match Streamdown's default inline-code styling so non-path inline code
-  // looks unchanged.
-  return (
-    <code
-      className={cn("rounded bg-muted px-1.5 py-0.5 font-mono text-ui", className)}
-      data-streamdown="inline-code"
-      {...codeProps}
-    >
-      {codeChildren}
-    </code>
-  );
+  return fallback;
 }
 
 // Streamdown's own anchor styling and marker attribute. Overriding the `a`

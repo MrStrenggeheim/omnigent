@@ -1,6 +1,6 @@
+import { useConversationChatStore } from "@/workbench/ScopedChatStore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { releaseConversationScrollLock } from "@/components/ai-elements/conversation";
-import { useChatStore } from "@/store/chatStore";
 import type { Bubble } from "@/lib/renderItems";
 import { findMessageElement } from "@/lib/messageDeepLink";
 import type { ContextSearchTarget } from "@/shell/contextSearch/types";
@@ -14,6 +14,8 @@ import {
   sourceOccurrenceRange,
 } from "@/lib/chatSearchHighlights";
 import "@/components/chat/chatSearchHighlights.css";
+
+let highlightOwner: object | null = null;
 
 export interface ChatSearchResolution {
   target: ContextSearchTarget;
@@ -35,6 +37,7 @@ export interface ChatSearchHighlightOptions {
 
 /** Refresh paints only; a new activation identity alone may move the viewport. */
 export function useChatSearchHighlights(options: ChatSearchHighlightOptions): void {
+  const useChatStore = useConversationChatStore();
   const {
     conversationId,
     query,
@@ -46,6 +49,7 @@ export function useChatSearchHighlights(options: ChatSearchHighlightOptions): vo
     ready,
     rangeNonce,
   } = options;
+  const owner = useRef({});
   const sources = useMemo(() => chatSearchSources(bubbles), [bubbles]);
   const loadingConversation = useChatStore((s) => s.loadingConversation);
   const loadingMoreHistory = useChatStore((s) => s.loadingMoreHistory);
@@ -107,18 +111,34 @@ export function useChatSearchHighlights(options: ChatSearchHighlightOptions): vo
     };
   }, [container, query]);
 
-  useEffect(() => () => clearChatSearchHighlights(), [container, conversationId]);
+  useEffect(
+    () => () => {
+      if (highlightOwner !== owner.current) return;
+      highlightOwner = null;
+      clearChatSearchHighlights();
+    },
+    [container, conversationId],
+  );
 
   useEffect(() => {
     if (progress.current.key !== activation) progress.current = { key: activation, done: false };
     const current = progress.current;
+    if (!container || !query) {
+      if (highlightOwner === owner.current) {
+        paintChatSearchHighlights([], null);
+      }
+      return;
+    }
     const all =
       container && query
         ? Array.from(
             container.querySelectorAll(`[data-message-id] :is(${CHAT_SEARCH_BODY_SELECTOR})`),
           ).flatMap((element) => chatQueryRanges(element, query))
         : [];
-    const paint = (active: Range | null) => paintChatSearchHighlights(all, active);
+    const paint = (active: Range | null) => {
+      highlightOwner = owner.current;
+      paintChatSearchHighlights(all, active);
+    };
     paint(null);
     if (
       !container ||
@@ -243,7 +263,7 @@ export function useChatSearchHighlights(options: ChatSearchHighlightOptions): vo
     paint(range);
     if (current.done) return;
     current.done = true;
-    releaseConversationScrollLock();
+    releaseConversationScrollLock(scrollElement ?? container);
     if (scrollElement) {
       const bounds = range.getBoundingClientRect();
       const viewport = scrollElement.getBoundingClientRect();
@@ -270,5 +290,6 @@ export function useChatSearchHighlights(options: ChatSearchHighlightOptions): vo
     oldestItemId,
     historyGeneration,
     revision,
+    useChatStore,
   ]);
 }

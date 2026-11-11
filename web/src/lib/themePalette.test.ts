@@ -76,7 +76,27 @@ afterEach(() => {
 describe("themePalette", () => {
   it("returns the default palette when nothing is stored", () => {
     expect(readThemePalette()).toBe(DEFAULT_PALETTE);
-    expect(DEFAULT_PALETTE).toBe("omni");
+    expect(DEFAULT_PALETTE).toBe("violet");
+  });
+
+  it.each(themeSelections)("preserves an explicit %s selection", (palette) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(palette));
+    expect(readThemePalette()).toBe(palette);
+  });
+
+  it.each(["light", "dark"] as const)("keeps violet %s text and actions readable", (mode) => {
+    const tokens = PALETTES.find((palette) => palette.id === "violet")!.tokens[mode];
+    for (const [foreground, background] of [
+      [tokens.foreground, tokens.background],
+      [tokens.mutedForeground, tokens.muted],
+      [tokens.primaryForeground, tokens.primary],
+      [tokens.accentForeground, tokens.accent],
+      [tokens.sidebarActiveForeground, tokens.sidebarActive],
+    ]) {
+      expect(
+        contrast(parseColor(foreground).rgb, parseColor(background).rgb),
+      ).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("round-trips a valid palette", () => {
@@ -95,7 +115,7 @@ describe("themePalette", () => {
     writeThemePalette("dracula");
     expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
     writeThemePalette(DEFAULT_PALETTE);
-    // Storing the default just reverts to base tokens, so drop the key.
+    // The missing preference resolves to the current default.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(readThemePalette()).toBe(DEFAULT_PALETTE);
   });
@@ -135,10 +155,15 @@ describe("themePalette", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("custom");
   });
 
-  it("removes data-theme for the default palette so the base tokens take over", () => {
+  it("applies the violet default and retains explicit legacy Omni tokens", () => {
     applyThemePalette("github");
     expect(document.documentElement.getAttribute("data-theme")).toBe("github");
     applyThemePalette(DEFAULT_PALETTE);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("violet");
+    writeThemePalette("omni");
+    expect(readThemePalette()).toBe("omni");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify("omni"));
+    applyThemePalette(readThemePalette());
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
   });
 
@@ -154,8 +179,8 @@ describe("themePalette", () => {
     expect(inner.getAttribute("data-theme")).toBe("dracula");
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
     applyThemePalette(DEFAULT_PALETTE);
-    expect(scope.hasAttribute("data-theme")).toBe(false);
-    expect(inner.hasAttribute("data-theme")).toBe(false);
+    expect(scope.getAttribute("data-theme")).toBe("violet");
+    expect(inner.getAttribute("data-theme")).toBe("violet");
   });
 
   it("exposes swatch metadata for every selectable palette, default first", () => {

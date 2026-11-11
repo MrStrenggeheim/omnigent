@@ -13,6 +13,9 @@ import type { ConversationState } from "./chatStore";
 // Exhaustive by construction: `Record<keyof ConversationState, true>` rejects a
 // missing key and a stale one.
 const CONVERSATION_STATE_KEY_MAP: Record<keyof ConversationState, true> = {
+  redirectToConversationId: true,
+  flashItemId: true,
+  pendingComposerAttachments: true,
   blocks: true,
   pendingUserMessages: true,
   settledShellInputs: true,
@@ -84,6 +87,9 @@ export function isConversationStateKey(key: string | symbol): key is keyof Conve
  */
 export function createInitialConversationState(): ConversationState {
   return {
+    redirectToConversationId: null,
+    flashItemId: null,
+    pendingComposerAttachments: [],
     blocks: [],
     pendingUserMessages: [],
     settledShellInputs: [],

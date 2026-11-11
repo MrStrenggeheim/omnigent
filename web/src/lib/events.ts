@@ -1,3 +1,4 @@
+import type { MessageCommunication } from "./messageCommunication";
 import type { NativePermissionDelivery } from "./nativePermissionDelivery";
 // Mirrors sdks/python-client/omnigent_client/_events.py.
 //
@@ -327,6 +328,7 @@ export interface NativeToolCall {
 
 /** The final assistant message from `output_item.done` (type `message`). */
 export interface MessageDone {
+  communication?: MessageCommunication;
   type: "message_done";
   content: Record<string, unknown>[];
   itemId: string;

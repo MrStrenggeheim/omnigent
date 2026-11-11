@@ -1,3 +1,8 @@
+import {
+  LIST_DENSITY_STORAGE_KEY,
+  readListDensity,
+  writeListDensity,
+} from "./listDensityPreferences";
 // Export and import user-facing UI settings as a JSON file.
 //
 // Only keys that represent deliberate user preferences are included — not
@@ -23,6 +28,7 @@ import {
 
 /** localStorage keys that constitute exportable user preferences. */
 const EXPORTABLE_KEYS = [
+  LIST_DENSITY_STORAGE_KEY,
   "omnigent:ui-font-size",
   "omnigent:ui-font-family",
   "omnigent:code-font-size",
@@ -160,6 +166,7 @@ export function applyImportedSettings(imported: ExportedSettings): number {
       // Swallow individual write failures.
     }
   }
+  writeListDensity(readListDensity());
   const nextPins = readPinnedWorkspaceTabs();
   const removedPins = previousPins.filter((tab) => !nextPins.includes(tab));
   unpinSessionWorkspaceTabs(removedPins);

@@ -1,3 +1,9 @@
+import {
+  ResourceViewIdContext,
+  panelFolderKey,
+  useResourceViewId,
+  useResourceViewState,
+} from "@/lib/panelFolder";
 import { getFindContext, REQUEST_FILE_FIND_EVENT } from "@/lib/findContext";
 import { FileSelectionScope } from "./FileSelectionMenu";
 import { FileContentReaderContext, type FileContentReader } from "./FileContentReader";
@@ -363,7 +369,13 @@ function useToolbarOverflow(actionsKey: string): {
 // ---------------------------------------------------------------------------
 
 interface FileViewerProps {
+  viewId?: string;
+  locationControls?: React.ReactNode;
+  onChooseAnnotationChat?: () => void;
   syncUrl?: boolean;
+  commentId?: string;
+  initialDiff?: boolean;
+  linkRequestId?: string;
   workspaceId?: string;
   /** Whether Chat Activity can receive comments and supply captures for this workspace. */
   recipientValid?: boolean;
@@ -421,8 +433,11 @@ export function FileViewer(props: FileViewerProps) {
   // boundAgentId is populated from the active session's agent binding —
   // works for both template agents and session-scoped agents from
   // `omnigent run --server`.
-  const boundAgentId = useChatStore((s) => s.boundAgentId);
+  const boundAgentId = useChatStore((s) =>
+    s.conversationId === props.conversationId ? s.boundAgentId : null,
+  );
   const workspace = useWorkbenchWorkspace();
+  const viewId = useResourceViewId(props.viewId);
   const recipientValid =
     props.recipientValid ?? (!workspace || workspace.chatSessionId === props.conversationId);
   const agentId = !recipientValid
@@ -435,19 +450,28 @@ export function FileViewer(props: FileViewerProps) {
       conversationId: props.conversationId,
       path: props.path,
       workspaceRoot: workspace?.root ?? null,
+      workspaceId: workspace?.id,
+      hostId: workspace?.host_id ?? null,
     }),
-    [props.conversationId, props.path, workspace?.root],
+    [props.conversationId, props.path, workspace?.root, workspace?.id, workspace?.host_id],
   );
   return (
-    <FileSelectionScope value={selectionSource}>
-      <CommentSenderProvider sessionId={props.conversationId} agentId={agentId}>
-        <FileViewerBody {...props} agentId={agentId} recipientValid={recipientValid} />
-      </CommentSenderProvider>
-    </FileSelectionScope>
+    <ResourceViewIdContext.Provider value={viewId}>
+      <FileSelectionScope value={selectionSource} onChooseChat={props.onChooseAnnotationChat}>
+        <CommentSenderProvider sessionId={props.conversationId} agentId={agentId}>
+          <FileViewerBody {...props} agentId={agentId} recipientValid={recipientValid} />
+        </CommentSenderProvider>
+      </FileSelectionScope>
+    </ResourceViewIdContext.Provider>
   );
 }
 
 function FileViewerBody({
+  commentId,
+  initialDiff,
+  linkRequestId,
+  viewId: explicitViewId,
+  locationControls,
   syncUrl = true,
   workspaceId: explicitWorkspaceId,
   recipientValid = true,
@@ -476,8 +500,10 @@ function FileViewerBody({
   const explorerHeaderTarget = useFileExplorerHeader();
   const workspaceId = explicitWorkspaceId ?? workspace?.id;
   const resourceIdentity = queryIdentity(workspaceId, conversationId)!;
+  const viewId = useResourceViewId(explicitViewId);
+  const uiIdentity = panelFolderKey(resourceIdentity, viewId);
   const comparisonView =
-    originView ?? getFileComparisonScope({ workspaceId, conversationId }, path);
+    originView ?? getFileComparisonScope({ workspaceId, conversationId, viewId }, path);
   const [searchParams, setSearchParams] = useSearchParams();
   const rebasePath = useRebasePath();
   const isMobile = useIsMobileViewport();
@@ -485,9 +511,9 @@ function FileViewerBody({
   const isActiveViewport = viewport === undefined || (viewport === "mobile") === isMobile;
   // Capture URL params once on open — we don't want re-renders caused by our own
   // param writes to re-run the initialization logic.
-  const initialDiffRef = useRef(syncUrl && searchParams.get("diff") === "1");
+  const initialDiffRef = useRef(initialDiff ?? (syncUrl && searchParams.get("diff") === "1"));
   const linkedFileRef = useRef(initialDiffRef.current ? { resourceIdentity, path } : null);
-  const initialCommentIdRef = useRef(syncUrl ? searchParams.get("comment") : null);
+  const initialCommentIdRef = useRef(commentId ?? (syncUrl ? searchParams.get("comment") : null));
   // Seeded from the parent's persisted state on remount (e.g. returning to a
   // tab); defaults closed on a fresh open. The linked-comment / fresh-open
   // effects below only force it open, never closed, so a restored-open value
@@ -517,16 +543,18 @@ function FileViewerBody({
     workspaceId,
     conversationId: recipientValid ? (workspace?.chatSessionId ?? conversationId) : undefined,
     view: comparisonView,
+    viewId,
   });
   const comparisonScope = useSyncExternalStore(
     subscribeExplorerGitScopes,
-    () => getExplorerGitScope({ workspaceId, conversationId }),
+    () => getExplorerGitScope({ workspaceId, conversationId, viewId }),
     () => getExplorerGitScope(undefined),
   );
   const agentComparison =
     diffComparison.source === "agent" || diffComparison.source === "last-turn";
   const changedFiles = useWorkspaceComparisonChanges(conversationId, {
     ...comparisonScope,
+    viewId,
     ...(workspaceId !== undefined ? { workspaceId } : {}),
     ...(comparisonView !== undefined ? { view: comparisonView } : {}),
     ...(recipientValid ? {} : { agentEnabled: false }),
@@ -708,8 +736,9 @@ function FileViewerBody({
     if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
     const url = new URL(window.location.href);
     if (!syncUrl) {
-      url.pathname = rebasePath(`/c/${conversationId}`);
+      url.pathname = rebasePath(conversationId ? `/c/${conversationId}` : "/");
       url.search = "";
+      if (!conversationId) url.searchParams.set("view", "workbench");
       url.searchParams.set("file", path);
     }
     url.searchParams.set("file", path);
@@ -726,7 +755,7 @@ function FileViewerBody({
   }, [activeSelection, syncUrl, rebasePath, conversationId, path, workspaceId]);
 
   const copyCommentLink = useCallback(
-    (commentId: string) => {
+    (linkedCommentId: string) => {
       if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
       const url = new URL(window.location.href);
       if (!syncUrl) {
@@ -734,12 +763,13 @@ function FileViewerBody({
         url.search = "";
         url.searchParams.set("file", path);
       }
-      url.searchParams.set("comment", commentId);
+      url.searchParams.set("comment", linkedCommentId);
+      if (workspaceId) url.searchParams.set("workspace", workspaceId);
       navigator.clipboard
         .writeText(url.toString())
         .then(undefined, (err) => console.warn("Failed to copy comment link", err));
     },
-    [syncUrl, rebasePath, conversationId, path],
+    [syncUrl, rebasePath, conversationId, path, workspaceId],
   );
 
   const commentSender = useOptionalCommentSender();
@@ -795,14 +825,19 @@ function FileViewerBody({
     }
   };
 
+  useEffect(() => {
+    if (commentId === undefined && linkRequestId === undefined) return;
+    initialCommentIdRef.current = commentId ?? null;
+    linkedCommentAppliedRef.current = false;
+  }, [commentId, linkRequestId, path, resourceIdentity]);
   // Apply the linked comment (from ?comment= URL param) once per lifecycle.
   // Waits for fileQuery.data so classifyAndRemapComments has run with real content,
   // ensuring activeSelection uses remapped indices that match open comments.
   useEffect(() => {
     if (linkedCommentAppliedRef.current) return;
-    const commentId = initialCommentIdRef.current;
-    if (!commentId || fileQuery.data === undefined) return;
-    const comment = openComments.find((c) => c.id === commentId);
+    const linkedCommentId = initialCommentIdRef.current;
+    if (!linkedCommentId || fileQuery.data === undefined) return;
+    const comment = openComments.find((c) => c.id === linkedCommentId);
     if (!comment) return;
     linkedCommentAppliedRef.current = true;
     commentsInitializedRef.current = true;
@@ -813,7 +848,7 @@ function FileViewerBody({
       anchor_content: comment.anchor_content ?? "",
       comment_id: comment.id,
     });
-  }, [openComments]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [openComments, commentId, linkRequestId, path, resourceIdentity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Find-in-file state lifted here so the toolbar button can open it.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -931,9 +966,18 @@ function FileViewerBody({
   // Read once on mount so our own writes (and within-tab file navigation) don't
   // re-run the initializers.
   const persistedPrefsRef = useRef(readFileViewPreferences());
-  const [diffActive, setDiffActive] = useState(
+  const [diffActive, setDiffActive] = useResourceViewState(
+    resourceIdentity,
+    viewId,
+    "diffActive",
     () => initialDiffRef.current || persistedPrefsRef.current.diffActive,
   );
+  useEffect(() => {
+    if (initialDiff === undefined) return;
+    initialDiffRef.current = initialDiff;
+    linkedFileRef.current = initialDiff ? { resourceIdentity, path } : null;
+    setDiffActive(initialDiff);
+  }, [initialDiff, linkRequestId, path, resourceIdentity, setDiffActive]);
   const requestedDiff =
     open &&
     isActiveViewport &&
@@ -979,14 +1023,30 @@ function FileViewerBody({
         // The mounted viewer retries initialization and surfaces load errors.
       });
   }, [prepareDiff, lang]);
-  const [diffLayout, setDiffLayout] = useState<"unified" | "split">(
+  const [diffLayout, setDiffLayout] = useResourceViewState<"unified" | "split">(
+    resourceIdentity,
+    viewId,
+    "diffLayout",
     () => persistedPrefsRef.current.diffLayout,
   );
-  const [hideWhitespace, setHideWhitespace] = useState(
+  const [hideWhitespace, setHideWhitespace] = useResourceViewState(
+    resourceIdentity,
+    viewId,
+    "hideWhitespace",
     () => persistedPrefsRef.current.hideWhitespace,
   );
-  const [wrapLines, setWrapLines] = useState(() => persistedPrefsRef.current.wrapLines);
-  const [previewableViewMode, setPreviewableViewMode] = useState<"editor" | "preview" | "source">(
+  const [wrapLines, setWrapLines] = useResourceViewState(
+    resourceIdentity,
+    viewId,
+    "wrapLines",
+    () => persistedPrefsRef.current.wrapLines,
+  );
+  const [previewableViewMode, setPreviewableViewMode] = useResourceViewState<
+    "editor" | "preview" | "source"
+  >(
+    resourceIdentity,
+    viewId,
+    "previewableViewMode",
     () => persistedPrefsRef.current.previewableViewMode,
   );
   // A ?comment= deep link to a markdown file must open on the rich-text editor
@@ -1008,6 +1068,9 @@ function FileViewerBody({
     initialCommentIdRef.current ? path : null,
   );
 
+  useEffect(() => {
+    if (commentId) setDeepLinkBiasPath(path);
+  }, [commentId, linkRequestId, path]);
   // Switch a markdown file to the rich-text editor — the surface where text-
   // selection commenting works. Used by the preview's "switch to edit mode"
   // hint. Coming from preview/source there are no edits to guard, so it applies
@@ -1015,7 +1078,7 @@ function FileViewerBody({
   const handleRequestEditMode = useCallback(() => {
     setDeepLinkBiasPath(null);
     setPreviewableViewMode("editor");
-  }, []);
+  }, [setPreviewableViewMode]);
 
   // Persist the global view preferences so they survive a refresh. commentsOpen
   // is intentionally excluded — it's contextual (per-open), not a sticky
@@ -1227,8 +1290,7 @@ function FileViewerBody({
   // different height, so sharing one offset across modes would drop the reader
   // at an unrelated place after a toggle; the namespace is separate from the
   // `viewer:` keys Monaco writes for its own internal scroller.
-  const contentScrollKey =
-    conversationId && path ? `viewer-content:${resourceIdentity}:${viewMode}:${path}` : null;
+  const contentScrollKey = path ? `viewer-content:${uiIdentity}:${viewMode}:${path}` : null;
   const handleContentScroll = useScrollRestore(
     contentAreaRef,
     contentScrollKey,
@@ -1703,6 +1765,7 @@ function FileViewerBody({
         className="workspace-control-header flex min-w-0 items-center justify-between gap-2 border-b border-border px-3"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {locationControls}
           {/* Back button is the dismiss affordance for the mobile full-screen
               overlay only. On desktop the viewer is embedded in the tabbed
               Files rail, where tabs (and their x buttons) own open/close, so

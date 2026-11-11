@@ -28,6 +28,7 @@ const SETTINGS_KEYS = [MOD_KEY, ALT_KEY, ","] as const;
  * and label follow from it.
  */
 export function SidebarHeaderActions({
+  compact = false,
   expanded,
   onToggle,
   onOpenSearch,
@@ -36,6 +37,7 @@ export function SidebarHeaderActions({
   onTogglePointerDown,
   onTogglePointerLeave,
 }: {
+  compact?: boolean;
   /**
    * Whether the sidebar currently reads as open — `open || peek`. Drives the
    * toggle only: expanded collapses, collapsed (or peeking) opens.
@@ -63,7 +65,9 @@ export function SidebarHeaderActions({
   return (
     <div className="flex items-center gap-1" data-testid="sidebar-header-actions">
       <SidebarSearchButton onOpenSearch={onOpenSearch} />
-      <SidebarSettingsButton onSettingsClick={onSettingsClick} className="max-md:hidden" />
+      {!compact && (
+        <SidebarSettingsButton onSettingsClick={onSettingsClick} className="max-md:hidden" />
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

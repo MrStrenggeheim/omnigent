@@ -3,10 +3,15 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useChatActivity, type ChatActivityEntry } from "@/hooks/useChatActivity";
 import { useChildSessions } from "@/hooks/useChildSessions";
+import { usePeerMessages, type PeerActivityMessage } from "@/hooks/usePeerMessages";
 import type * as UseChildSessionsModule from "@/hooks/useChildSessions";
 import { ChatActivityPanel } from "./ChatActivityPanel";
 
 vi.mock("@/hooks/useChatActivity", () => ({ useChatActivity: vi.fn() }));
+vi.mock("@/hooks/usePeerMessages", () => ({
+  usePeerMessages: vi.fn(),
+  peerActivityKey: (message: PeerActivityMessage) => message.id,
+}));
 vi.mock("@/hooks/useChildSessions", async (original) => ({
   ...(await original<typeof UseChildSessionsModule>()),
   useChildSessions: vi.fn(),
@@ -58,6 +63,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(useChildSessions).mockReturnValue({ children: [], isLoading: false, error: null });
   activity([]);
+  vi.mocked(usePeerMessages).mockReturnValue({
+    messages: [],
+    isLoading: false,
+    error: null,
+    hasNextPage: false,
+    refetch: vi.fn(),
+    fetchNextPage: vi.fn(),
+  } as unknown as ReturnType<typeof usePeerMessages>);
 });
 afterEach(cleanup);
 
@@ -116,7 +129,12 @@ it("opens the original live terminal using both IDs even for workspace usage or 
   const open = vi.fn();
   render(panel("selected-chat", open));
   fireEvent.click(screen.getByRole("button", { name: "bash" }));
-  expect(open).toHaveBeenCalledWith({ sessionId: "origin-chat", terminalId: "terminal_bash_a" });
+  expect(open).toHaveBeenCalledWith({
+    sessionId: "origin-chat",
+    terminalId: "terminal_bash_a",
+    workspaceId: "workspace",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Expand activity" }));
   expect(screen.getByText("Workspace terminal · used by this chat")).toBeVisible();
 });
 
@@ -167,6 +185,7 @@ it.each([false, true])(
         />
       </MemoryRouter>,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Expand activity" }));
     expect(screen.getByText("Live terminal unavailable here.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "bash" }));
     expect(screen.getByRole("dialog")).toBeVisible();
@@ -188,9 +207,11 @@ it("nests commands beneath their real terminal and groups bare commands without 
   ]);
   render(panel());
   expect(screen.queryByText("git status")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Expand activity" }));
   fireEvent.click(screen.getByRole("button", { name: "Commands (1)" }));
   expect(screen.getByText("git status")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Past (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Expand activity" }));
   fireEvent.click(screen.getByRole("button", { name: "Commands (2)" }));
   expect(screen.getByText("pnpm test")).toBeVisible();
   expect(screen.getByText("pwd")).toBeVisible();
@@ -228,6 +249,7 @@ it("keeps separate launches of a reused terminal ID and assigns commands by laun
   const open = vi.fn();
   render(panel("selected-chat", open));
   const live = within(screen.getByRole("region", { name: "Live shells" }));
+  fireEvent.click(live.getByRole("button", { name: "Expand activity" }));
   fireEvent.click(live.getByRole("button", { name: "Commands (1)" }));
   expect(live.getByText("current command")).toBeVisible();
   expect(live.queryByText("old command")).not.toBeInTheDocument();
@@ -310,4 +332,89 @@ it("keeps agent navigation visible while loading shell activity", () => {
   render(panel());
   expect(screen.getByText("Loading shell activity…")).toBeVisible();
   expect(screen.getByTestId("subagent-main-row")).toBeVisible();
+});
+
+it("filters attributed incoming/outgoing messages and requests another page even when the first is empty", () => {
+  const fetchNextPage = vi.fn();
+  const messages: PeerActivityMessage[] = [
+    {
+      id: "incoming",
+      direction: "incoming",
+      communication: {
+        kind: "peer",
+        message_id: "incoming",
+        source_conversation_id: "source-chat",
+        source_title: "Researcher",
+        destination_conversation_id: "selected-chat",
+        delivery_state: "confirmed",
+      },
+      content: [{ type: "input_text", text: "The complete incoming text" }],
+    },
+    {
+      id: "outgoing",
+      direction: "outgoing",
+      communication: {
+        kind: "peer",
+        message_id: "outgoing",
+        source_conversation_id: "selected-chat",
+        destination_conversation_id: "target-chat",
+        delivery_state: "unknown",
+      },
+      content: [{ type: "input_text", text: "The complete outgoing text" }],
+    },
+  ];
+  vi.mocked(usePeerMessages).mockReturnValue({
+    messages,
+    isLoading: false,
+    error: null,
+    hasNextPage: true,
+    isFetchingNextPage: false,
+    fetchNextPage,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof usePeerMessages>);
+  const rendered = render(panel());
+  fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+  expect(screen.queryByRole("region", { name: "Agents" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Shell activity" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "From Researcher" })).toHaveAttribute(
+    "href",
+    "/c/source-chat",
+  );
+  expect(screen.getByRole("link", { name: "Message to conversation" })).toHaveAttribute(
+    "href",
+    "/c/target-chat",
+  );
+  expect(screen.getByText("Unconfirmed")).toBeVisible();
+  expect(screen.getByText("The complete incoming text")).toBeVisible();
+  fireEvent.click(screen.getAllByRole("button", { name: "Expand activity" })[1]);
+  expect(screen.getByText("Delivery")).toBeVisible();
+  rendered.rerender(panel());
+  expect(screen.getByRole("button", { name: "Collapse activity" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Load older outgoing messages" }));
+  expect(fetchNextPage).toHaveBeenCalledOnce();
+  vi.mocked(usePeerMessages).mockReturnValue({
+    messages: [],
+    isLoading: false,
+    error: null,
+    hasNextPage: true,
+    fetchNextPage,
+  } as unknown as ReturnType<typeof usePeerMessages>);
+  rendered.rerender(panel());
+  expect(screen.getByRole("button", { name: "Load older outgoing messages" })).toBeEnabled();
+});
+
+it("keeps incoming messages available when outbox inspection fails and exposes retry", () => {
+  const retry = vi.fn();
+  vi.mocked(usePeerMessages).mockReturnValue({
+    messages: [],
+    isLoading: false,
+    error: new Error("Unavailable"),
+    hasNextPage: false,
+    refetch: retry,
+  } as unknown as ReturnType<typeof usePeerMessages>);
+  render(panel());
+  fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+  expect(screen.getByText(/Incoming messages reflect loaded conversation history/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Retry messages" }));
+  expect(retry).toHaveBeenCalledOnce();
 });

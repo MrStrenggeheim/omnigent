@@ -124,6 +124,7 @@ it("supports Tab entry, arrow wrapping, Home/End and keyboard activation", async
   const { comment } = renderMenu();
   const add = screen.getByRole("menuitem", { name: "Add comment" });
   const ask = screen.getByRole("menuitem", { name: "Ask in chat" });
+  const quote = screen.getByRole("menuitem", { name: "Use in chat…" });
   await user.tab();
   expect(document.activeElement).toBe(add);
   await user.keyboard("{ArrowDown}");
@@ -131,11 +132,13 @@ it("supports Tab entry, arrow wrapping, Home/End and keyboard activation", async
   expect(ask.tabIndex).toBe(0);
   expect(add.tabIndex).toBe(-1);
   await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(quote);
+  await user.keyboard("{ArrowRight}");
   expect(document.activeElement).toBe(add);
   await user.keyboard("{ArrowUp}");
-  expect(document.activeElement).toBe(ask);
+  expect(document.activeElement).toBe(quote);
   await user.keyboard("{ArrowLeft}{End}");
-  expect(document.activeElement).toBe(ask);
+  expect(document.activeElement).toBe(quote);
   await user.keyboard("{Home}{Enter}");
   expect(comment).toHaveBeenCalledOnce();
 });
@@ -200,4 +203,54 @@ it("positions the measured menu immediately above its selection anchor", () => {
   expect(menu.style.top).toBe("158px");
   expect(menu).toHaveAttribute("data-text-selection-menu");
   expect(menu).toHaveAttribute("data-file-selection-menu");
+});
+
+it("offers an explicit chat choice instead of a no-op comment for an unowned preview", () => {
+  const choose = vi.fn();
+  const comment = vi.fn();
+  render(
+    <FileSelectionScope
+      value={{ ...source, conversationId: "", workspaceId: "workspace-a", hostId: "host-a" }}
+      onChooseChat={choose}
+    >
+      <FileSelectionScope value={{ ...source, conversationId: "" }}>
+        <FileSelectionMenu
+          x={20}
+          y={20}
+          getText={() => "selected"}
+          onComment={comment}
+          onClose={vi.fn()}
+        />
+      </FileSelectionScope>
+    </FileSelectionScope>,
+  );
+  expect(screen.queryByRole("menuitem", { name: "Add comment" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: "Ask in chat" })).not.toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: "Use in chat…" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Choose chat" }));
+  expect(choose).toHaveBeenCalledOnce();
+  expect(comment).not.toHaveBeenCalled();
+});
+
+it("retains captured machine provenance through the code viewer's matching nested scope", () => {
+  const dispatch = vi.spyOn(window, "dispatchEvent");
+  render(
+    <FileSelectionScope value={{ ...source, workspaceId: "workspace-a", hostId: "host-a" }}>
+      <FileSelectionScope value={source}>
+        <FileSelectionMenu
+          x={20}
+          y={20}
+          getText={() => "selected"}
+          onComment={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </FileSelectionScope>
+    </FileSelectionScope>,
+  );
+  fireEvent.click(screen.getByRole("menuitem", { name: "Ask in chat" }));
+  expect((dispatch.mock.calls[0][0] as CustomEvent<FileAnnotation>).detail).toMatchObject({
+    conversationId: "chat-a",
+    workspaceId: "workspace-a",
+    hostId: "host-a",
+  });
 });

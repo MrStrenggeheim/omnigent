@@ -1,7 +1,18 @@
+import { useScrollRestore } from "./useScrollRestore";
+import { panelFolderKey, useResourceViewId, useResourceViewState } from "@/lib/panelFolder";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { isEditorLevel } from "@/lib/permissionsApi";
 import { useWorkbenchWorkspace, queryIdentity, resourceBase } from "@/lib/workbenchWorkspace";
-import { type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDownIcon,
@@ -101,6 +112,10 @@ async function readResponse(response: Response) {
 }
 
 function ContentSearchPanelContent({
+  viewId: explicitViewId,
+  locationControls,
+  initialQuery,
+  autoFocus,
   conversationId,
   onFileSelect,
   inputRef,
@@ -108,6 +123,10 @@ function ContentSearchPanelContent({
   replaceOpen = false,
   replaceFocusNonce = 0,
 }: {
+  viewId?: string;
+  locationControls?: ReactNode;
+  initialQuery?: string;
+  autoFocus?: boolean;
   conversationId: string;
   onFileSelect: (path: string, options?: OpenFileOptions) => void;
   inputRef?: RefObject<HTMLInputElement | null>;
@@ -117,22 +136,34 @@ function ContentSearchPanelContent({
 }) {
   const workspace = useWorkbenchWorkspace();
   const identity = queryIdentity(workspace, conversationId);
+  const viewId = useResourceViewId(explicitViewId);
+  const uiIdentity = panelFolderKey(identity, viewId);
   const queryClient = useQueryClient();
   const sessionCanEdit = useCanEdit(workspace ? "" : conversationId);
   const canEdit = workspace ? isEditorLevel(workspace.permission_level ?? null) : sessionCanEdit;
   const cachedInput = useQuery<SearchInput>({
-    queryKey: ["content-search-input", identity],
-    initialData: defaults(scope),
-    queryFn: () => defaults(scope),
+    queryKey: ["content-search-input", uiIdentity],
+    initialData: () => ({ ...defaults(scope), query: initialQuery ?? "" }),
+    queryFn: () => ({ ...defaults(scope), query: initialQuery ?? "" }),
     enabled: false,
     gcTime: Infinity,
   });
-  const [input, setInput] = useState<SearchInput>({ ...defaults(scope), ...cachedInput.data });
+  const [input, setInput] = useResourceViewState<SearchInput>(
+    identity,
+    viewId,
+    "content-search-input",
+    () => ({ ...defaults(scope), ...cachedInput.data }),
+  );
   const effectiveFolder = input.pinned ? input.folder : scope;
   const [showFilters, setShowFilters] = useState(false);
   const [showReplace, setShowReplace] = useState(replaceOpen);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useResourceViewState<Set<string>>(
+    identity,
+    viewId,
+    "collapsed-search-results",
+    () => new Set(),
+  );
   const [preview, setPreview] = useState<{
     result: ReplacementResult;
     matches: ContentMatch[];
@@ -141,7 +172,7 @@ function ContentSearchPanelContent({
   const [busy, setBusy] = useState(false);
   const [operationError, setOperationError] = useState("");
   const [operationStatus, setOperationStatus] = useState("");
-  const undoKey = ["content-search-undo", identity, getCurrentUserId() ?? "local"];
+  const undoKey = ["content-search-undo", uiIdentity, getCurrentUserId() ?? "local"];
   const undoState = useQuery<{ id: string; path: string } | null>({
     queryKey: undoKey,
     initialData: null,
@@ -154,18 +185,29 @@ function ContentSearchPanelContent({
     queryClient.setQueryData(undoKey, value);
   const [operationErrors, setOperationErrors] = useState<ReplacementResult["errors"]>([]);
   const replacementRef = useRef<HTMLInputElement>(null);
+  const ownInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = inputRef ?? ownInputRef;
+  const focusOnMount = useRef(autoFocus === true);
+  useEffect(() => {
+    if (focusOnMount.current) {
+      focusOnMount.current = false;
+      searchInputRef.current?.focus();
+    }
+  }, [searchInputRef]);
   const filtersId = useId();
   const revision = useRef(0);
   const currentInput = { ...input, folder: effectiveFolder };
   const lastSubmittedSignature = useRef("");
   const currentInputRef = useRef(currentInput);
   currentInputRef.current = currentInput;
+  const signature = searchSignature(currentInput);
   const searchKey = useMemo(
-    () => ["content-search-result", identity, effectiveFolder],
-    [identity, effectiveFolder],
+    () => ["content-search-result", identity, effectiveFolder, ...(viewId ? [signature] : [])],
+    [identity, effectiveFolder, signature, viewId],
   );
   const search = useQuery<ContentSearchResult>({
     queryKey: searchKey,
+    placeholderData: viewId ? (previous) => previous : undefined,
     enabled: false,
     gcTime: Infinity,
     retry: false,
@@ -210,9 +252,8 @@ function ContentSearchPanelContent({
   const refetchRef = useRef(submitSearch);
   refetchRef.current = submitSearch;
   useEffect(() => {
-    queryClient.setQueryData(["content-search-input", identity], input);
-  }, [identity, input, queryClient]);
-  const signature = searchSignature(currentInput);
+    queryClient.setQueryData(["content-search-input", uiIdentity], input);
+  }, [uiIdentity, input, queryClient]);
   const resultsCurrent = Boolean(
     search.data && searchSignature(search.data.snapshot) === signature && !search.isFetching,
   );
@@ -237,12 +278,12 @@ function ContentSearchPanelContent({
   }, [signature, input.replacement, input.preserveCase]);
   useEffect(() => {
     setShowReplace(replaceOpen);
-    if (replaceOpen) {
+    if (replaceOpen && autoFocus !== false) {
       const timer = window.setTimeout(() => replacementRef.current?.focus(), 0);
       return () => window.clearTimeout(timer);
     }
     return undefined;
-  }, [replaceOpen, replaceFocusNonce]);
+  }, [replaceOpen, replaceFocusNonce, autoFocus]);
   const files = new Map<string, ContentMatch[]>();
   for (const match of search.data?.matches ?? [])
     files.set(match.path, [...(files.get(match.path) ?? []), match]);
@@ -342,6 +383,12 @@ function ContentSearchPanelContent({
       setBusy(false);
     }
   }
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const onScroll = useScrollRestore(
+    scrollRef,
+    uiIdentity ? `content-search:${uiIdentity}` : null,
+    search.data !== undefined,
+  );
   const update = <K extends keyof SearchInput>(key: K, value: SearchInput[K]) =>
     setInput((previous) => ({ ...previous, [key]: value }));
   const replaceableMatches = (search.data?.matches ?? []).filter((match) => match.sha256);
@@ -363,7 +410,7 @@ function ContentSearchPanelContent({
         <div className="flex gap-2">
           <div className="flex min-w-0 flex-1">
             <Input
-              ref={inputRef}
+              ref={searchInputRef}
               aria-label="Search file contents"
               placeholder="Search file contents"
               type="search"
@@ -420,9 +467,11 @@ function ContentSearchPanelContent({
           </label>
         </div>
         <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="truncate" title={effectiveFolder || "Session workspace"}>
-            Folder: {effectiveFolder || "Session workspace"}
-          </span>
+          {locationControls ?? (
+            <span className="truncate" title={effectiveFolder || "Session workspace"}>
+              Folder: {effectiveFolder || "Session workspace"}
+            </span>
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -538,7 +587,12 @@ function ContentSearchPanelContent({
           <p className="text-muted-foreground">Comma-separated globs. Exclude takes precedence.</p>
         </div>
       </form>
-      <div className="min-h-0 flex-1 overflow-auto p-2" aria-busy={search.isFetching || busy}>
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="min-h-0 flex-1 overflow-auto p-2"
+        aria-busy={search.isFetching || busy}
+      >
         {search.isFetching && (
           <div role="status" className="flex items-center gap-2 p-2 text-sm">
             <Spinner /> Searching…
@@ -749,7 +803,11 @@ function ContentSearchPanelContent({
 
 export function ContentSearchPanel(props: Parameters<typeof ContentSearchPanelContent>[0]) {
   const workspace = useWorkbenchWorkspace();
+  const viewId = useResourceViewId(props.viewId);
   return (
-    <ContentSearchPanelContent key={queryIdentity(workspace, props.conversationId)} {...props} />
+    <ContentSearchPanelContent
+      key={panelFolderKey(queryIdentity(workspace, props.conversationId), viewId)}
+      {...props}
+    />
   );
 }

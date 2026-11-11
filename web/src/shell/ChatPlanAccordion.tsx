@@ -1,5 +1,5 @@
+import { useConversationChatStore } from "@/workbench/ScopedChatStore";
 import { ChevronDownIcon, ListTodoIcon } from "lucide-react";
-import { useChatStore } from "@/store/chatStore";
 import { cn } from "@/lib/utils";
 import { TodoPanel } from "./TodoPanel";
 
@@ -14,6 +14,7 @@ import { TodoPanel } from "./TodoPanel";
  * no tasks, matching the Tasks tab's `todosSupported` gate.
  */
 export function ChatPlanAccordion({ className }: { className?: string }) {
+  const useChatStore = useConversationChatStore();
   const todos = useChatStore((s) => s.todos);
   if (todos.length === 0) return null;
   const completed = todos.filter((t) => t.status === "completed").length;

@@ -2564,3 +2564,101 @@ describe("FilesPanel double-click navigation", () => {
     expect(onFileSelect).toHaveBeenCalledWith("src/App.tsx");
   });
 });
+
+describe("independent view instances", () => {
+  it("retains separate folders, filters, selection and comparison on one workspace", async () => {
+    const { within } = await import("@testing-library/react");
+    const { panelFolderKey, readPanelFolder } = await import("@/lib/panelFolder");
+    useAllFilesMock.mockReturnValue(allFilesResult([dir("src"), file("a.ts"), file("b.ts")]));
+    useEnvironmentMock.mockReturnValue(environmentResult("/repo"));
+    useSearchMock.mockReturnValue(searchResult());
+    const workspace: WorkbenchWorkspace = {
+      id: "two-explorers",
+      root: "/repo",
+      host_id: "host",
+      target_kind: "host",
+      capabilities: ["files"],
+      permission_level: 4,
+    };
+    const panels = () => (
+      <>
+        {["left", "right"].map((viewId) => (
+          <div key={viewId} data-testid={viewId}>
+            <FilesPanel
+              viewId={viewId}
+              conversationId="chat"
+              flatView={false}
+              showHidden={false}
+              onShowHiddenChange={vi.fn()}
+              sort="alpha"
+              onSortChange={vi.fn()}
+              onFileSelect={vi.fn()}
+            />
+          </div>
+        ))}
+      </>
+    );
+    const mounted = render(panels(), workspace);
+    const left = within(screen.getByTestId("left"));
+    const right = within(screen.getByTestId("right"));
+    fireEvent.click(left.getByRole("button", { name: /^a\.ts$/ }), { ctrlKey: true });
+    expect(
+      left.getByRole("button", { name: /^a\.ts$/ }).closest("[role=treeitem]"),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      right.getByRole("button", { name: /^a\.ts$/ }).closest("[role=treeitem]"),
+    ).toHaveAttribute("aria-selected", "false");
+    fireEvent.change(left.getByRole("searchbox", { name: "Search all files" }), {
+      target: { value: "needle" },
+    });
+    expect(right.getByRole("searchbox", { name: "Search all files" })).toHaveValue("");
+    fireEvent.change(left.getByRole("searchbox", { name: "Search all files" }), {
+      target: { value: "" },
+    });
+    fireEvent.doubleClick(left.getByRole("button", { name: "src/" }));
+    expect(readPanelFolder(panelFolderKey(workspace.id, "left"))).toBe("/repo/src");
+    expect(readPanelFolder(panelFolderKey(workspace.id, "right"))).toBeNull();
+    act(() =>
+      setWorkspaceComparison(
+        { workspaceId: workspace.id, viewId: "left", view: "files" },
+        { source: "range", base: "v1", target: "v2" },
+      ),
+    );
+    expect(
+      getWorkspaceComparison({ workspaceId: workspace.id, viewId: "right", view: "files" }),
+    ).toBe(DEFAULT_WORKSPACE_COMPARISON);
+    fireEvent.change(right.getByRole("searchbox", { name: "Search all files" }), {
+      target: { value: "retained" },
+    });
+    mounted.unmount();
+    render(panels(), workspace);
+    expect(
+      within(screen.getByTestId("right")).getByRole("searchbox", { name: "Search all files" }),
+    ).toHaveValue("retained");
+    expect(readPanelFolder(panelFolderKey(workspace.id, "left"))).toBe("/repo/src");
+  });
+});
+
+it("merges supplied location controls into the existing Files toolbar", () => {
+  useAllFilesMock.mockReturnValue(allFilesResult([file("file.ts")]));
+  useEnvironmentMock.mockReturnValue(environmentResult("/repo"));
+  useSearchMock.mockReturnValue(searchResult());
+  const mounted = render(
+    <FilesPanel
+      conversationId="merged-header"
+      flatView={false}
+      showHidden={false}
+      onShowHiddenChange={vi.fn()}
+      sort="alpha"
+      onSortChange={vi.fn()}
+      onFileSelect={vi.fn()}
+      locationControls={<button type="button">Machine and folder</button>}
+    />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Machine and folder" }).closest(".workspace-control-header"),
+  ).toBe(
+    screen.getByRole("button", { name: "More file actions" }).closest(".workspace-control-header"),
+  );
+  expect(mounted.container.querySelectorAll(".workspace-control-header")).toHaveLength(1);
+});

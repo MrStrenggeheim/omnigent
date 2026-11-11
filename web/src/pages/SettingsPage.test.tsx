@@ -289,6 +289,7 @@ afterEach(() => {
   // The palette picker sets data-theme on <html>; clear it so a palette
   // selected in one test doesn't leak into the next.
   document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-list-density");
   document.documentElement.removeAttribute("data-custom-translucent-sidebar");
   for (const property of Array.from(document.documentElement.style)) {
     if (property.startsWith("--custom-")) document.documentElement.style.removeProperty(property);
@@ -808,14 +809,27 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("renders the color theme dropdown, defaults to Omnigent, and applies a palette on change", () => {
+  it("applies and restores list density without changing font preferences", () => {
+    localStorage.setItem("omnigent:ui-font-size", "15");
+    const page = renderPage("/settings/appearance");
+    expect(screen.getByRole("group", { name: "List density" })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("list-density-compact"));
+    expect(document.documentElement).toHaveAttribute("data-list-density", "compact");
+    expect(localStorage.getItem("omnigent:ui-font-size")).toBe("15");
+    page.unmount();
+    renderPage("/settings/appearance");
+    expect(screen.getByTestId("list-density-compact")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("list-density-comfortable"));
+    expect(document.documentElement).toHaveAttribute("data-list-density", "comfortable");
+  });
+
+  it("renders the color theme dropdown, defaults to muted violet, and applies a palette on change", () => {
     localStorage.clear();
     renderPage("/settings/appearance");
 
     const select = screen.getByTestId("color-theme-select") as HTMLSelectElement;
-    // Nothing stored → the default (Omnigent) palette is selected and no
-    // data-theme override is applied to the document.
-    expect(select.value).toBe("omni");
+    // The picker reads the violet default; startup applies its DOM tokens.
+    expect(select.value).toBe("violet");
     expect(document.documentElement.getAttribute("data-theme")).toBeNull();
 
     // Choosing a palette applies it live to <html> and persists it.
@@ -997,6 +1011,9 @@ describe("SettingsPage", () => {
     localStorage.clear();
     renderPage("/settings/appearance");
 
+    fireEvent.click(screen.getByTestId("list-density-compact"));
+    expect(localStorage.getItem("omnigent:list-density")).toBe("compact");
+
     // Tweak a representative set of appearance preferences.
     mocks.theme = "dark";
     fireEvent.click(screen.getByTestId("theme-dark"));
@@ -1041,6 +1058,10 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByTestId("reset-appearance-button"));
     fireEvent.click(screen.getByTestId("reset-appearance-confirm"));
 
+    expect(localStorage.getItem("omnigent:list-density")).toBeNull();
+    expect(screen.getByTestId("list-density-comfortable")).toHaveAttribute("aria-pressed", "true");
+    expect(document.documentElement).toHaveAttribute("data-list-density", "comfortable");
+
     // Mode is restored to "system".
     expect(mocks.setTheme).toHaveBeenCalledWith("system");
 
@@ -1055,9 +1076,9 @@ describe("SettingsPage", () => {
     expect(localStorage.getItem("omnigent:code-font-size")).toBeNull();
     expect(localStorage.getItem("omnigent:code-font-weight")).toBeNull();
 
-    // Color theme is back to Omnigent.
-    expect((screen.getByTestId("color-theme-select") as HTMLSelectElement).value).toBe("omni");
-    expect(document.documentElement.getAttribute("data-theme")).toBeNull();
+    // Color theme is back to muted violet.
+    expect((screen.getByTestId("color-theme-select") as HTMLSelectElement).value).toBe("violet");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("violet");
 
     // Terminal theme, transcript view, workspace defaults, and harness visibility are restored.
     expect(screen.getByTestId("terminal-theme-auto")).toHaveAttribute("aria-checked", "true");

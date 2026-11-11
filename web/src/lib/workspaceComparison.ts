@@ -1,3 +1,9 @@
+import {
+  readResourceViewState,
+  writeResourceViewState,
+  resourceViewStorageScope,
+} from "./resourceViewStorage";
+import { useResourceViewId } from "./panelFolder";
 import { useCallback, useSyncExternalStore } from "react";
 
 export interface WorkspaceComparison {
@@ -23,6 +29,7 @@ export const DEFAULT_WORKSPACE_COMPARISON: WorkspaceComparison = Object.freeze({
 });
 export type WorkspaceComparisonView = "files" | "changes";
 export interface WorkspaceComparisonScope {
+  viewId?: string;
   workspaceId?: string;
   conversationId?: string;
   view?: WorkspaceComparisonView;
@@ -34,7 +41,12 @@ export function workspaceComparisonKey(identity: WorkspaceComparisonIdentity): s
   const scope = typeof identity === "string" ? { conversationId: identity } : identity;
   const owner = scope?.workspaceId || scope?.conversationId;
   return owner
-    ? JSON.stringify([scope?.workspaceId ? "workspace" : "chat", owner, scope?.view ?? "changes"])
+    ? JSON.stringify([
+        scope?.workspaceId ? "workspace" : "chat",
+        owner,
+        scope?.view ?? "changes",
+        ...(scope?.viewId ? [resourceViewStorageScope(), scope.viewId] : []),
+      ])
     : undefined;
 }
 
@@ -81,6 +93,16 @@ export function getWorkspaceComparison(
   identity?: WorkspaceComparisonIdentity,
 ): WorkspaceComparison {
   const key = workspaceComparisonKey(identity);
+  if (key && typeof identity === "object" && identity.viewId) {
+    const saved = readResourceViewState<WorkspaceComparison>(`comparison:${key}`);
+    return saved &&
+      ["git", "since", "range", "commit", "agent", "last-turn"].includes(saved.source) &&
+      typeof saved.base === "string" &&
+      typeof saved.target === "string" &&
+      (!isAgentComparison(saved) || !!saved.sourceChatId)
+      ? saved
+      : DEFAULT_WORKSPACE_COMPARISON;
+  }
   return (key && selections.get(key)) || DEFAULT_WORKSPACE_COMPARISON;
 }
 
@@ -104,10 +126,14 @@ export function setWorkspaceComparison(
     previous.sourceChatId === next.sourceChatId
   )
     return;
-  selections.delete(key);
-  selections.set(key, Object.freeze({ ...next }));
-  if (selections.size > MAX_SELECTIONS) selections.delete(selections.keys().next().value!);
-  persistSelections();
+  if (typeof identity === "object" && identity.viewId) {
+    writeResourceViewState(`comparison:${key}`, Object.freeze({ ...next }));
+  } else {
+    selections.delete(key);
+    selections.set(key, Object.freeze({ ...next }));
+    if (selections.size > MAX_SELECTIONS) selections.delete(selections.keys().next().value!);
+    persistSelections();
+  }
   for (const listener of listeners) listener();
 }
 
@@ -119,23 +145,24 @@ export function subscribeWorkspaceComparisons(listener: () => void) {
 }
 
 export function useWorkspaceComparison(identity?: WorkspaceComparisonIdentity) {
+  const viewId = useResourceViewId(typeof identity === "object" ? identity.viewId : undefined);
   const workspaceId = typeof identity === "object" ? identity.workspaceId : undefined;
   const conversationId = typeof identity === "string" ? identity : identity?.conversationId;
   const view = typeof identity === "object" ? identity.view : undefined;
   const comparison = useSyncExternalStore(
     subscribeWorkspaceComparisons,
-    () => getWorkspaceComparison(identity),
+    () => getWorkspaceComparison({ workspaceId, conversationId, view, viewId }),
     () => DEFAULT_WORKSPACE_COMPARISON,
   );
   const setComparison = useCallback(
     (value: WorkspaceComparison) => {
       if (isAgentComparison(value) && !conversationId) return;
       setWorkspaceComparison(
-        { workspaceId, conversationId, view },
+        { workspaceId, conversationId, view, viewId },
         isAgentComparison(value) ? { ...value, sourceChatId: conversationId } : value,
       );
     },
-    [workspaceId, conversationId, view],
+    [workspaceId, conversationId, view, viewId],
   );
   return { comparison, setComparison };
 }

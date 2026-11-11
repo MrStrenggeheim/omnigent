@@ -1,0 +1,52 @@
+.unified-workbench .conversations-sidebar {
+  border-right: 1px solid var(--border);
+}
+.unified-workbench .workbench-app-bar {
+  z-index: 60;
+}
+.unified-workbench .conversations-sidebar {
+  top: 48px;
+}
+.unified-workbench .workbench-conversation .chat-conversation-content {
+  padding-top: 1rem;
+}
+
+/* Docked headers occupy their own row; only the composer edge needs fading. */
+.unified-workbench .workbench-conversation .chat-scroll-fade {
+  mask-image: linear-gradient(to bottom, black calc(100% - 32px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 32px), transparent 100%);
+}
+.unified-workbench .workbench-conversation .side-chat-backdrop {
+  background: var(--background);
+}
+@media (min-width: 768px) {
+  .unified-workbench .conversations-sidebar {
+    top: auto;
+  }
+}
+
+html[data-electron-mac] .unified-workbench .workbench-app-bar {
+  padding-left: var(--mac-traffic-light-width, 88px);
+  -webkit-app-region: drag;
+}
+html[data-electron-mac] .unified-workbench .workbench-app-bar button {
+  -webkit-app-region: no-drag;
+}
+html[data-electron-mac] .unified-workbench .sidebar-brand,
+html[data-electron-mac]
+  .unified-workbench
+  .conversations-sidebar
+  [data-testid="sidebar-header-actions"] {
+  display: flex;
+}
+html[data-electron-mac] .unified-workbench .sidebar-header-row {
+  height: 48px;
+  padding: 0 12px;
+}
+.unified-workbench:is([data-ios-native], [data-android-native]) {
+  padding-top: var(--omnigent-safe-top, 0px);
+  padding-bottom: var(--omnigent-safe-bottom, 0px);
+}
+.unified-workbench:is([data-ios-native], [data-android-native]) .conversations-sidebar {
+  top: calc(48px + var(--omnigent-safe-top, 0px));
+}

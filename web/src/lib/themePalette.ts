@@ -4,12 +4,12 @@
 //
 //   1. MODE  — light / dark / system, owned by next-themes (toggles the
 //      `.dark` class on <html>; see components/theme/ThemeProvider.tsx).
-//   2. PALETTE — the color scheme (Omni pink, GitHub, Vercel, …), owned here.
+//   2. PALETTE — the color scheme (Muted violet, Omni pink, GitHub, …), owned here.
 //
 // A palette is applied as a `data-theme` attribute on <html>, so it composes
 // with the mode class: `:root:not(.dark)[data-theme="github"]` is GitHub-light
-// and `.dark[data-theme="github"]` is GitHub-dark. The default "omni" palette
-// carries no data attribute, so selecting it restores the brand look. Everything
+// and `.dark[data-theme="github"]` is GitHub-dark. The legacy "omni" palette
+// carries no data attribute, so selecting it restores the upstream brand look. Everything
 // is expressed through the existing CSS custom properties (--background,
 // --primary, --sidebar, …), so a palette re-skins the whole app without any
 // component knowing a theme changed.
@@ -28,6 +28,7 @@ const STORAGE_KEY = "omnigent:ui-theme-palette";
 
 /** Selectable color palettes. The first entry is the default (brand) look. */
 export const themePalettes = [
+  "violet",
   "omni",
   "dracula",
   "github",
@@ -43,8 +44,8 @@ export type ThemePalette = (typeof themePalettes)[number];
 export const themeSelections = [...themePalettes, "custom"] as const;
 export type ThemeSelection = (typeof themeSelections)[number];
 
-/** Default palette: the Omni brand tokens already defined in `:root` / `.dark`. */
-export const DEFAULT_PALETTE: ThemePalette = "omni";
+/** New/unconfigured devices use the local muted violet palette. */
+export const DEFAULT_PALETTE: ThemePalette = "violet";
 
 /** A few representative colors used to render a palette's preview swatch. */
 export interface PaletteSwatch {
@@ -213,6 +214,71 @@ export interface PaletteMeta {
 
 // Swatch colors are a hand-picked summary used for mini-previews.
 export const PALETTES: readonly PaletteMeta[] = [
+  {
+    id: "violet",
+    label: "Muted violet",
+    blurb: "Muted violet accents on neutral surfaces.",
+    light: {
+      bg: "#faf9fc",
+      card: "#ffffff",
+      accent: "#8d74b4",
+      border: "#e4e1e9",
+      text: "#27272a",
+    },
+    dark: { bg: "#16151a", card: "#211f27", accent: "#8d74b4", border: "#39353f", text: "#f4f4f5" },
+    tokens: {
+      light: paletteTokens({
+        background: "#faf9fc",
+        foreground: "#27272a",
+        card: "#ffffff",
+        cardSolid: "#ffffff",
+        primary: "#8d74b4",
+        primaryForeground: "#111114",
+        link: "#68518b",
+        selectionBackground: "rgba(141, 116, 180, 0.18)",
+        secondary: "#eeecf2",
+        muted: "#eeecf2",
+        mutedForeground: "#69636f",
+        codeBackground: "#eeecf2",
+        accent: "#eae4f2",
+        accentForeground: "#514063",
+        border: "#e4e1e9",
+        borderStrong: "#a59bad",
+        ring: "#8a73bd",
+        brandAccent: "#7869b9",
+        sidebar: "#f5f3f8",
+        sidebarPrimary: "#8d74b4",
+        sidebarActive: "#eae4f2",
+        sidebarActiveForeground: "#514063",
+        shellBackground: "var(--background)",
+      }),
+      dark: paletteTokens({
+        background: "#16151a",
+        foreground: "#f4f4f5",
+        card: "#211f27",
+        cardSolid: "#211f27",
+        primary: "#8d74b4",
+        primaryForeground: "#111114",
+        link: "#bdabda",
+        selectionBackground: "rgba(141, 116, 180, 0.24)",
+        secondary: "#2d2933",
+        muted: "#2d2933",
+        mutedForeground: "#b5afbd",
+        codeBackground: "#2d2933",
+        accent: "#3a3048",
+        accentForeground: "#ddd2ec",
+        border: "#39353f",
+        borderStrong: "#796f84",
+        ring: "#8a73bd",
+        brandAccent: "#7869b9",
+        sidebar: "#1c1a21",
+        sidebarPrimary: "#8d74b4",
+        sidebarActive: "#3a3048",
+        sidebarActiveForeground: "#ddd2ec",
+        shellBackground: "var(--background)",
+      }),
+    },
+  },
   {
     id: "omni",
     label: "Omnigent",
@@ -731,7 +797,7 @@ export function writeThemePalette(palette: ThemeSelection): void {
 
 /**
  * Apply the palette to the DOM by setting `data-theme` on the theme roots.
- * The generated `[data-theme]` blocks re-point the color tokens; the default
+ * The generated `[data-theme]` blocks re-point the color tokens; the legacy
  * "omni" palette removes the attribute. This composes with the `.dark` mode
  * class untouched.
  *
@@ -745,7 +811,7 @@ export function applyThemePalette(palette: ThemeSelection): void {
   if (roots.length === 0) return;
   const next = isThemeSelection(palette) ? palette : DEFAULT_PALETTE;
   for (const root of roots) {
-    if (next === DEFAULT_PALETTE) {
+    if (next === "omni") {
       root.removeAttribute("data-theme");
     } else {
       root.setAttribute("data-theme", next);

@@ -5,10 +5,12 @@
 // - Assertions check the target element's data attr, not just "spy called".
 
 import type * as ConversationModule from "@/components/ai-elements/conversation";
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/store/chatStore";
 import { useUserMessageNav } from "./useUserMessageNav";
+import { ScopedChatStoreProvider } from "@/workbench/ScopedChatStore";
+import { conversationRegistry } from "@/store/conversationRegistry";
 
 const releaseScrollLock = vi.hoisted(() => vi.fn());
 vi.mock("@/components/ai-elements/conversation", async (importOriginal) => {
@@ -49,6 +51,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   scrollSpy.mockRestore();
   document.body.innerHTML = "";
   vi.clearAllTimers();
@@ -56,6 +59,41 @@ afterEach(() => {
 });
 
 describe("useUserMessageNav", () => {
+  it("scrolls and flashes only its own pane when forks share message ids", () => {
+    conversationRegistry.acquire("nav-first");
+    conversationRegistry.acquire("nav-second");
+    function Pane({ label }: { label: string }) {
+      const nav = useUserMessageNav(["inherited"]);
+      return (
+        <>
+          <div data-user-message-id="inherited">Inherited turn</div>
+          <button type="button" onClick={nav.goPrev}>
+            {label}
+          </button>
+        </>
+      );
+    }
+    render(
+      <>
+        <ScopedChatStoreProvider conversationId="nav-first" focused>
+          <Pane label="First" />
+        </ScopedChatStoreProvider>
+        <ScopedChatStoreProvider conversationId="nav-second" focused={false}>
+          <Pane label="Second" />
+        </ScopedChatStoreProvider>
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Second" }));
+    const target = scrollSpy.mock.contexts[0] as Element;
+    expect(target.closest("[data-conversation-scope]")).toHaveAttribute(
+      "data-conversation-scope",
+      "nav-second",
+    );
+    act(() => vi.advanceTimersByTime(SETTLE_MS));
+    expect(conversationRegistry.peek("nav-first")?.getState().flashItemId).toBeNull();
+    expect(conversationRegistry.peek("nav-second")?.getState().flashItemId).toBe("inherited");
+  });
+
   it("goPrev from null anchor jumps to the LAST user message", () => {
     const ids = ["a", "b", "c"];
     setupDom(ids);

@@ -1,3 +1,4 @@
+import { serializeContextReference, type ContextReference } from "./contextReferences";
 import type { ComposerAttachment } from "@/store/chatStore";
 import { nativeCodingAgentForHarness } from "@/lib/nativeCodingAgents";
 
@@ -30,10 +31,11 @@ export interface MentionState {
  * type: a chip drained from ``pendingComposerAttachments`` is a ``MentionItem``
  * unchanged.
  */
-export type MentionItem = ComposerAttachment;
+export type MentionItem = ComposerAttachment & { reference?: ContextReference };
 
 /** Serialize a tagged item to the path string that goes inside its marker. */
 export function mentionItemPath(item: MentionItem): string {
+  if (item.reference) return `chat:${item.reference.snapshot_id}`;
   if (item.lineRange) return `${item.path}:${item.lineRange.start}-${item.lineRange.end}`;
   return item.isDir ? `${item.path}/` : item.path;
 }
@@ -134,5 +136,13 @@ export function rankMentionEntries<T extends { name: string; type: string }>(
  */
 export function buildMentionPreamble(items: MentionItem[], harness: string | null): string {
   if (items.length === 0) return "";
-  return items.map((it) => mentionMarkerFor(harness, mentionItemPath(it))).join("\n") + "\n\n";
+  return (
+    items
+      .map((it) =>
+        it.reference
+          ? serializeContextReference(it.reference)
+          : mentionMarkerFor(harness, mentionItemPath(it)),
+      )
+      .join("\n") + "\n\n"
+  );
 }

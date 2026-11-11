@@ -1,3 +1,4 @@
+import { clearSessionDrafts } from "@/lib/sessionDrafts";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createPortal } from "react-dom";
 import { StrictMode } from "react";
@@ -70,6 +71,8 @@ const renderPane = (ui: ReactNode) =>
   });
 
 beforeEach(() => {
+  clearSessionDrafts();
+  sessionStorage.clear();
   sessionLabels.current = {};
   loadingSession.id = null;
   conversationRegistry.clear();
@@ -1003,18 +1006,26 @@ describe("side-chat interrupt", () => {
     expect(input).toHaveValue("/compact");
   });
 
-  it("keeps a running grid session's draft until its turn ends", () => {
+  it("queues a running full session draft and steers the FIFO head on empty Enter", () => {
+    writeAlwaysSteer(false);
     renderPane(<SideChatPane childId={childId} fullSession />);
     const input = screen.getByTestId("side-chat-input");
     fireEvent.change(input, { target: { value: "Wait for this turn" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.keyDown(input, { key: "Escape" });
-
     expect(send).not.toHaveBeenCalled();
-    expect(sessionsApi.interrupt).not.toHaveBeenCalled();
-    expect(input).toHaveValue("Wait for this turn");
-    expect(screen.queryByTestId("side-chat-send")).toBeNull();
-    expect(screen.getByRole("button", { name: "Interrupt session" })).toBeEnabled();
+    expect(input).toHaveValue("");
+    expect(useChatStore.getState().queuedMessages).toEqual([
+      expect.objectContaining({ conversationId: childId, text: "Wait for this turn" }),
+    ]);
+    fireEvent.keyDown(input, { key: "Enter", repeat: true });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(send).toHaveBeenCalledWith(
+      "Wait for this turn",
+      expect.anything(),
+      undefined,
+      expect.objectContaining({ pinnedConversationId: childId }),
+    );
   });
 
   it.each([

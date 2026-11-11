@@ -1,3 +1,5 @@
+import { panelFolderKey, useResourceViewId } from "@/lib/panelFolder";
+import { useWorkbenchWorkspace } from "@/lib/workbenchWorkspace";
 import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -427,6 +429,7 @@ export function FolderTree(props: Parameters<typeof FolderTreeInner>[0]) {
 }
 
 function FolderTreeInner({
+  viewId: explicitViewId,
   files,
   isLoading,
   isError,
@@ -459,6 +462,7 @@ function FolderTreeInner({
   isError: boolean;
   error: Error | null;
   onFileSelect: (path: string) => void;
+  viewId?: string;
   conversationId: string | undefined;
   showHidden: boolean;
   /** Called when the user clicks "Show hidden files" in the search results. */
@@ -517,7 +521,10 @@ function FolderTreeInner({
 }) {
   // Initialise from the module-level cache so expanded state survives
   // unmount/remount (e.g. opening the FileViewer and navigating back).
-  const cacheKey = conversationId ? expandedCacheKey(conversationId, browseLocation) : null;
+  const workspace = useWorkbenchWorkspace();
+  const viewId = useResourceViewId(explicitViewId);
+  const owner = panelFolderKey(workspace?.id ?? conversationId, viewId);
+  const cacheKey = owner ? expandedCacheKey(owner, browseLocation) : null;
   // Changes are workspace-relative inside the root and absolute outside it.
   const scopedChangedFiles = useMemo(() => {
     if (!changedFiles) return [];

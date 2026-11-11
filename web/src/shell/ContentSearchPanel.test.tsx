@@ -645,3 +645,74 @@ it("disables replacement previews while displayed results belong to an older que
   expect(authenticatedFetch).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("No matches for “other”.")).toBeVisible();
 });
+
+it("keeps two same-workspace searches independent while sharing authorized query data", async () => {
+  const { within } = await import("@testing-library/react");
+  vi.mocked(authenticatedFetch).mockImplementation(async (url) => {
+    expect(String(url)).toContain("/v1/workbench-workspaces/selected/resources/");
+    return new Response(JSON.stringify({ matches: [], truncated: false, warning: null }));
+  });
+  const client = new QueryClient();
+  const views = () => (
+    <QueryClientProvider client={client}>
+      <WorkbenchWorkspaceProvider value={workspace}>
+        {["left-search", "right-search"].map((viewId) => (
+          <div key={viewId} data-testid={viewId}>
+            <ContentSearchPanel viewId={viewId} conversationId="owner" onFileSelect={vi.fn()} />
+          </div>
+        ))}
+      </WorkbenchWorkspaceProvider>
+    </QueryClientProvider>
+  );
+  const mounted = render(views());
+  const left = within(screen.getByTestId("left-search"));
+  const right = within(screen.getByTestId("right-search"));
+  fireEvent.change(left.getByRole("searchbox"), { target: { value: "alpha" } });
+  fireEvent.submit(left.getByRole("searchbox").closest("form")!);
+  expect(await left.findByText("No matches for “alpha”.")).toBeInTheDocument();
+  expect(right.getByRole("searchbox")).toHaveValue("");
+  fireEvent.change(right.getByRole("searchbox"), { target: { value: "beta" } });
+  fireEvent.submit(right.getByRole("searchbox").closest("form")!);
+  expect(await right.findByText("No matches for “beta”.")).toBeInTheDocument();
+  expect(left.getByText("No matches for “alpha”.")).toBeInTheDocument();
+  mounted.unmount();
+  render(views());
+  expect(within(screen.getByTestId("left-search")).getByRole("searchbox")).toHaveValue("alpha");
+  expect(within(screen.getByTestId("right-search")).getByRole("searchbox")).toHaveValue("beta");
+  for (const query of client.getQueryCache().findAll({ queryKey: ["content-search-result"] })) {
+    expect(query.queryKey[1]).toBe("workbench-workspace:selected");
+    expect(query.queryKey).not.toContain("left-search");
+    expect(query.queryKey).not.toContain("right-search");
+  }
+});
+
+it("seeds an explicit query once and focuses only when requested on mount", () => {
+  const outside = document.createElement("input");
+  document.body.append(outside);
+  outside.focus();
+  const client = new QueryClient();
+  const view = (initialQuery: string, autoFocus = false, key = "restored") => (
+    <QueryClientProvider client={client}>
+      <ContentSearchPanel
+        key={key}
+        viewId={key}
+        conversationId="initial-search"
+        initialQuery={initialQuery}
+        autoFocus={autoFocus}
+        replaceOpen={!autoFocus}
+        onFileSelect={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
+  const mounted = render(view("seed"));
+  expect(screen.getByRole("searchbox")).toHaveValue("seed");
+  expect(document.activeElement).toBe(outside);
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "my query" } });
+  mounted.rerender(view("new default"));
+  expect(screen.getByRole("searchbox")).toHaveValue("my query");
+  expect(document.activeElement).toBe(outside);
+  mounted.rerender(view("explicit new search", true, "new-search"));
+  expect(screen.getByRole("searchbox")).toHaveValue("explicit new search");
+  expect(screen.getByRole("searchbox")).toHaveFocus();
+  outside.remove();
+});

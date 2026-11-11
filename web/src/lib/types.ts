@@ -1,3 +1,4 @@
+import type { ConversationBranch } from "./conversationBranches";
 // Mirrors the response/error/usage types in
 // sdks/python-client/omnigent_client/_types.py.
 //
@@ -13,6 +14,7 @@
 import type { ConversationItem } from "./conversationItems";
 import type { McpServerStartup } from "./events";
 import type { MessageContentBlock } from "./blocks";
+import type { MessageCommunication } from "./messageCommunication";
 
 /** Reference to a conversation, as returned on response objects. */
 export interface ConversationRef {
@@ -63,6 +65,7 @@ export interface PendingInput {
   pendingId: string;
   /** Message content blocks as POSTed (file blocks carry real ids). */
   content: MessageContentBlock[];
+  communication?: MessageCommunication;
   /** Authenticated identity of the posting actor, e.g. ``"alice@example.com"``. Absent when unknown. */
   createdBy?: string;
 }
@@ -274,6 +277,7 @@ export interface BackgroundTaskInfo {
 }
 
 export interface Session {
+  branch?: ConversationBranch | null;
   projectId?: string | null;
   id: string;
   agentId: string;

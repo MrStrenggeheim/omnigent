@@ -5,7 +5,7 @@ import { TooltipButton } from "@/components/ui/tooltip";
 import { useContextSearch } from "./ContextSearchContext";
 import { isIOSShell, isAndroidShell } from "@/lib/nativeBridge";
 
-export function ContextSearchBar() {
+export function ContextSearchBar({ contained = false }: { contained?: boolean }) {
   const search = useContextSearch();
   const root = useRef<HTMLDivElement>(null);
   usePanelEscapeClose(!!search?.open && !!search.activeSessionId, search?.close, {
@@ -37,7 +37,7 @@ export function ContextSearchBar() {
       role="search"
       aria-label="Find in active chat"
       data-testid="context-search-bar"
-      className="absolute inset-x-0 top-14 z-20 flex h-10 min-w-0 items-center gap-1 border-b bg-background px-3 text-xs md:top-12 md:right-[var(--workspace-panel-offset,0px)]"
+      className={`${contained ? "relative shrink-0" : "absolute inset-x-0 top-14 md:top-12 md:right-[var(--workspace-panel-offset,0px)]"} z-20 flex h-10 min-w-0 items-center gap-1 border-b bg-background px-3 text-xs`}
       onKeyDown={(event) => {
         if (event.defaultPrevented || event.nativeEvent.isComposing) return;
         if (event.key === "Escape") {
@@ -51,7 +51,7 @@ export function ContextSearchBar() {
       }}
       tabIndex={0}
       style={
-        isIOSShell() || isAndroidShell()
+        !contained && (isIOSShell() || isAndroidShell())
           ? { transform: "translateY(max(0px, calc(var(--omnigent-safe-top, 0px) - 0.5rem)))" }
           : undefined
       }

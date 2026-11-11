@@ -1,3 +1,4 @@
+import { useConversationChatStore } from "@/workbench/ScopedChatStore";
 import { ChatAttachment } from "@/components/ChatAttachment";
 // Bubble rendering, scroll helpers, and the working-indicator cluster for the
 // chat transcript. Extracted from ChatPage.tsx so <Transcript> can import them
@@ -65,10 +66,11 @@ import {
   keyedAttachments,
 } from "@/lib/blocks";
 import { type Bubble, type RenderItem, bubblesEqual } from "@/lib/renderItems";
+import { PeerMessage } from "@/components/blocks/PeerMessage";
 import { getCurrentAuthorId } from "@/lib/identity";
 import { QueryClientContext } from "@tanstack/react-query";
 import { ApiError, continueFailedTurn, retrySession } from "@/lib/sessionsApi";
-import { useChatStore, type PendingUserMessage } from "@/store/chatStore";
+import type { PendingUserMessage } from "@/store/chatStore";
 import { conversationRegistry } from "@/store/conversationRegistry";
 import { useConversationEntryState } from "@/hooks/useConversationEntryState";
 import {
@@ -222,6 +224,7 @@ export function buildPendingBubbles(
       // No server item id yet; tempId keeps React keys stable until promotion.
       itemId: p.tempId,
       pending: true,
+      ...(p.communication ? { communication: p.communication } : {}),
       ...(p.sentMidTurn ? { awaitingAgent: true } : {}),
       content: p.content,
       ...(author !== null ? { createdBy: author } : {}),
@@ -410,6 +413,7 @@ export function computeIsTurnActive(sessionStatus: SessionStatus, localSending: 
 }
 
 function useAgentTurnActive(): boolean {
+  const useChatStore = useConversationChatStore();
   const sessionStatus = useChatStore((s) => s.sessionStatus);
   const localSending = useChatStore((s) => s.status === "streaming");
   return computeIsTurnActive(sessionStatus, localSending);
@@ -450,6 +454,7 @@ export function workingIndicatorLabel(
 }
 
 export function WorkingIndicator() {
+  const useChatStore = useConversationChatStore();
   const scopedConversationId = useContext(ConversationScopeContext);
   const scopedState = useConversationEntryState(scopedConversationId);
   const rootBgCount = useChatStore((s) => s.backgroundTaskCount);
@@ -596,7 +601,16 @@ export const BubbleView = memo(
     /** Hide retry/recovery controls when the surrounding session is sealed. */
     recoveryDisabled?: boolean;
   }) {
-    if (bubble.kind === "user") return <UserBubble bubble={bubble} />;
+    if (bubble.kind === "user")
+      return bubble.communication ? (
+        <PeerMessage
+          communication={bubble.communication}
+          content={bubble.content}
+          itemId={bubble.itemId}
+        />
+      ) : (
+        <UserBubble bubble={bubble} />
+      );
     if (bubble.kind === "compaction_loading") {
       return <CompactionLoadingIndicator createdAtS={bubble.createdAtS} />;
     }
@@ -739,6 +753,7 @@ function useCopyMessageLink(messageId: string | null): {
 }
 
 function UserBubble({ bubble }: { bubble: Extract<Bubble, { kind: "user" }> }) {
+  const useChatStore = useConversationChatStore();
   // Scoped so a side-chat bubble builds attachment URLs against the CHILD, not
   // the main conversation the root store projects.
   const sessionId = useScopedConversationId();
@@ -989,6 +1004,7 @@ function AssistantBubble({
   actionsPersistent?: boolean;
   recoveryDisabled?: boolean;
 }) {
+  const useChatStore = useConversationChatStore();
   // The walker only emits an assistant bubble when at least one assistant-side
   // block exists. The "Working…" shimmer for the empty-items / streaming gap
   // is rendered at the page level, not inside this component.
@@ -1062,7 +1078,7 @@ function AssistantBubble({
         throw error;
       }
     },
-    [conversationId, scopedConversationId, isLastAssistant, queryClient],
+    [conversationId, scopedConversationId, isLastAssistant, queryClient, useChatStore],
   );
 
   if (bubble.items.length === 0) return null;
@@ -1369,6 +1385,7 @@ export function HistoryAutoLoader({
    */
   rowCount: number;
 }) {
+  const useChatStore = useConversationChatStore();
   // useStickToBottomContext exposes scrollRef in the runtime context even though
   // the public TS types only declare isAtBottom and scrollToBottom. Cast to it.
   const ctx = useStickToBottomContext() as ReturnType<typeof useStickToBottomContext> & {
@@ -1630,6 +1647,7 @@ export function HistoryAutoLoader({
     rowCount,
     scrollElement,
     scrollRevision,
+    useChatStore,
   ]);
 
   // No visible control — history loads purely on reader input.
@@ -1684,6 +1702,7 @@ export function LatestTurnSpacer({
   measureRef?: React.RefObject<(() => void) | null>;
   remeasureNonce?: number;
 } = {}) {
+  const useChatStore = useConversationChatStore();
   const ctx = useStickToBottomContext() as ReturnType<typeof useStickToBottomContext> & {
     scrollRef: React.RefObject<HTMLElement>;
   };
@@ -1866,7 +1885,7 @@ export function LatestTurnSpacer({
     );
     const current = Number.parseFloat(spacerEl.style.height) || 0;
     if (Math.abs(current - next) >= 1) spacerEl.style.height = `${next}px`;
-  }, [ctx.scrollRef, hasCommittedAnchorProp, scrollElement, topGapPx]);
+  }, [ctx.scrollRef, hasCommittedAnchorProp, scrollElement, topGapPx, useChatStore]);
 
   // A block-count change shifts content; force past the same-node skip. The
   // range nonce (scroll) does NOT force — the guard skips it when the anchor
@@ -1966,6 +1985,7 @@ export function JumpToTopButton({
   scroller: ConversationScroller | null;
   hasMoreHistory: boolean;
 }) {
+  const useChatStore = useConversationChatStore();
   const [atTop, setAtTop] = useState(true);
   const [hovering, setHovering] = useState(false);
   const [jumping, setJumping] = useState(false);
@@ -2071,7 +2091,7 @@ export function JumpToTopButton({
     } finally {
       setJumping(false);
     }
-  }, [scroller]);
+  }, [scroller, useChatStore]);
 
   return (
     <div
