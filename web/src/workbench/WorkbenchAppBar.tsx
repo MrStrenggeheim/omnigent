@@ -1,7 +1,6 @@
 import {
   Columns2Icon,
   LayoutTemplateIcon,
-  PanelLeftIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -20,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { OmnigentLogo } from "@/components/OmnigentLogo";
+import { SidebarToggle } from "@/shell/SidebarToggle";
 
 export interface WorkbenchOpenAction {
   id: string;
@@ -53,17 +53,13 @@ export function WorkbenchAppBar({
       className="workbench-app-bar flex h-12 min-h-12 shrink-0 items-center gap-2 border-b bg-sidebar px-2"
       aria-label="Application"
     >
-      <HeaderActionButton
+      <SidebarToggle
+        side="left"
+        expanded={sidebarOpen}
         aria-label={sidebarOpen ? "Close navigation" : "Open navigation"}
         tooltipShortcut={[MOD_KEY, "B"]}
         onClick={onToggleSidebar}
-      >
-        <PanelLeftIcon
-          className="size-4"
-          fill={sidebarOpen ? "currentColor" : "none"}
-          fillOpacity={sidebarOpen ? 0.15 : 1}
-        />
-      </HeaderActionButton>
+      />
       <OmnigentLogo className="size-7 shrink-0" />
       <span className="hidden text-sm font-semibold sm:block">Omnigent</span>
       <div className="flex-1" />

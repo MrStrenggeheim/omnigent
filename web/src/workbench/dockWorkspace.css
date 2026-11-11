@@ -8,6 +8,8 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
+  --workbench-focused-tab: color-mix(in srgb, var(--brand-accent) 16%, var(--background));
+  --workbench-hover-duration: 150ms;
   color: var(--foreground);
   background: var(--background);
 }
@@ -30,11 +32,7 @@
 
 .dock-pane {
   pointer-events: none;
-  border: 1px solid var(--border);
-}
-
-.dock-pane[data-focused="true"] {
-  border-color: var(--brand-accent, #8a73bd);
+  border: 0;
 }
 
 .dock-pane-header {
@@ -48,10 +46,6 @@
   pointer-events: auto;
 }
 
-.dock-pane[data-focused="true"] .dock-pane-header {
-  box-shadow: inset 0 2px var(--brand-accent, #8a73bd);
-}
-
 .dock-tabs {
   display: flex;
   align-items: stretch;
@@ -60,6 +54,7 @@
   height: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .dock-tab {
@@ -77,11 +72,6 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.dock-tab[aria-selected="true"] {
-  background: var(--muted);
-  box-shadow: inset 0 -2px var(--border);
 }
 
 .dock-tab[data-dragging="true"] {
@@ -193,27 +183,51 @@
   padding: 8px;
 }
 
-.dock-embedded-header {
-  flex: 1;
-  min-width: 0;
+.dock-tab-group {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding-right: 4px;
+  transition: background-color var(--workbench-hover-duration) ease;
 }
-.dock-embedded-header > div {
-  border-bottom: 0;
-  padding-left: 0;
+.dock-tab-group:hover {
+  background: var(--muted);
 }
-.dock-tab-grip {
-  display: none;
+.dock-tab {
+  height: 100%;
+  padding-right: 6px;
+  background: transparent;
+  transition: background-color var(--workbench-hover-duration) ease;
 }
-.dock-pane-header:has(.dock-embedded-header:not(:empty)) .dock-tabs {
-  flex: 0 0 auto;
+.dock-tab-group:has([aria-selected="true"]) {
+  background: var(--muted);
 }
-.dock-pane-header:has(.dock-embedded-header:not(:empty)) .dock-tab-grip {
-  display: block;
+.dock-pane[data-focused="true"] .dock-tab-group:has([aria-selected="true"]) {
+  background: var(--workbench-focused-tab);
 }
-.dock-pane-header:has(.dock-embedded-header:not(:empty)) .dock-tab-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
+.dock-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+}
+.dock-tab-close:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-tab,
+  .dock-tab-group {
+    transition: none;
+  }
+}
+
+@media (any-pointer: coarse) {
+  .dock-tab-close {
+    width: 44px;
+    height: 44px;
+  }
 }

@@ -1,4 +1,3 @@
-import { createPortal } from "react-dom";
 import { useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import {
   ChevronRightIcon,
@@ -73,13 +72,11 @@ export function ConversationView({
   conversationId,
   visible = true,
   focused,
-  headerTarget,
   children,
 }: {
   conversationId: string;
   visible?: boolean;
   focused?: boolean;
-  headerTarget?: HTMLElement | null;
   children?: ReactNode;
 }) {
   const workbench = useWorkbench();
@@ -90,11 +87,7 @@ export function ConversationView({
       visible={visible}
       focused={visible && (focused ?? workbench?.focusedConversationId === conversationId)}
     >
-      <ConversationViewContent
-        conversationId={conversationId}
-        visible={visible}
-        headerTarget={headerTarget}
-      >
+      <ConversationViewContent conversationId={conversationId} visible={visible}>
         {children}
       </ConversationViewContent>
     </ScopedChatStoreProvider>
@@ -104,12 +97,10 @@ export function ConversationView({
 function ConversationViewContent({
   conversationId,
   visible,
-  headerTarget,
   children,
 }: {
   conversationId: string;
   visible: boolean;
-  headerTarget?: HTMLElement | null;
   children?: ReactNode;
 }) {
   const useChatStore = useConversationChatStore();
@@ -278,7 +269,7 @@ function ConversationViewContent({
           data-context-search-region="chat"
           data-session-id={conversationId}
         >
-          {headerTarget ? createPortal(header, headerTarget) : header}
+          {header}
           {search?.open && search.activeSessionId === conversationId && (
             <ContextSearchBar contained />
           )}

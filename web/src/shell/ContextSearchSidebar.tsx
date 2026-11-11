@@ -4,7 +4,6 @@ import { ArrowLeftIcon, SearchIcon, XIcon } from "lucide-react";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { conversationDisplayLabel } from "./sidebarNav";
 import { useContextSearch } from "./ContextSearchContext";
@@ -153,7 +152,7 @@ export function ContextSearchSidebar() {
       ref={root}
       aria-label="Chat search"
       data-testid="context-search-sidebar"
-      className="flex min-h-0 flex-1 flex-col"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       onKeyDown={(event) => {
         if (event.defaultPrevented || event.nativeEvent.isComposing) return;
         if (event.key === "Escape") {
@@ -223,9 +222,12 @@ export function ContextSearchSidebar() {
             </TooltipButton>
           )}
         </div>
-        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>Search in</span>
-          <SegmentedControl aria-label="Search scope">
+          <SegmentedControl
+            aria-label="Search scope"
+            className="h-auto min-h-6 max-w-full flex-wrap"
+          >
             {(
               [
                 ["current", "Current chat"],
@@ -244,18 +246,21 @@ export function ContextSearchSidebar() {
             ))}
           </SegmentedControl>
         </div>
-        <Tabs
-          value={search.category}
-          onValueChange={(value) => search.setCategory(value as ContextSearchCategory)}
+        <SegmentedControl
+          aria-label="Search categories"
+          className="h-auto min-h-6 max-w-full flex-wrap"
         >
-          <TabsList variant="pill" aria-label="Search categories" className="gap-1 border-b pb-2">
-            {categories.map(({ id, label }) => (
-              <TabsTrigger key={id} value={id} className="px-2 py-1 text-xs">
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+          {categories.map(({ id, label }) => (
+            <SegmentedControlItem
+              key={id}
+              label={label}
+              active={search.category === id}
+              onClick={() => search.setCategory(id)}
+            >
+              {label}
+            </SegmentedControlItem>
+          ))}
+        </SegmentedControl>
       </div>
       <div
         ref={results}

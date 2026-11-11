@@ -50,3 +50,20 @@ html[data-electron-mac] .unified-workbench .sidebar-header-row {
 .unified-workbench:is([data-ios-native], [data-android-native]) .conversations-sidebar {
   top: calc(48px + var(--omnigent-safe-top, 0px));
 }
+
+/* All docked view roots share one content surface. */
+.unified-workbench .dock-view-slot {
+  --card: var(--background);
+  background: var(--background);
+}
+.unified-workbench .dock-view-slot .bg-card {
+  background: var(--background);
+}
+
+/* A docked content panel is a flat surface, not an elevated floating card. */
+.dark .unified-workbench .dock-view-slot .bg-card {
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}

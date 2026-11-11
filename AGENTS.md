@@ -18,6 +18,8 @@ Keep each customization in a focused commit. Never edit installed package files.
 
 ## Reuse and design
 
+Read `design-system/omnigent/MASTER.md` before changing workspace UI.
+
 - Search for and reuse existing helpers before adding code. Refactor an existing
   implementation if that avoids duplication.
 - Treat local extensions as part of the whole product: reuse existing UI components, styles and interaction patterns, extend shared primitives when necessary, and preserve navigation and selection during background refreshes.

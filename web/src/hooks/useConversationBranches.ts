@@ -34,7 +34,7 @@ async function authorizedConversation(id: string): Promise<BranchConversation | 
   };
 }
 
-/** One shared lazy list, using the authorized branch contract rather than delegation /children. */
+/** One shared metadata list, using the authorized branch contract rather than delegation /children. */
 export function useConversationBranches({
   enabled,
   rows,
@@ -96,10 +96,10 @@ export function useConversationBranches({
   const query = useInfiniteQuery({
     queryKey: ["conversation-branches", scope, filter, searchQuery],
     initialPageParam: undefined as string | undefined,
-    enabled: enabled && expanded.size > 0,
+    enabled,
     retry: false,
     staleTime: 15_000,
-    refetchInterval: enabled && expanded.size > 0 ? 30_000 : false,
+    refetchInterval: enabled ? 30_000 : false,
     queryFn: async ({ pageParam, signal }) => {
       const params = new URLSearchParams({
         include_side_chats: "true",
@@ -118,6 +118,23 @@ export function useConversationBranches({
     },
     getNextPageParam: (page) => (page.has_more && page.last_id ? page.last_id : undefined),
   });
+  // Prefetch at most 2,000 authorized metadata rows without loading histories.
+  const { data, hasNextPage, isFetching, isError, fetchNextPage } = query;
+  useEffect(() => {
+    const pages = data?.pages ?? [];
+    const cursor = pages.at(-1)?.last_id;
+    if (
+      enabled &&
+      hasNextPage &&
+      !isFetching &&
+      !isError &&
+      pages.length < 20 &&
+      cursor &&
+      !data?.pageParams.includes(cursor)
+    ) {
+      void fetchNextPage();
+    }
+  }, [enabled, data, hasNextPage, isFetching, isError, fetchNextPage]);
   useEffect(() => {
     if (!enabled) return;
     return client.getMutationCache().subscribe((event) => {

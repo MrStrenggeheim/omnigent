@@ -49,7 +49,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
-  CircleAlertIcon,
   CircleStopIcon,
   FolderGit2Icon,
   FolderIcon,
@@ -58,10 +57,6 @@ import {
   FolderOpenIcon,
   GitBranchIcon,
   GitForkIcon,
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestDraftIcon,
-  GitPullRequestIcon,
   InboxIcon,
   ListChecksIcon,
   ListFilterIcon,
@@ -73,6 +68,7 @@ import {
   MessageCircleDashedIcon,
   MessageCirclePlusIcon,
   Maximize2Icon,
+  ExternalLinkIcon,
   Minimize2Icon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -86,7 +82,6 @@ import {
   SquareIcon,
   SquareCheckIcon,
   Trash2Icon,
-  UserRoundIcon,
   UsersIcon,
   WalletIcon,
   XIcon,
@@ -203,6 +198,7 @@ import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { ProjectRowIcon } from "./ProjectPicker";
 import { EmojiPicker } from "@/components/ProjectIconPicker";
 import { SessionStateBadge } from "@/components/SessionStateBadge";
+import { RunningDot } from "@/components/RunningDot";
 import { useSessionRunnerOnline } from "@/hooks/RunnerHealthProvider";
 import { useActiveRootSessionId } from "@/hooks/useSession";
 import { isSessionStoppable } from "@/lib/sessionStop";
@@ -261,7 +257,6 @@ import {
   computeNextActiveOverride,
   conversationDisplayLabel,
   dedupeConversationsById,
-  getConversationAgentType,
   EXPANDED_PROJECT_SECTIONS_STORAGE_KEY,
   groupConversations,
   orderByPinnedTimestamp,
@@ -281,18 +276,8 @@ import {
   sessionsListAcceptsDrop,
 } from "./sidebarNav";
 import { SidebarServerPicker } from "./SidebarServerPicker";
-import { ComposerAgentIcon } from "@/components/ComposerAgentIcon";
 import { useHarnessLabels } from "@/lib/agentLabels";
-import {
-  nativeCodingAgentForSession,
-  nativeCodingAgentForWrapper,
-  type NativeCodingAgentIconKind,
-  WRAPPER_LABEL_KEY,
-} from "@/lib/nativeCodingAgents";
-import AntigravityColor from "@lobehub/icons/es/Antigravity/components/Color";
-import DevinColor from "@lobehub/icons/es/Devin/components/Color";
-import KiroColor from "@lobehub/icons/es/Kiro/components/Color";
-import { type PullRequest, usePullRequestInfo } from "@/hooks/usePullRequests";
+import { nativeCodingAgentForSession } from "@/lib/nativeCodingAgents";
 import { matchWorktree } from "@/hooks/useHostWorktrees";
 import { useSessionWorktrees } from "@/hooks/useSessionWorktrees";
 import {
@@ -328,7 +313,7 @@ import {
 // + kebab take its place; on mobile those controls are gone, so the badge holds
 // that edge.
 const SESSION_STATE_SLOT_CLASS =
-  "-translate-y-1/2 pointer-events-none absolute flex h-5 items-center transition-opacity md:group-hover:opacity-0 md:group-has-[:focus-visible]:opacity-0 md:group-has-[[aria-expanded=true]]:opacity-0";
+  "-translate-y-1/2 pointer-events-none absolute flex h-5 items-center transition-opacity md:group-hover/conversation:opacity-0 md:group-has-[:focus-visible]/conversation:opacity-0 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-0";
 
 // Small markers (running/starting/unseen dot, or the draft pencil when there's
 // no session state) get a fixed size-6 centered box so their glyph lands 16px
@@ -2850,6 +2835,14 @@ function ConversationList({
               }
               onMouseLeave={() => setPointerInside(false)}
             >
+              {workbench && branches.error && (
+                <div role="alert" className="px-2 text-xs text-destructive">
+                  Could not refresh subchats.{" "}
+                  <button type="button" onClick={branches.retry}>
+                    Retry
+                  </button>
+                </div>
+              )}
               {/* Removing a filed session from its project means dropping it back
             onto the flat "Chats" list — so the Chats section itself is the
             ungroup target (wrapped below). This top strip is only a FALLBACK
@@ -3375,7 +3368,7 @@ function SectionHeader({
                 !showsMarker &&
                 "pr-8 [@media((hover:hover)_and_(pointer:fine))]:pr-14 [@media((hover:hover)_and_(pointer:fine))]:md:pr-2 [@media((hover:hover)_and_(pointer:fine))]:md:group-hover/header:pr-14 [@media((hover:hover)_and_(pointer:fine))]:md:group-has-[[data-header-controls]:focus-within]/header:pr-14 [@media((hover:hover)_and_(pointer:fine))]:md:group-has-[[data-state=open]]/header:pr-14",
             )
-          : "group flex h-7 w-full items-center gap-1 border-0 pr-0 pl-2 text-left text-sm font-normal text-muted-foreground transition-colors hover:text-foreground",
+          : "group flex h-7 w-full items-center gap-1 border-0 pr-0 pl-2 text-left text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground",
         status && "w-auto min-w-0 max-w-1/2 shrink-0",
       )}
     >
@@ -3397,7 +3390,7 @@ function SectionHeader({
           />
         </span>
       ) : null}
-      <span className="min-w-0 truncate">{title}</span>
+      <span className="min-w-0 truncate font-semibold">{title}</span>
       {/* Trailing chevron, rotating on expand. Headers without a leading icon
             reveal it on desktop hover/focus; icon headers show it only on mobile
             (no hover) since desktop swaps the folder for the chevron above. */}
@@ -4491,15 +4484,6 @@ function ConversationMenuItems({
   );
 }
 
-function SessionErrorHint() {
-  return (
-    <p className="mt-1 flex items-center gap-1.5 text-sm text-destructive">
-      <CircleAlertIcon aria-hidden className="size-3.5 shrink-0" />
-      <span>Latest message is an error</span>
-    </p>
-  );
-}
-
 /** Where a session runs: local machine, a sandbox provider, or the host's name (id while unresolved). */
 function sessionLocationLabel(
   conversation: Conversation,
@@ -4588,218 +4572,6 @@ function SessionMetaLine({
   );
 }
 
-// A label-left, value-right line in the session tooltip's details block.
-function SessionTooltipDetail({
-  label,
-  icon: Icon,
-  testId,
-  children,
-}: {
-  label: string;
-  icon: LucideIcon;
-  testId: string;
-  children: ReactNode;
-}) {
-  return (
-    <div data-testid={testId} className="flex items-center justify-between gap-3 text-sm">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{children}</span>
-      </span>
-    </div>
-  );
-}
-
-// GitHub's glyph and label for a PR state; gh reports a draft as OPEN + is_draft.
-function pullRequestStatus(pr: PullRequest): { icon: LucideIcon; label: string } {
-  const state = pr.state.toUpperCase();
-  if (state === "MERGED") return { icon: GitMergeIcon, label: "Merged" };
-  if (state === "CLOSED") return { icon: GitPullRequestClosedIcon, label: "Closed" };
-  if (pr.is_draft) return { icon: GitPullRequestDraftIcon, label: "Draft" };
-  return { icon: GitPullRequestIcon, label: "Open" };
-}
-
-// The tooltip's detail rows. Repo, PR and a non-worktree branch come from the
-// session's GitHub info, fetched only while the tooltip is open (Radix mounts
-// its content on open) and shared with the GitHub panel's cache.
-function SessionTooltipDetails({ conversation }: { conversation: Conversation }) {
-  const viewerId = useContext(ViewerIdContext);
-  // Only a workspace-bound session has a checkout to read GitHub state from.
-  const { data: github } = usePullRequestInfo(conversation.workspace ? conversation.id : undefined);
-  // `owner` is null when permissions are off; there's no creator to name then.
-  const owner = conversation.owner ?? null;
-  const createdBy = owner !== null && isOwnedByViewer(conversation, viewerId) ? "You" : owner;
-  const repo = github?.repo?.name_with_owner?.split("/").pop() ?? null;
-  // Prefer the resolved PR (carries state); fall back to the tracked association
-  // (number only) so the row still shows when gh can't resolve state — e.g. gh
-  // isn't authenticated on the host.
-  const pr = github?.pr ?? null;
-  const association =
-    github?.prs?.find((p) => p.url === github.selected_pr_url) ?? github?.prs?.[0] ?? null;
-  const prNumber = pr?.number ?? association?.number ?? null;
-  const prStatus = pr ? pullRequestStatus(pr) : null;
-  const branch = conversation.git_branch ?? github?.branch ?? null;
-  if (createdBy === null && repo === null && prNumber === null && branch === null) return null;
-  return (
-    <div className="mt-2.5 flex flex-col gap-1 border-t border-border pt-2.5">
-      {createdBy !== null && (
-        <SessionTooltipDetail
-          label="Created by"
-          icon={UserRoundIcon}
-          testId="session-tooltip-owner"
-        >
-          {createdBy}
-        </SessionTooltipDetail>
-      )}
-      {repo !== null && (
-        <SessionTooltipDetail label="Repo" icon={FolderGit2Icon} testId="session-tooltip-repo">
-          {repo}
-        </SessionTooltipDetail>
-      )}
-      {prNumber !== null && (
-        <SessionTooltipDetail
-          label="PR"
-          icon={prStatus?.icon ?? GitPullRequestIcon}
-          testId="session-tooltip-pr"
-        >
-          #{prNumber}
-          {prStatus ? ` · ${prStatus.label}` : ""}
-        </SessionTooltipDetail>
-      )}
-      {branch !== null && (
-        <SessionTooltipDetail label="Branch" icon={GitBranchIcon} testId="session-tooltip-branch">
-          {branch}
-        </SessionTooltipDetail>
-      )}
-    </div>
-  );
-}
-
-// Brand-color glyphs for harnesses ComposerAgentIcon draws in mono. Claude and Codex
-// are already in color there; Kimi's color mark is white-on-dark, and Cursor,
-// OpenCode, Pi and Goose have none.
-const TOOLTIP_COLOR_ICONS: Partial<
-  Record<NativeCodingAgentIconKind, ComponentType<{ size?: number; className?: string }>>
-> = { antigravity: AntigravityColor, devin: DevinColor, kiro: KiroColor };
-
-// The tooltip before the sidebar_grouping_ui release flag; remove with the flag
-// (review by 0.19.0).
-function LegacySessionTooltipContent({
-  conversation,
-  hostsById,
-  hasError,
-}: {
-  conversation: Conversation;
-  hostsById: ReadonlyMap<string, Host>;
-  hasError: boolean;
-}) {
-  return (
-    <TooltipContent
-      side="right"
-      align="start"
-      sideOffset={8}
-      data-testid="session-tooltip-content"
-      // Mirror PinnedProjectFlyoutContent's compact HoverCard look: title,
-      // then muted, small-icon metadata lines.
-      className="w-64 max-w-[calc(100vw-2rem)] flex-col items-stretch rounded-lg bg-popover p-2.5 text-popover-foreground whitespace-normal shadow-menu ring-1 ring-foreground/10"
-    >
-      <p className="sidebar-compact-text line-clamp-3 font-medium">
-        {conversation.title ?? conversation.id}
-        <span className="font-normal text-muted-foreground">
-          {" · "}
-          {relativeTime(conversation.updated_at * 1000)}
-        </span>
-      </p>
-      <p
-        data-testid="session-tooltip-location"
-        className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground"
-      >
-        <LaptopIcon aria-hidden className="size-3.5 shrink-0" />
-        <span className="truncate">{sessionLocationLabel(conversation, hostsById)}</span>
-      </p>
-      {conversation.git_branch && (
-        <p
-          data-testid="session-tooltip-branch"
-          className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground"
-        >
-          <GitBranchIcon aria-hidden className="size-3.5 shrink-0" />
-          <span className="truncate">{conversation.git_branch}</span>
-        </p>
-      )}
-      {hasError && <SessionErrorHint />}
-    </TooltipContent>
-  );
-}
-
-function SessionTooltipContent({
-  conversation,
-  hostsById,
-  hasError,
-}: {
-  conversation: Conversation;
-  hostsById: ReadonlyMap<string, Host>;
-  hasError: boolean;
-}) {
-  const serverInfo = useContext(ServerInfoContext);
-  if (!isFeatureEnabled(serverInfo, "sidebar_grouping_ui")) {
-    return (
-      <LegacySessionTooltipContent
-        conversation={conversation}
-        hostsById={hostsById}
-        hasError={hasError}
-      />
-    );
-  }
-  const nativeAgent = nativeCodingAgentForWrapper(conversation.labels?.[WRAPPER_LABEL_KEY]);
-  const ColorIcon = nativeAgent ? TOOLTIP_COLOR_ICONS[nativeAgent.iconKind] : undefined;
-  const harnessAgent = nativeAgent
-    ? { name: nativeAgent.agentName, harness: nativeAgent.harness }
-    : conversation.agent_name === "nessie"
-      ? { name: "nessie", harness: null }
-      : null;
-
-  return (
-    <TooltipContent
-      side="right"
-      align="start"
-      sideOffset={8}
-      data-testid="session-tooltip-content"
-      // Mirror PinnedProjectFlyoutContent's compact HoverCard look: title and a
-      // muted "updated · harness · environment" line, then label/value rows.
-      className="w-72 max-w-[calc(100vw-2rem)] flex-col items-stretch rounded-lg bg-popover p-2.5 text-popover-foreground whitespace-normal shadow-menu ring-1 ring-foreground/10"
-    >
-      <p className="sidebar-compact-text line-clamp-3 font-medium">
-        {conversation.title ?? conversation.id}
-      </p>
-      <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-        <span className="shrink-0">{relativeTime(conversation.updated_at * 1000)}</span>
-        <span aria-hidden>·</span>
-        {harnessAgent && (
-          <span
-            role="img"
-            aria-label={`${getConversationAgentType(conversation)} harness`}
-            data-testid="session-tooltip-harness"
-            className="flex shrink-0"
-          >
-            {ColorIcon ? (
-              <ColorIcon size={16} className="shrink-0" />
-            ) : (
-              <ComposerAgentIcon agent={harnessAgent} className="size-4" />
-            )}
-          </span>
-        )}
-        <span data-testid="session-tooltip-location" className="flex min-w-0 items-center gap-1.5">
-          <LaptopIcon aria-hidden className="size-3.5 shrink-0" />
-          <span className="truncate">{sessionLocationLabel(conversation, hostsById)}</span>
-        </span>
-      </p>
-      <SessionTooltipDetails conversation={conversation} />
-      {hasError && <SessionErrorHint />}
-    </TooltipContent>
-  );
-}
-
 // Max gap between the first click and the dblclick of one double-click.
 // Browsers pair clicks within ~500ms; the margin absorbs event-loop delay.
 const DOUBLE_CLICK_PAIR_WINDOW_MS = 750;
@@ -4834,17 +4606,18 @@ function ConversationBranchRow({
     <>
       <ConversationRow
         {...props}
-        treeDepth={ancestors.length}
+        treeDepth={ancestors.length + 1}
         openElsewhere={!props.isActive && branches.openIds.includes(id)}
         treeControl={
-          !props.conversation.provisional && (
+          !props.conversation.provisional &&
+          children.length > 0 && (
             <TooltipButton
               type="button"
               title={`${expanded ? "Collapse" : "Expand"} subchats`}
               aria-label={`${expanded ? "Collapse" : "Expand"} subchats of ${label}`}
               aria-expanded={expanded}
               aria-controls={groupId}
-              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+              className="flex h-6 w-[var(--tree-indent)] items-center justify-center rounded text-muted-foreground hover:bg-muted"
               onMouseDown={(event) => event.stopPropagation()}
               onTouchStart={(event) => event.stopPropagation()}
               onClick={(event) => {
@@ -4858,7 +4631,7 @@ function ConversationBranchRow({
           )
         }
       />
-      {expanded && (
+      {expanded && children.length > 0 && (
         <li className="list-none">
           <ul
             id={groupId}
@@ -4880,34 +4653,6 @@ function ConversationBranchRow({
                 gridSelected={child.id === grids?.selectedSessionId}
               />
             ))}
-            {branches.loading && (
-              <li role="status" className="px-4 text-xs text-muted-foreground">
-                Loading subchats…
-              </li>
-            )}
-            {branches.error && (
-              <li role="alert" className="px-4 text-xs text-destructive">
-                Could not load subchats.{" "}
-                <button type="button" onClick={branches.retry}>
-                  Retry
-                </button>
-              </li>
-            )}
-            {branches.hasMore && (
-              <li>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={branches.loadMore}
-                  disabled={branches.loading}
-                >
-                  Load more subchats
-                </Button>
-              </li>
-            )}
-            {!children.length && !branches.loading && !branches.error && !branches.hasMore && (
-              <li className="px-4 text-xs text-muted-foreground">No subchats</li>
-            )}
           </ul>
         </li>
       )}
@@ -4962,10 +4707,6 @@ function ConversationRowImpl({
   // yet, so per-row mutations are disabled until it's rekeyed to the real id —
   // otherwise they'd POST to `/v1/sessions/temp:*`. The row still navigates.
   const isProvisionalRow = conversation.provisional === true;
-  // Mobile has no real hover, so a tap that navigates would also trip the
-  // project flyout's HoverCard and leave it lingering over the chat. Gate the
-  // flyout off below the `md` breakpoint (see `projectFlyoutName`).
-  const isMobile = useContext(IsMobileContext);
   // When this row becomes the active conversation (e.g. a freshly created
   // session navigated to via `/c/:id`), scroll it toward the center of the
   // sidebar so it's comfortably in view rather than pinned to an edge.
@@ -5050,23 +4791,6 @@ function ConversationRowImpl({
   const firstClassProjectName =
     conversation.project_id != null ? projectNamesById.get(conversation.project_id) : undefined;
   const currentProject = firstClassProjectName ?? conversation.labels?.[PROJECT_LABEL_KEY] ?? null;
-  // Pinned sessions are lifted OUT of their project folder into the flat
-  // "Pinned" section, so the row no longer shows which project it belongs to.
-  // For those rows only, surface the project in a hover flyout. Non-pinned
-  // rows already sit inside their project folder, so they don't need it.
-  // Disabled on mobile: there's no hover, so a tap would open the HoverCard
-  // and leave it overlaying the chat after navigation. Forcing null there
-  // routes the row through the plain ContextMenu/link path and restores the
-  // native `title` tooltip.
-  const projectFlyoutName = !isMobile && isPinned ? currentProject : null;
-  // First-class projects can carry a chosen emoji; label-only projects have
-  // none, so the flyout falls back to the folder glyph for those.
-  const projectIconsById = useContext(ProjectIconsContext);
-  const projectFlyoutIcon =
-    conversation.project_id != null
-      ? (projectIconsById.get(conversation.project_id) ?? null)
-      : null;
-
   // The title the user just committed. The rename's cache write reaches this
   // row as a prop from the list above, which re-renders a tick after the row's
   // own `setIsEditing(false)` — until then the row would repaint the old name.
@@ -5128,9 +4852,10 @@ function ConversationRowImpl({
   // Drafts share the row's trailing indicator slot, but the active session's
   // composer already makes its draft visible. Live session state wins while
   // present; otherwise only an inactive row needs the draft marker.
-  const showDraftIndicator = hasDraft && !isActive;
+  const isWorkingState = sessionState?.kind === "running" || sessionState?.kind === "starting";
+  const showDraftIndicator = hasDraft && !isActive && !isWorkingState;
   const showSharedIndicator = !isOwner;
-  const hasSessionIndicator = sessionState !== null || showDraftIndicator;
+  const hasSessionIndicator = (sessionState !== null && !isWorkingState) || showDraftIndicator;
   // The "Show → Updated" timestamp takes the indicator slot only when it's free.
   const show = useContext(SidebarShowContext);
   const showUpdated = show.includes("updated") && !hasSessionIndicator;
@@ -5156,7 +4881,7 @@ function ConversationRowImpl({
   // the row, or on the title line — padding + half its 20px box — above a meta line.
   const overlayTop =
     metaEnvironment !== null || metaRepo !== null || metaBranch !== null
-      ? "top-4 md:top-3.5"
+      ? "top-[calc(var(--list-row-padding-block)+10px)]"
       : "top-1/2";
 
   // Drag-and-drop: a row is grabbable when the viewer owns it (re-filing is
@@ -5362,7 +5087,7 @@ function ConversationRowImpl({
       className={cn(
         SIDEBAR_ROW,
         "density-row",
-        "density-row density-tree-row relative flex flex-col justify-center text-left text-foreground transition-colors",
+        "density-tree-row relative flex flex-col justify-center text-left text-foreground transition-colors",
         SIDEBAR_HOVER_HIGHLIGHT,
         // Full width (not 100%+1rem) so the highlight stays inset from the
         // right edge, aligning with the project/folder rows above.
@@ -5389,7 +5114,8 @@ function ConversationRowImpl({
         // `focus-within` also fires for a plain click, which shrank the reserve
         // on the selected row while the marker stayed put, sliding the title
         // under it.
-        !selectionMode && "md:group-hover:pr-20 md:group-has-[:focus-visible]:pr-20",
+        !selectionMode &&
+          "md:group-hover/conversation:pr-20 md:group-has-[:focus-visible]/conversation:pr-20",
         !selectionMode && menuOpen && "md:pr-20",
         selectionMode && "pr-2 pl-8",
         !selectionMode && isActive && SIDEBAR_ACTIVE_HIGHLIGHT,
@@ -5430,19 +5156,29 @@ function ConversationRowImpl({
         if (recent.length === 1) return;
         setIsEditing(true);
       }}
-      title={isMobile ? (conversation.title ?? conversation.id) : undefined}
     >
       {/* Row 1: the session name. Working, needs-approval, unseen, and draft
           markers render in the shared trailing indicator slot below. */}
       <div className="flex w-full items-center gap-1">
+        {isWorkingState && (
+          <span
+            role="img"
+            aria-label={
+              sessionState.kind === "starting" ? "Session starting up" : "Session running"
+            }
+            className="flex shrink-0 items-center"
+          >
+            <RunningDot className="size-3" />
+          </span>
+        )}
         {openElsewhere && (
           <span role="img" aria-label="Open elsewhere" className="shrink-0">
-            <Maximize2Icon className="size-3 text-muted-foreground" />
+            <ExternalLinkIcon className="size-3 text-muted-foreground" />
           </span>
         )}
         <span
           className={cn(
-            "relative min-w-0 truncate",
+            "relative min-w-0 truncate font-medium",
             // The optimistic first-prompt label is a placeholder until the
             // server's title lands — dim it so it doesn't read as final.
             isProvisionalLabel && "italic text-muted-foreground",
@@ -5463,7 +5199,7 @@ function ConversationRowImpl({
   // Conversation`) drops `provisional` and the full row renders.
   if (isProvisionalRow) {
     return (
-      <li ref={rowRef} className="group relative">
+      <li ref={rowRef} className="group/conversation relative">
         {rowLink}
       </li>
     );
@@ -5476,7 +5212,7 @@ function ConversationRowImpl({
       ref={setRowRef}
       data-sidebar-session-id={conversation.id}
       data-open-elsewhere={openElsewhere || undefined}
-      style={{ "--tree-depth": treeControl ? treeDepth + 1 : treeDepth } as CSSProperties}
+      style={{ "--tree-depth": treeDepth } as CSSProperties}
       onMouseDown={(event) => {
         // Portaled dialogs bubble through this row but must not start a drag.
         if (event.currentTarget.contains(event.target as Node)) {
@@ -5488,12 +5224,14 @@ function ConversationRowImpl({
           dragListeners?.onTouchStart?.(event);
         }
       }}
-      className={cn("group relative", isDragging && "opacity-40")}
+      className={cn("group/conversation relative", isDragging && "opacity-40")}
     >
       {treeControl && (
         <div
-          className="absolute top-1 z-10"
-          style={{ left: `calc(${treeDepth} * var(--tree-indent) + 2px)` }}
+          className={cn("absolute -translate-y-1/2 z-10", overlayTop)}
+          style={{
+            left: `calc(var(--list-row-padding-inline) + ${treeDepth - 1} * var(--tree-indent))`,
+          }}
         >
           {treeControl}
         </div>
@@ -5505,62 +5243,9 @@ function ConversationRowImpl({
           style={pinInsertion === "before" ? { top: 0 } : { bottom: 0 }}
         />
       )}
-      {/* Right-click anywhere on the row opens the same actions as the kebab.
-          Suppressed in selection mode (bulk-select owns the row), where the
-          bare link is rendered instead. ContextMenuTrigger preventDefaults the
-          native contextmenu event, so right-click never navigates; asChild
-          merges its handler onto the Link, preserving left-click / double-click.
-          Pinned, project-owned rows nest a TooltipTrigger around the Link so
-          hovering surfaces the project flyout — the trigger sits innermost so
-          both the context menu and the hover card keep their handlers/refs on
-          the Link. */}
       {selectionMode ? (
-        projectFlyoutName ? (
-          <Tooltip>
-            <TooltipTrigger asChild>{rowLink}</TooltipTrigger>
-            <PinnedProjectFlyoutContent
-              title={conversation.title ?? conversation.id}
-              projectName={projectFlyoutName}
-              projectIcon={projectFlyoutIcon}
-              gitBranch={gitBranch}
-              hasError={sessionState?.kind === "error"}
-            />
-          </Tooltip>
-        ) : isMobile ? (
-          rowLink
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>{rowLink}</TooltipTrigger>
-            <SessionTooltipContent
-              conversation={conversation}
-              hostsById={hostsById}
-              hasError={sessionState?.kind === "error"}
-            />
-          </Tooltip>
-        )
-      ) : projectFlyoutName ? (
-        <Tooltip>
-          <ContextMenu>
-            <ContextMenuTrigger asChild>
-              <TooltipTrigger asChild>{rowLink}</TooltipTrigger>
-            </ContextMenuTrigger>
-            <ContextMenuContent className="min-w-44">
-              <ConversationMenuItems
-                components={contextBundle}
-                setMenuOpen={() => {}}
-                {...menuItemProps}
-              />
-            </ContextMenuContent>
-          </ContextMenu>
-          <PinnedProjectFlyoutContent
-            title={conversation.title ?? conversation.id}
-            projectName={projectFlyoutName}
-            projectIcon={projectFlyoutIcon}
-            gitBranch={gitBranch}
-            hasError={sessionState?.kind === "error"}
-          />
-        </Tooltip>
-      ) : isMobile ? (
+        rowLink
+      ) : (
         <ContextMenu>
           <ContextMenuTrigger asChild>{rowLink}</ContextMenuTrigger>
           <ContextMenuContent className="min-w-44">
@@ -5571,28 +5256,6 @@ function ConversationRowImpl({
             />
           </ContextMenuContent>
         </ContextMenu>
-      ) : (
-        <Tooltip>
-          <ContextMenu>
-            <ContextMenuTrigger asChild>
-              <div className="w-full">
-                <TooltipTrigger asChild>{rowLink}</TooltipTrigger>
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent className="min-w-44">
-              <ConversationMenuItems
-                components={contextBundle}
-                setMenuOpen={() => {}}
-                {...menuItemProps}
-              />
-            </ContextMenuContent>
-          </ContextMenu>
-          <SessionTooltipContent
-            conversation={conversation}
-            hostsById={hostsById}
-            hasError={sessionState?.kind === "error"}
-          />
-        </Tooltip>
       )}
       {selectionMode ? (
         <span
@@ -5648,9 +5311,8 @@ function ConversationRowImpl({
         <span
           role="img"
           aria-label="Shared session"
-          title="Shared with you"
           className={cn(
-            "-translate-y-1/2 pointer-events-none absolute inline-flex h-5 w-6 shrink-0 items-center justify-center text-muted-foreground transition-opacity md:group-hover:opacity-0 md:group-has-[:focus-visible]:opacity-0 md:group-has-[[aria-expanded=true]]:opacity-0",
+            "-translate-y-1/2 pointer-events-none absolute inline-flex h-5 w-6 shrink-0 items-center justify-center text-muted-foreground transition-opacity md:group-hover/conversation:opacity-0 md:group-has-[:focus-visible]/conversation:opacity-0 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-0",
             overlayTop,
             hasSessionIndicator ? "right-8" : showUpdated ? "right-11" : "right-1",
           )}
@@ -5705,8 +5367,8 @@ function ConversationRowImpl({
                         // display when revealing it.
                         "text-muted-foreground transition-opacity",
                         "hidden md:inline-flex",
-                        "md:opacity-0 md:group-hover:opacity-100",
-                        "md:group-has-[:focus-visible]:opacity-100 md:group-has-[[aria-expanded=true]]:opacity-100",
+                        "md:opacity-0 md:group-hover/conversation:opacity-100",
+                        "md:group-has-[:focus-visible]/conversation:opacity-100 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
                       )}
                       onClick={(e) => {
                         // Keep the toggle click off the surrounding Link (no navigation).
@@ -5744,8 +5406,8 @@ function ConversationRowImpl({
                       className={cn(
                         "text-muted-foreground transition-opacity",
                         "hidden md:inline-flex",
-                        "md:opacity-0 md:group-hover:opacity-100",
-                        "md:group-has-[:focus-visible]:opacity-100 md:group-has-[[aria-expanded=true]]:opacity-100",
+                        "md:opacity-0 md:group-hover/conversation:opacity-100",
+                        "md:group-has-[:focus-visible]/conversation:opacity-100 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
                       )}
                       onClick={(e) => {
                         // Keep the toggle click off the surrounding Link (no navigation).
@@ -5784,8 +5446,8 @@ function ConversationRowImpl({
                     className={cn(
                       "text-muted-foreground transition-opacity",
                       "hidden md:inline-flex",
-                      "md:opacity-0 md:group-hover:opacity-100 md:group-has-[:focus-visible]:opacity-100",
-                      "md:aria-expanded:opacity-100",
+                      "md:opacity-0 md:group-hover/conversation:opacity-100 md:group-has-[:focus-visible]/conversation:opacity-100",
+                      "md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
                     )}
                     onClick={(e) => {
                       // Keep the trigger click from bubbling into the Link.
@@ -6047,52 +5709,6 @@ const ConversationRow = memo(ConversationRowImpl, (prev, next) => {
     conversationRenderEqual(prev.conversation, next.conversation)
   );
 });
-
-/**
- * Hover flyout body for a pinned, project-owned conversation row.
- *
- * Pinning lifts a session out of its project folder into the flat "Pinned"
- * section, dropping the visual project cue the folder provided. Hovering the
- * row surfaces it again: the session title, project name, and optional branch.
- * Mirrors {@link AgentHoverCard}'s Cursor-style placement (right / top-aligned)
- * and the muted, small-icon foreground used elsewhere in the sidebar.
- */
-function PinnedProjectFlyoutContent({
-  title,
-  projectName,
-  projectIcon,
-  gitBranch,
-  hasError,
-}: {
-  title: string;
-  projectName: string;
-  projectIcon: string | null;
-  gitBranch: string | null;
-  hasError: boolean;
-}) {
-  return (
-    <TooltipContent className="w-64 flex-col items-start" data-testid="pinned-project-flyout">
-      {/* Titles have no length cap (server + rename input are unbounded), so
-          clamp to 3 wrapped lines to keep the card tidy — full text stays in
-          the DOM. */}
-      <p className="sidebar-compact-text line-clamp-3 font-medium">{title}</p>
-      <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-        <ProjectRowIcon icon={projectIcon} />
-        <span className="truncate">{projectName}</span>
-      </p>
-      {gitBranch && (
-        <p
-          data-testid="pinned-project-flyout-branch"
-          className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground"
-        >
-          <GitBranchIcon aria-hidden className="size-3.5 shrink-0" />
-          <span className="truncate">{gitBranch}</span>
-        </p>
-      )}
-      {hasError && <SessionErrorHint />}
-    </TooltipContent>
-  );
-}
 
 function ProjectFolderActions({
   projectName,

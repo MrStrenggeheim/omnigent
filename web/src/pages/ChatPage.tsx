@@ -1,6 +1,5 @@
 import { useWorkbench } from "@/workbench/WorkbenchContext";
 import { openDurableSubchat, subchatBoundary } from "@/workbench/durableSubchat";
-import { ConversationActivityDock } from "@/components/composer/ConversationActivityDock";
 import { useScopedInitialPrompt } from "@/workbench/useScopedInitialPrompt";
 import {
   useConversationChatStore,
@@ -1582,7 +1581,6 @@ const MainAgentSurface = memo(function MainAgentSurfaceImpl({
   wrapperLabel,
 }: MainAgentSurfaceProps) {
   const useChatStore = useConversationChatStore();
-  const scoped = useIsScopedConversation();
   const visible = useConversationChatVisible();
   const focused = useConversationChatFocused();
   const terminalFirst = useTerminalFirst();
@@ -1879,7 +1877,6 @@ const MainAgentSurface = memo(function MainAgentSurfaceImpl({
             />
           )}
 
-          {scoped && conversationId && <ConversationActivityDock conversationId={conversationId} />}
           <Composer
             ref={composerRef}
             disabled={disabled}

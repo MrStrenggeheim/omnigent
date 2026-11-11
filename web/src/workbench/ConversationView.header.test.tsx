@@ -48,7 +48,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-it("moves only the header into dock chrome and back without remounting the chat", () => {
+it("keeps its own header without remounting the chat", () => {
   const mounted = vi.fn();
   const unmounted = vi.fn();
   function Draft() {
@@ -61,11 +61,8 @@ it("moves only the header into dock chrome and back without remounting the chat"
       <textarea aria-label="Draft" value={text} onChange={(event) => setText(event.target.value)} />
     );
   }
-  const firstTarget = document.createElement("div");
-  const secondTarget = document.createElement("div");
-  document.body.append(firstTarget, secondTarget);
-  const view = (headerTarget?: HTMLElement | null) => (
-    <ConversationView conversationId="chat" focused headerTarget={headerTarget}>
+  const view = () => (
+    <ConversationView conversationId="chat" focused>
       <Draft />
     </ConversationView>
   );
@@ -75,22 +72,9 @@ it("moves only the header into dock chrome and back without remounting the chat"
   expect(
     within(container).getByRole("navigation", { name: "Conversation ancestry" }),
   ).toHaveTextContent("Chat A");
-
-  rerender(view(firstTarget));
-  expect(
-    within(firstTarget).getByRole("navigation", { name: "Conversation ancestry" }),
-  ).toHaveTextContent("Chat A");
-  expect(within(container).queryByRole("navigation", { name: "Conversation ancestry" })).toBeNull();
-  fireEvent.click(within(firstTarget).getByRole("button", { name: "Share" }));
+  rerender(view());
+  fireEvent.click(within(container).getByRole("button", { name: "Share" }));
   expect(screen.getByText("Sharing dialog")).toBeInTheDocument();
-
-  rerender(view(secondTarget));
-  expect(firstTarget).toBeEmptyDOMElement();
-  expect(
-    within(secondTarget).getByRole("navigation", { name: "Conversation ancestry" }),
-  ).toBeInTheDocument();
-  rerender(view(null));
-  expect(secondTarget).toBeEmptyDOMElement();
   expect(
     within(container).getByRole("navigation", { name: "Conversation ancestry" }),
   ).toBeInTheDocument();

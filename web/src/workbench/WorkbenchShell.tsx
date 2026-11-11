@@ -762,7 +762,6 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
       content = (
         <ConversationView
           conversationId={sessionId}
-          headerTarget={visibility.headerTarget}
           visible={showDock && visibility.visible}
           focused={visibility.focused}
         />
@@ -1064,7 +1063,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
                       onUnpinView={(id) => dock.unpinView(id)}
                     />
                     {!dock.layout.views.length && (
-                      <div className="m-auto text-sm text-muted-foreground">
+                      <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
                         Use Open to add a conversation or tool.
                       </div>
                     )}

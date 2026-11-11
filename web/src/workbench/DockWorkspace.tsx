@@ -26,7 +26,7 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
-import { GripVertical, MoreHorizontal, Pin, X } from "lucide-react";
+import { MoreHorizontal, Pin, X } from "lucide-react";
 import { TooltipButton } from "@/components/ui/tooltip";
 import {
   Select,
@@ -68,7 +68,6 @@ import {
 import "./dockWorkspace.css";
 
 export interface DockViewVisibility {
-  headerTarget?: HTMLDivElement | null;
   visible: boolean;
   focused: boolean;
 }
@@ -113,16 +112,6 @@ export function DockWorkspace(props: DockWorkspaceProps) {
 function DockSurface(props: DockWorkspaceProps) {
   const { layout, onLayoutChange, renderView, retainedViews = [], pinnedViewIds = [] } = props;
   const prefix = useId();
-  const [headerTargets, setHeaderTargets] = useState(() => new Map<string, HTMLDivElement>());
-  const setHeaderTarget = useCallback((id: string, node: HTMLDivElement | null) => {
-    setHeaderTargets((previous) => {
-      if ((previous.get(id) ?? null) === node) return previous;
-      const next = new Map(previous);
-      if (node) next.set(id, node);
-      else next.delete(id);
-      return next;
-    });
-  }, []);
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const latest = useRef(props);
@@ -286,7 +275,6 @@ function DockSurface(props: DockWorkspaceProps) {
                 onLayoutChange={onLayoutChange}
                 onPinView={props.onPinView}
                 onUnpinView={props.onUnpinView}
-                onHeaderTarget={setHeaderTarget}
               />
             );
           })}
@@ -308,7 +296,6 @@ function DockSurface(props: DockWorkspaceProps) {
                     if (pane) focus(pane.id);
                   }}
                   renderView={renderView}
-                  headerTarget={headerTargets.get(view.id)}
                 />
               );
             })}
@@ -349,7 +336,6 @@ function DockSurface(props: DockWorkspaceProps) {
 
 /** Every resource has the same parent and key throughout moves, splits and tab changes. */
 function DockViewSlot({
-  headerTarget,
   id,
   view,
   visible,
@@ -365,7 +351,6 @@ function DockViewSlot({
   style: CSSProperties;
   onFocus: () => void;
   renderView: DockWorkspaceProps["renderView"];
-  headerTarget?: HTMLDivElement | null;
 }) {
   const setElement = useCallback(
     (element: HTMLDivElement | null) => {
@@ -388,13 +373,12 @@ function DockViewSlot({
       onPointerDownCapture={onFocus}
       onFocusCapture={onFocus}
     >
-      {renderView(view, { visible, focused, headerTarget })}
+      {renderView(view, { visible, focused })}
     </div>
   );
 }
 
 function DockPaneChrome({
-  onHeaderTarget,
   prefix,
   pane,
   layout,
@@ -426,16 +410,8 @@ function DockPaneChrome({
   onLayoutChange: DockWorkspaceProps["onLayoutChange"];
   onPinView: DockWorkspaceProps["onPinView"];
   onUnpinView: DockWorkspaceProps["onUnpinView"];
-  onHeaderTarget: (id: string, node: HTMLDivElement | null) => void;
 }) {
   const selected = layout.views.find((view) => view.id === pane.selectedViewId)!;
-  const move = (paneId: string, edge?: SplitEdge, index?: number) =>
-    onLayoutChange((current) => moveDockView(current, selected.id, { paneId, edge, index }));
-  const index = pane.viewIds.indexOf(selected.id);
-  const headerRef = useCallback(
-    (node: HTMLDivElement | null) => onHeaderTarget(selected.id, node),
-    [selected.id, onHeaderTarget],
-  );
   return (
     <section
       className="dock-pane"
@@ -461,6 +437,8 @@ function DockPaneChrome({
                 prefix={prefix}
                 pinned={pinnedViewIds.includes(id)}
                 onSelect={() => onSelect(id)}
+                onClose={() => onClose(id)}
+                closing={closing.includes(id)}
                 onStep={(step, reorder) => {
                   if (reorder)
                     onLayoutChange((current) =>
@@ -477,80 +455,26 @@ function DockPaneChrome({
             ))}
           </SortableContext>
         </div>
-        {pane.viewIds.length === 1 && selected.kind === "conversation" && (
-          <div className="dock-embedded-header" ref={headerRef} />
-        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <TooltipButton
-              type="button"
-              aria-label={`Actions for ${selected.title}`}
-              className="dock-icon"
-            >
+            <TooltipButton type="button" aria-label="Pane actions" className="dock-icon">
               <MoreHorizontal size={16} />
             </TooltipButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              disabled={index === 0}
-              onSelect={() => move(pane.id, undefined, index - 1)}
-            >
-              Move tab left
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={index === pane.viewIds.length - 1}
-              onSelect={() => move(pane.id, undefined, index + 1)}
-            >
-              Move tab right
-            </DropdownMenuItem>
-            {edges.map((edge) => (
-              <DropdownMenuItem
-                key={edge}
-                disabled={pane.viewIds.length < 2}
-                onSelect={() => move(pane.id, edge)}
-              >
-                Split {edge}
-              </DropdownMenuItem>
-            ))}
-            {layout.panes
-              .filter((target) => target.id !== pane.id)
-              .map((target) => (
-                <DropdownMenuItem key={target.id} onSelect={() => move(target.id)}>
-                  Move to{" "}
-                  {layout.views.find((view) => view.id === target.selectedViewId)?.title ??
-                    target.id}
-                </DropdownMenuItem>
-              ))}
-            {(onPinView || onUnpinView) && <DropdownMenuSeparator />}
-            {pinnedViewIds.includes(selected.id)
-              ? onUnpinView && (
-                  <DropdownMenuItem onSelect={() => onUnpinView(selected.id)}>
-                    Unpin from shared area
-                  </DropdownMenuItem>
-                )
-              : onPinView && (
-                  <DropdownMenuItem onSelect={() => onPinView(selected.id)}>
-                    Keep open across chats
-                  </DropdownMenuItem>
-                )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={closing.includes(selected.id)}
-              onSelect={() => onClose(selected.id)}
-            >
-              Close view
-            </DropdownMenuItem>
+            <DockViewMenuItems
+              pane={pane}
+              layout={layout}
+              selected={selected}
+              closing={closing}
+              onClose={onClose}
+              onLayoutChange={onLayoutChange}
+              onPinView={onPinView}
+              onUnpinView={onUnpinView}
+              pinnedViewIds={pinnedViewIds}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
-        <TooltipButton
-          type="button"
-          className="dock-icon"
-          aria-label={`Close ${selected.title}`}
-          disabled={closing.includes(selected.id)}
-          onClick={() => onClose(selected.id)}
-        >
-          <X size={16} />
-        </TooltipButton>
       </div>
       {dragging && (
         <div className="dock-drop-overlay">
@@ -572,6 +496,8 @@ function DockTab({
   pinned,
   onSelect,
   onStep,
+  onClose,
+  closing,
 }: {
   view: DockView;
   pane: DockPane;
@@ -580,6 +506,8 @@ function DockTab({
   pinned: boolean;
   onSelect: () => void;
   onStep: (step: number, reorder: boolean) => void;
+  onClose: () => void;
+  closing: boolean;
 }) {
   const { active } = useDndContext();
   const { setNodeRef, attributes, listeners, isDragging } = useSortable({
@@ -587,30 +515,44 @@ function DockTab({
     data: { type: "dock-tab", viewId: view.id, paneId: pane.id, index },
   });
   return (
-    <button
-      type="button"
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      role="tab"
-      id={`${prefix}-tab-${view.id}`}
-      aria-controls={`${prefix}-view-${view.id}`}
-      aria-selected={pane.selectedViewId === view.id}
-      tabIndex={pane.selectedViewId === view.id ? 0 : -1}
-      className="dock-tab"
-      data-dragging={isDragging}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (!active && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-          event.preventDefault();
-          onStep(event.key === "ArrowLeft" ? -1 : 1, event.altKey);
-        } else listeners?.onKeyDown?.(event);
-      }}
-    >
-      {pinned && <Pin size={12} aria-label="Kept open across chats" />}
-      <GripVertical className="dock-tab-grip" size={14} aria-hidden="true" />
-      <span className="dock-tab-label">{view.title}</span>
-    </button>
+    <div className="dock-tab-group">
+      <button
+        type="button"
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        role="tab"
+        id={`${prefix}-tab-${view.id}`}
+        aria-controls={`${prefix}-view-${view.id}`}
+        aria-selected={pane.selectedViewId === view.id}
+        tabIndex={pane.selectedViewId === view.id ? 0 : -1}
+        className="dock-tab"
+        data-dragging={isDragging}
+        onClick={onSelect}
+        onKeyDown={(event) => {
+          if (!active && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+            event.preventDefault();
+            onStep(event.key === "ArrowLeft" ? -1 : 1, event.altKey);
+          } else listeners?.onKeyDown?.(event);
+        }}
+      >
+        {pinned && <Pin size={12} aria-label="Kept open across chats" />}
+        <span className="dock-tab-label">{view.title}</span>
+      </button>
+      <TooltipButton
+        type="button"
+        className="dock-tab-close"
+        aria-label={`Close ${view.title}`}
+        disabled={closing}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+        }}
+      >
+        <X size={14} />
+      </TooltipButton>
+    </div>
   );
 }
 
@@ -704,5 +646,82 @@ function DockDivider({
         }
       }}
     />
+  );
+}
+
+function DockViewMenuItems({
+  pane,
+  layout,
+  selected,
+  closing,
+  onClose,
+  onLayoutChange,
+  onPinView,
+  onUnpinView,
+  pinnedViewIds,
+}: Pick<
+  Parameters<typeof DockPaneChrome>[0],
+  | "pane"
+  | "layout"
+  | "closing"
+  | "onClose"
+  | "onLayoutChange"
+  | "onPinView"
+  | "onUnpinView"
+  | "pinnedViewIds"
+> & { selected: DockView }) {
+  const index = pane.viewIds.indexOf(selected.id);
+  const move = (paneId: string, edge?: SplitEdge, targetIndex?: number) =>
+    onLayoutChange((current) =>
+      moveDockView(current, selected.id, { paneId, edge, index: targetIndex }),
+    );
+  return (
+    <>
+      <DropdownMenuItem disabled={index === 0} onSelect={() => move(pane.id, undefined, index - 1)}>
+        Move tab left
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={index === pane.viewIds.length - 1}
+        onSelect={() => move(pane.id, undefined, index + 1)}
+      >
+        Move tab right
+      </DropdownMenuItem>
+      {edges.map((edge) => (
+        <DropdownMenuItem
+          key={edge}
+          disabled={pane.viewIds.length < 2}
+          onSelect={() => move(pane.id, edge)}
+        >
+          Split {edge}
+        </DropdownMenuItem>
+      ))}
+      {layout.panes
+        .filter((target) => target.id !== pane.id)
+        .map((target) => (
+          <DropdownMenuItem key={target.id} onSelect={() => move(target.id)}>
+            Move to{" "}
+            {layout.views.find((view) => view.id === target.selectedViewId)?.title ?? target.id}
+          </DropdownMenuItem>
+        ))}
+      {(onPinView || onUnpinView) && <DropdownMenuSeparator />}
+      {pinnedViewIds.includes(selected.id)
+        ? onUnpinView && (
+            <DropdownMenuItem onSelect={() => onUnpinView(selected.id)}>
+              Unpin from shared area
+            </DropdownMenuItem>
+          )
+        : onPinView && (
+            <DropdownMenuItem onSelect={() => onPinView(selected.id)}>
+              Keep open across chats
+            </DropdownMenuItem>
+          )}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        disabled={closing.includes(selected.id)}
+        onSelect={() => onClose(selected.id)}
+      >
+        Close view
+      </DropdownMenuItem>
+    </>
   );
 }
