@@ -17,7 +17,7 @@ Find in a file, folder or conversation follows the last clicked or focused regio
 ## How to get to it (user POV)
 
 - Click chat text or its composer and press Ctrl/Cmd+F to search Current chat.
-- Use Search in the left sidebar, Ctrl/Cmd+K, or Ctrl/Cmd+F after interacting with navigation to search All chats.
+- Use Search in the left sidebar or Ctrl/Cmd+F after interacting with navigation to search All chats; Ctrl/Cmd+K opens the global search and command palette.
 - Click the query summary in the compact bar to reopen or focus the sidebar query without resetting the scope.
 - Click a message result, or use Enter in Current chat and Previous/Next in the bar, to reveal an occurrence.
 - Click the Explorer and press Ctrl/Cmd+F to open folder content search; interact with a file preview and use the same shortcut for file find.
@@ -38,7 +38,7 @@ Preconditions: read the [verification skill](skills/verify-omnigent/SKILL.md), b
 ## Gotchas
 
 - File find, folder content search and chat search have separate queries; terminal and specialized editor shortcuts retain their owners.
-- Ctrl/Cmd+Alt+S retains the sessions-only switcher; Ctrl/Cmd+K now opens integrated Search.
+- Ctrl/Cmd+Alt+S retains the sessions-only switcher; Ctrl/Cmd+K opens global search and commands in the unified workspace.
 - Counters with a plus indicate a bounded source window or another result page, rather than an exact total.
 - Results describe stored source; ambiguous Markdown transformations or omitted folded text can make an exact rendered occurrence unavailable.
 - An unavailable result must never highlight a different repeated occurrence by guessing.

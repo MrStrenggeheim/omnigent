@@ -113,6 +113,8 @@ user-visible behavior. It then uses exactly these four H2 sections in order:
 
 ## Features
 
+- [Unified workspace](./unified-workspace.md) covers dockable views, resource ownership, durable branches, communication, layout pins and migration.
+
 - [Contextual search](./context-search.md) covers region-aware find, sidebar search, synchronized occurrence navigation and authorized message-level results.
 - [Button tooltips](./tooltips.md) covers canonical hover/focus guidance, shortcuts, disabled reasons and duplicate suppression.
 - [Chat attachments](./chat-attachments.md) covers persistent files, safe previews, native agent uploads and captured workspace references.

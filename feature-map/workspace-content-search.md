@@ -3,6 +3,9 @@
 Users search file contents across the session workspace or a browsed folder, inspect grouped matches, and preview and apply selected replacements with undo.
 Filename search remains a separate control in Files.
 
+Default chat routes now use the application Open menu and docked views.
+Follow [Unified workspace](unified-workspace.md) for those entry points; older right-rail recipes below describe retained compatibility surfaces.
+
 ## Sub-features
 
 - `search`: search automatically after a short typing pause, or submit with Enter/Search; cancel an active request.

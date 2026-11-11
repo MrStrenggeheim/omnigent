@@ -3,6 +3,9 @@
 The right panel follows the active chat's workspace; its folder row scopes Files, Changes, Search, PRs and new manual terminals.
 Resource identity and terminal lifetime remain independent of chat lifetime.
 
+Default chat routes now use the application Open menu and docked views.
+Follow [Unified workspace](unified-workspace.md) for those entry points; older right-rail recipes below describe retained compatibility surfaces.
+
 ## Sub-features
 
 - `identity`: an owned workspace has a durable target, generation and root; identical paths on different targets remain distinct.

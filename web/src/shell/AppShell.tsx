@@ -270,7 +270,7 @@ export function AppShell() {
       <RetainedWorkbench active={!legacyLayout}>
         <WorkbenchShell active={!legacyLayout} />
       </RetainedWorkbench>
-      {legacyLayout && <AppShellImpl />}
+      {legacyLayout && <LegacyAppShell />}
     </GridSessionsProvider>
   );
 }
@@ -285,7 +285,7 @@ const TerminalView = lazy(() =>
   import("@/components/blocks/TerminalView").then((module) => ({ default: module.TerminalView })),
 );
 
-function AppShellImpl() {
+export function LegacyAppShell() {
   // Cmd/Ctrl+Enter accepts the pending harness approval prompt. Bound once
   // here so it works on every chat route, regardless of where focus sits.
   useApproveHotkey();

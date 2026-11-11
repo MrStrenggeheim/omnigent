@@ -40,6 +40,12 @@ vi.mock("@/hooks/useWorkspaceComparisons", () => ({
   })),
 }));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceFileSearch: () => ({
+    data: undefined,
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+  }),
   useWorkspaceGitChanges: vi.fn(() => ({ data: { data: [] }, isLoading: false })),
   useWorkspaceEnvironment: vi.fn(() => ({
     data: { available: true, root: null },
@@ -95,7 +101,7 @@ vi.mock("./TerminalsPanel", () => ({
   TerminalsPanel: () => <div data-testid="terminals-panel" />,
 }));
 
-import { AppShell } from "./AppShell";
+import { LegacyAppShellHarness as AppShell } from "@/test/LegacyAppShellHarness";
 import { useOpenGithubTab } from "./FileViewerContext";
 import { isMobileViewport } from "./Sidebar";
 import { usePullRequestInfo } from "@/hooks/usePullRequests";

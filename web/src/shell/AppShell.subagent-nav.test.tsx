@@ -54,6 +54,12 @@ vi.mock("@/hooks/useWorkspaceComparisons", () => ({
   })),
 }));
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceFileSearch: () => ({
+    data: undefined,
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+  }),
   useWorkspaceGitChanges: vi.fn(() => ({ data: { data: [] }, isLoading: false })),
   useWorkspaceEnvironment: vi.fn(() => ({
     data: { available: true, root: null },
@@ -124,7 +130,7 @@ vi.mock("@/components/icons/NessieIcon", () => ({
   NessieIcon: (props: Record<string, unknown>) => <svg {...props} data-icon="nessie" />,
 }));
 
-import { AppShell } from "./AppShell";
+import { LegacyAppShellHarness as AppShell } from "@/test/LegacyAppShellHarness";
 import { childSessionsQueryKey, useChildSessions } from "@/hooks/useChildSessions";
 import { useSession } from "@/hooks/useSession";
 import { useConversations } from "@/hooks/useConversations";

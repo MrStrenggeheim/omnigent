@@ -86,6 +86,12 @@ vi.mock("@/hooks/useWorkbenchSelection", () => ({
 }));
 
 vi.mock("@/hooks/useWorkspaceChangedFiles", () => ({
+  useWorkspaceFileSearch: () => ({
+    data: undefined,
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+  }),
   useWorkspaceGitChanges: vi.fn(() => ({ data: undefined, isLoading: true })),
   useWorkspaceEnvironment: vi.fn(() => ({ data: undefined, isLoading: true })),
   useWorkspaceChangedFiles: vi.fn(() => ({ data: undefined, isLoading: true })),
@@ -323,7 +329,7 @@ const useSessionAgentMock = vi.mocked(useSessionAgent);
 const forkSessionMock = vi.mocked(forkSession);
 const getSessionSlimMock = vi.mocked(getSessionSlim);
 
-import { AppShell } from "./AppShell";
+import { LegacyAppShellHarness as AppShell } from "@/test/LegacyAppShellHarness";
 import { useTerminalFirst } from "./TerminalFirstContext";
 import { useForkDialog } from "./ForkDialogContext";
 import { useContextSearch } from "./ContextSearchContext";

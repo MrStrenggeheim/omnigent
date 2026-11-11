@@ -3,6 +3,9 @@
 On mobile, the header orders the left sidebar toggle, title, chat actions, Notifications and right sidebar toggle; opening either sidebar leaves its close toggle at the same viewport position with the narrow icon segment filled.
 Workspace drawers and the phone's full-screen file viewer share horizontally scrolling tabs, reuse existing panel contents and lifecycles, and reopen the last selected available workspace page in the current session.
 
+Default chat routes now use the application Open menu and docked views.
+Follow [Unified workspace](unified-workspace.md) for those entry points; older right-rail recipes below describe retained compatibility surfaces.
+
 ## Sub-features
 
 - `panel-menu`: the compact + menu lists tool panels and creates a manual shell when the selected workspace supports terminals.

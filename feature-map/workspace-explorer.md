@@ -3,6 +3,9 @@
 Users manage files in the active chat's workspace from the Files tree, filename search results and Changes list, using the same filesystem operations and permissions across desktop and mobile.
 Git supplies change status by default; explicit captured comparisons retain the originating chat.
 
+Default chat routes now use the application Open menu and docked views.
+Follow [Unified workspace](unified-workspace.md) for those entry points; older right-rail recipes below describe retained compatibility surfaces.
+
 ## Sub-features
 
 - `quiet-row-menu`: file size and status marker show at rest; the trailing menu replaces it on hover or keyboard focus without adding reserved button width; touch devices retain a tappable menu.

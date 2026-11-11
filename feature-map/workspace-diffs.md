@@ -2,6 +2,9 @@
 
 Files and Changes each remember an independent comparison with one-word labels (Git, Turn, Chat, Since and Revisions), scoped to the selected workspace and panel folder; an opened file remembers its originating panel comparison.
 
+Default chat routes now use the application Open menu and docked views.
+Follow [Unified workspace](unified-workspace.md) for those entry points; older right-rail recipes below describe retained compatibility surfaces.
+
 ## Sub-features
 
 - `working-tree`: Git (uncommitted changes) compares each discovered repository's HEAD with current disk, including staged, unstaged and untracked files from all writers.

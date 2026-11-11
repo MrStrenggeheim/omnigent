@@ -5,6 +5,9 @@ Both reuse the terminal viewer; [Activity](chat-activity.md) exposes recorded ch
 
 New manual shells start in the selected panel folder; browsing later leaves existing processes in their own working directories.
 
+Default chat routes now use the application Open menu and docked views.
+Follow [Unified workspace](unified-workspace.md) for those entry points; older right-rail recipes below describe retained compatibility surfaces.
+
 ## Sub-features
 
 - `close-reconciliation`: a failed close reports its actual cause; a lost acknowledgement counts as success only when the original workspace confirms the terminal exited or disappeared; stale polls cannot resurrect the closed tab.
