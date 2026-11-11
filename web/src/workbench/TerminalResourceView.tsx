@@ -108,7 +108,7 @@ function TerminalResourceContent({
     <WorkbenchWorkspaceProvider value={target ?? null}>
       <div className="flex h-full min-h-0 flex-col" data-context-search-region="native">
         {manual && (
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3 text-xs">
+          <div className="workspace-control-header flex items-center gap-2 border-b px-3 text-xs">
             <span className="min-w-0 flex-1 truncate text-muted-foreground">{label}</span>
             <span role="status">
               {stopping || stop.isPending

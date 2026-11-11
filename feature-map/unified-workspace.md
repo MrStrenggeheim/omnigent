@@ -35,6 +35,7 @@ Conversation and tool views share resizable, dockable panes while keeping their 
 
 Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md), build the checkout and use an isolated environment or the sealed browser-contract lane.
 
+- Compact composer, 36px headers, mobile Open views-only navigation and single safe-area inset: `tests/browser_ui/chat/test_workspace_selection_design.py::test_mobile_composer_compacts_workspace_and_keeps_only_open_views`.
 - Approved palette, root confirmation, Settings and Activity sources: `tests/browser_ui/chat/test_workspace_selection_design.py`.
 - Combined picker and controlled chat switching: `web/src/shell/WorkspaceSelectionDialog.test.tsx` and `web/src/components/composer/WorkspaceSwitchControl.test.tsx`.
 - Host/Chat Activity and temporary Settings navigation: `web/src/workbench/ActivityView.test.tsx` and `web/src/hooks/useSettingsNavigationVisibility.test.tsx`.
@@ -54,7 +55,10 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 ## Gotchas
 
 - Closing a view preserves its conversation, shell or schedule; explicit Stop/Delete retains its existing permission and confirmation checks.
-- Tab/container headers and view headers remain separate even with one tab; type icons live in tabs and close controls have accessible names without tooltips.
+- Workspace header rows are 36px tall.
+- Desktop tab/container headers and view headers remain separate even with one tab; mobile exposes only Open views selection.
+- Type icons live in desktop tabs, and close controls have accessible names without tooltips.
+- Narrow composer workspace labels collapse while the full location stays accessible; the mobile bottom safe area is reserved once.
 - Neutral hairlines separate viewports; pane focus uses tab fill, never an enclosing accent frame.
 - App bar is medium-light accent, sidebar/tab bars pale accent, focused tab medium-light, and view headers/content neutral; primary controls use white foregrounds.
 - Tab/disclosure hover feedback changes instantly, and selected entries retain their selected appearance.

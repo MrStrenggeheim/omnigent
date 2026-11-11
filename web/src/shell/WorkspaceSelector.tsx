@@ -25,12 +25,17 @@ export function WorkspaceSelector({
       {...props}
     >
       <MonitorIcon className="size-3.5 shrink-0" aria-hidden />
-      <span className="max-w-32 truncate">{hostLabel}</span>
-      <span aria-hidden className="text-muted-foreground">
-        /
+      <span
+        data-workspace-collapse-label=""
+        className="workspace-selector-details inline-flex min-w-0 items-center gap-1.5 group-data-[labels=collapsed]/composer-actions:hidden group-data-[labels=collapsed]/composer-workspace:hidden"
+      >
+        <span className="max-w-32 truncate">{hostLabel}</span>
+        <span aria-hidden className="text-muted-foreground">
+          /
+        </span>
+        <FolderIcon className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{path || "Choose path"}</span>
       </span>
-      <FolderIcon className="size-3.5 shrink-0" aria-hidden />
-      <span className="min-w-0 truncate">{path || "Choose path"}</span>
       <ChevronDownIcon className="size-3 shrink-0" aria-hidden />
     </button>
   );

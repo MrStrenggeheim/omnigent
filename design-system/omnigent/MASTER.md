@@ -23,8 +23,8 @@ The approved workspace specification governs behavior; later owner corrections g
 | Selected tab             | Unfocused selection uses the content surface; focused selection uses `--workspace-selected` |
 | Pane focus               | Focused-tab fill only; no perimeter or top accent line                                      |
 | Keyboard focus           | Existing `--ring` treatment; preserve visible focus                                         |
-| Header geometry          | Existing 48px per header row                                                                |
-| Header action            | `HeaderActionButton`, 24px glyph surface, 44px mobile target                                |
+| Header geometry          | 36px per workspace header row                                                                |
+| Header action            | `HeaderActionButton`, 24px glyph surface, 32px workspace header target                                |
 | Sidebar toggle           | `SidebarToggle` with `SidebarPanelIcon`, filled segment when open                           |
 | Search modes             | Existing `SegmentedControl`, consistent scope/category sizing                               |
 | Switches                 | Shared `Switch`; off, on and disabled must remain distinguishable                           |
@@ -65,7 +65,10 @@ Docked content is excluded from the global dark-card glass decoration; code, dif
 ## Composition
 
 Each tab contains its label and its own close control.
-Keep tab/container headers and view headers as separate rows for every pane, including single-tab panes.
+Desktop tab/container headers and view headers remain separate rows, including single-tab panes.
+On mobile, Open views replaces the tab strip; the selected view begins directly below it.
+Narrow composer workspace controls collapse to an icon and chevron while retaining their accessible full location.
+The shell owns the device bottom safe area once; the mobile composer adds only an 8px content gutter.
 Do not merge or split their overflow controls; the owner explicitly deferred that redesign.
 Keep conversation breadcrumbs in the view header.
 Center empty guidance within the entire available content area.

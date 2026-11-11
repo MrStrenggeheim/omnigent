@@ -1,3 +1,8 @@
+.unified-workbench {
+  --workbench-header-height: 36px;
+  padding-bottom: var(--omnigent-safe-bottom, 0px);
+}
+
 .unified-workbench .conversations-sidebar {
   border-right: 1px solid var(--border);
 }
@@ -5,7 +10,7 @@
   z-index: 20;
 }
 .unified-workbench .conversations-sidebar {
-  top: 48px;
+  top: var(--workbench-header-height);
 }
 .unified-workbench .workbench-conversation .chat-conversation-content {
   padding-top: 1rem;
@@ -40,7 +45,7 @@ html[data-electron-mac]
   display: flex;
 }
 html[data-electron-mac] .unified-workbench .sidebar-header-row {
-  height: 48px;
+  height: var(--workbench-header-height);
   padding: 0 12px;
 }
 .unified-workbench:is([data-ios-native], [data-android-native]) {
@@ -48,7 +53,7 @@ html[data-electron-mac] .unified-workbench .sidebar-header-row {
   padding-bottom: var(--omnigent-safe-bottom, 0px);
 }
 .unified-workbench:is([data-ios-native], [data-android-native]) .conversations-sidebar {
-  top: calc(48px + var(--omnigent-safe-top, 0px));
+  top: calc(var(--workbench-header-height) + var(--omnigent-safe-top, 0px));
 }
 
 /* All docked view roots share one content surface. */
@@ -70,6 +75,35 @@ html[data-electron-mac] .unified-workbench .sidebar-header-row {
 
 .unified-workbench .workbench-app-bar {
   background: var(--workspace-appbar);
+  height: var(--workbench-header-height);
+  min-height: var(--workbench-header-height);
+}
+
+.unified-workbench .sidebar-header-row {
+  height: var(--workbench-header-height);
+}
+
+.unified-workbench :is(.workbench-app-bar, .workspace-control-header) [data-header-action-button] {
+  width: 32px;
+  height: 32px;
+}
+
+.unified-workbench
+  .workbench-app-bar
+  :is([aria-label="Open view"], [aria-label="Search or run a command"]) {
+  height: 28px;
+  min-height: 28px;
+}
+
+.unified-workbench .workspace-control-header [aria-label^="Select workspace:"] {
+  min-height: 28px;
+}
+
+@media (max-width: 767.98px) {
+  /* The shell owns the safe area; the composer only needs its content gutter. */
+  .unified-workbench.app-shell .chat-composer-form {
+    padding-bottom: 8px;
+  }
 }
 .unified-workbench .conversations-sidebar {
   --sidebar: var(--workspace-chrome);

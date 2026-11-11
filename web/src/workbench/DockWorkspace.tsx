@@ -265,7 +265,7 @@ function DockSurface(props: DockWorkspaceProps) {
                 pane={pane}
                 layout={layout}
                 style={rectStyle(compact ? fullRect : rect)}
-                hidden={compact && !focused}
+                hidden={compact}
                 focused={focused}
                 dragging={dragging}
                 pinnedViewIds={pinnedViewIds}
@@ -292,7 +292,7 @@ function DockSurface(props: DockWorkspaceProps) {
                   view={view}
                   visible={visible}
                   focused={visible && focused}
-                  style={rectStyle(compact ? fullRect : rect, true)}
+                  style={rectStyle(compact ? fullRect : rect, !compact)}
                   onFocus={() => {
                     if (pane) focus(pane.id);
                   }}

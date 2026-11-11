@@ -218,7 +218,7 @@ function ConversationViewContent({
       }
     : null;
   const header = (
-    <div className="flex h-12 min-h-12 shrink-0 items-center gap-1.5 border-b px-3">
+    <div className="workspace-control-header flex items-center gap-1.5 border-b px-3">
       <nav
         aria-label="Conversation ancestry"
         className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-sm"

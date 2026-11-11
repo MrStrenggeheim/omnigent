@@ -171,7 +171,12 @@ describe("DockWorkspace resource mounts", () => {
     await user.click(screen.getByRole("option", { name: "b" }));
     expect(screen.getByTestId("c")).toHaveAttribute("data-visible", "false");
     expect(screen.getByTestId("b")).toHaveAttribute("data-visible", "true");
-    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "b", hidden: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    for (const list of screen.getAllByRole("tablist", { hidden: true }))
+      expect(list).not.toBeVisible();
     expect(document.querySelectorAll('.dock-pane[data-focused="true"]')).toHaveLength(1);
     expect(screen.queryByRole("separator", { name: "Resize panes" })).not.toBeInTheDocument();
   });

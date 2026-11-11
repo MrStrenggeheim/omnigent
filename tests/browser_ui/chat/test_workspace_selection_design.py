@@ -32,6 +32,83 @@ def _close_navigation(page: Page) -> None:
     expect(page.get_by_role("button", name="Open navigation", exact=True)).to_be_visible()
 
 
+def test_mobile_composer_compacts_workspace_and_keeps_only_open_views(
+    page: Page,
+    workspace_journey: WorkspaceJourney,
+    browser_contract: BrowserContract,
+    output_path: str,
+    browser_errors: list[str],
+) -> None:
+    host = workspace_journey.chats[0].host_id
+    for suffix in ("", "/workspace"):
+        browser_contract.json(f"/v1/hosts/{host}/filesystem{suffix}", list_payload([]))
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(workspace_journey.chats[0].url)
+    chat = _view(page, "Chat A")
+    composer = chat.get_by_label("Message the agent")
+    expect(composer).to_be_visible()
+    composer.fill("Mobile draft stays here")
+    selector = chat.get_by_test_id("composer-workspace-dir")
+    expect(selector).to_be_visible()
+    expect(selector.locator(".workspace-selector-details")).to_be_hidden()
+    expect(selector).to_have_attribute("aria-label", "Change workspace: /workspace")
+    expect(page.get_by_role("combobox", name="Open views", exact=True)).to_be_visible()
+    expect(page.get_by_role("tablist", name="Views in main")).to_be_hidden()
+
+    geometry = chat.evaluate("""element => {
+      const form = element.querySelector('.chat-composer-form');
+      const card = form.querySelector('[data-composer-card]');
+      const appbar = document.querySelector('.workbench-app-bar');
+      const navigation = document.querySelector('.dock-mobile-navigation');
+      const header = element.querySelector('.workspace-control-header');
+      return {
+        appbar: appbar.getBoundingClientRect().height,
+        navigation: navigation.getBoundingClientRect().height,
+        viewHeader: header.getBoundingClientRect().height,
+        gutter: form.getBoundingClientRect().bottom - card.getBoundingClientRect().bottom,
+        belowForm: element.getBoundingClientRect().bottom - form.getBoundingClientRect().bottom,
+      };
+    }""")
+    assert geometry == {
+        "appbar": 36,
+        "navigation": 36,
+        "viewHeader": 36,
+        "gutter": 8,
+        "belowForm": 0,
+    }, geometry
+    _capture(page, output_path, "mobile-compact-composer")
+
+    selector.click()
+    expect(page.get_by_role("dialog", name="Select workspace", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Cancel", exact=True).click()
+    expect(composer).to_have_value("Mobile draft stays here")
+
+    page.evaluate("""() => {
+      document.documentElement.style.setProperty('--omnigent-safe-bottom', '20px');
+      document.querySelector('.unified-workbench').dataset.iosNative = 'true';
+    }""")
+    assert (
+        page.locator(".dock-workspace").evaluate(
+            "el => window.innerHeight - el.getBoundingClientRect().bottom"
+        )
+        == 20
+    )
+    assert (
+        chat.locator(".chat-composer-form").evaluate("el => getComputedStyle(el).paddingBottom")
+        == "8px"
+    )
+
+    page.evaluate("""() => {
+      document.documentElement.style.removeProperty('--omnigent-safe-bottom');
+      delete document.querySelector('.unified-workbench').dataset.iosNative;
+    }""")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    expect(page.get_by_role("tablist", name="Views in main")).to_be_visible()
+    expect(page.get_by_role("combobox", name="Open views", exact=True)).to_have_count(0)
+    expect(composer).to_have_value("Mobile draft stays here")
+    assert browser_errors == []
+
+
 def _assert_picker(page: Page, host_id: str, root: str) -> Locator:
     dialog = page.get_by_role("dialog", name="Select workspace", exact=True)
     expect(dialog).to_be_visible()

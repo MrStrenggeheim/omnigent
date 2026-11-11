@@ -50,7 +50,7 @@ export function WorkbenchAppBar({
 }) {
   return (
     <header
-      className="workbench-app-bar flex h-12 min-h-12 shrink-0 items-center gap-2 border-b bg-sidebar px-2"
+      className="workbench-app-bar flex h-9 min-h-9 shrink-0 items-center gap-2 border-b bg-sidebar px-2"
       aria-label="Application"
     >
       <SidebarToggle

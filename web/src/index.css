@@ -606,11 +606,18 @@
 /* The desktop workspace rail stays mounted through its exit so its content
    can fade and slide as one stable sibling of the session surface. */
 .workspace-control-header {
-  height: 48px;
-  min-height: 48px;
+  height: var(--workbench-header-height, 48px);
+  min-height: var(--workbench-header-height, 48px);
   flex-shrink: 0;
   padding-block: 0;
   overflow-y: clip;
+}
+
+/* Workspace labels follow the same narrow-composer behavior as other controls. */
+@container composer-actions (max-width: 28rem) {
+  .workspace-selector-details {
+    display: none;
+  }
 }
 
 .workspace-panel-motion {

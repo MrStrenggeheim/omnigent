@@ -1,5 +1,5 @@
 .dock-workspace {
-  --dock-header-height: 48px;
+  --dock-header-height: var(--workbench-header-height, 36px);
   position: relative;
   display: flex;
   flex: 1;
@@ -160,7 +160,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 48px;
+  min-height: var(--workbench-header-height, 36px);
   padding: 0 8px;
   border-bottom: 1px solid var(--border);
 }
@@ -168,7 +168,7 @@
 .dock-mobile-navigation [role="combobox"] {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
+  min-height: 28px;
   color: inherit;
   background: var(--background);
 }
