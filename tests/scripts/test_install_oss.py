@@ -33,6 +33,52 @@ INSTALLER = Path(__file__).resolve().parents[2] / "scripts" / "install_oss.sh"
 # detection, which would otherwise hide the launcher from subprocess.
 SH = shutil.which("sh") or "/bin/sh"
 
+
+@pytest.mark.parametrize("download_fails", [False, True])
+def test_fork_entry_point_reuses_installer_and_cleans_download(
+    tmp_path: Path, download_fails: bool
+) -> None:
+    """The pipe entry point forwards the fork ref and never runs a failed download."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    downloads = tmp_path / "download space"
+    downloads.mkdir()
+    args_file = tmp_path / "args"
+    upstream = tmp_path / "upstream.sh"
+    upstream.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_ARGS"\n')
+    curl = bin_dir / "curl"
+    curl.write_text(
+        '#!/bin/sh\n[ "$TEST_DOWNLOAD_FAILS" = 1 ] && exit 22\ncp "$TEST_UPSTREAM" "$4"\n'
+    )
+    curl.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+        "TMPDIR": str(downloads),
+        "TEST_UPSTREAM": str(upstream),
+        "TEST_ARGS": str(args_file),
+        "TEST_DOWNLOAD_FAILS": "1" if download_fails else "0",
+    }
+    result = subprocess.run(
+        [SH, str(INSTALLER.with_name("install.sh")), "--non-interactive"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == (22 if download_fails else 0), result.stderr
+    assert list(downloads.iterdir()) == []
+    if download_fails:
+        assert not args_file.exists()
+    else:
+        assert args_file.read_text().splitlines() == [
+            "--repo",
+            "https://github.com/MrStrenggeheim/omnigent.git@custom",
+            "--no-databricks",
+            "--non-interactive",
+        ]
+
+
 # Agent credentials must not leak into the script under test (CLAUDE.md).
 _STRIP_ENV = ("DATABRICKS_TOKEN", "ANTHROPIC_API_KEY", "CODEX", "CLAUDE_CODE")
 
@@ -357,13 +403,23 @@ def test_install_target_selects_extras(lib: Path, args: str, target: str) -> Non
         """,
     )
     assert r.returncode == 0, r.stderr
-    assert [line[4:] for line in r.stdout.splitlines() if line.startswith("arg=")] == [
+    expected = [
         "tool",
         "install",
         "--force",
         "-q",
         "--python",
         "3.12",
+    ]
+    if "--repo" in args:
+        expected += [
+            "--with",
+            "omnigent-client @ git+https://github.com/o/r#subdirectory=sdks/python-client",
+            "--with",
+            "omnigent-ui-sdk @ git+https://github.com/o/r#subdirectory=sdks/ui",
+        ]
+    assert [line[4:] for line in r.stdout.splitlines() if line.startswith("arg=")] == [
+        *expected,
         target,
     ]
 

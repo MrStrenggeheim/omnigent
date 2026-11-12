@@ -7,7 +7,8 @@ Upstream authorship, LICENSE and NOTICE are retained.
 ## Run it
 
 Follow the [root quickstart](../README.md#quick-start) for a local browser installation or the existing Docker server stack.
-The local recipe installs the backend and both SDKs from this checkout with `uv.lock`, then builds the frontend with `pnpm-lock.yaml`.
+The default one-line installer reuses the existing OSS installer, builds the frontend and installs the backend and SDKs from our `custom` Git ref.
+The expandable manual recipe instead uses a local checkout and `uv.lock`, then builds the frontend with `pnpm-lock.yaml`.
 Native harnesses need their own installation/login, `tmux` and, on Linux, `bubblewrap`.
 The browser/server recipe does not need Rust, Ruby or iOS tooling.
 See [contributor setup](../CONTRIBUTING.md#development-setup) when changing code.
@@ -27,7 +28,8 @@ Local user data and credentials live under `~/.omnigent` by default, independent
 Keep this directory and Docker's generated `.env` private.
 Docker stores database and artifact data in its existing named volumes; see the [deployment guide](../deploy/docker/README.md).
 
-For source updates, let running work finish, stop the local instance with `omnigent stop`, and run `git pull --ff-only` on `custom`.
+For an installer-based update, let running work finish, stop the local instance with `omnigent stop`, and rerun the installer.
+For checkout-based updates, stop it and run `git pull --ff-only` on `custom`.
 Repeat the quickstart's dependency-install and frontend-build commands, then start it again.
 Upstream PyPI, Homebrew and desktop downloads do not contain this fork's changes.
 

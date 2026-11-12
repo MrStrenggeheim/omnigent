@@ -68,6 +68,22 @@ Omnigent lets you:
 
 ### 1. Run this fork locally
 
+Install on Linux, macOS or WSL2 with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MrStrenggeheim/omnigent/custom/scripts/install.sh | sh
+```
+
+The installer uses our `custom` branch, builds the web UI and installs the matching backend and SDKs.
+It reuses Omnigent's prerequisite checks, offers missing supported tools and leaves optional Databricks integration out.
+A source build needs Node.js **22.13+** and pnpm (or Corepack) available; install your chosen agent harness and sign in separately.
+
+Then run `omnigent start --server ""` to open the local web UI.
+If the installer added the command directory to PATH, open a new terminal first.
+
+<details>
+<summary>Manual source installation and development checkout</summary>
+
 Use Linux, macOS or WSL2 (clone into the Linux filesystem).
 Install Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), Node.js **22.13+** and **pnpm 11.15.1** first.
 For native agent terminals, also install `tmux` and, on Linux, `bubblewrap`.
@@ -91,6 +107,8 @@ The basic recipe needs neither Rust nor Ruby/iOS tools.
 From the activated environment, use `omnigent server status` to check the server or `omnigent stop` to stop it after running work finishes.
 In another terminal, activate `.venv` again or prefix commands with `uv run --no-sync` from the checkout.
 User data stays in `~/.omnigent`, outside Git.
+
+</details>
 
 #### Run the server with Docker
 

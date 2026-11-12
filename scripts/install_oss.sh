@@ -526,9 +526,15 @@ install_omnigent() {
     target="${PACKAGE_NAME}${extras_suffix}"
     step "Installing Omnigent${extras_suffix:+ $extras_suffix} (Python $PYTHON_VERSION)"
   fi
-  # --force so re-running upgrades instead of no-op'ing; -q hides uv's
-  # "Installed N executables" summary (the package also ships an `omni` alias).
-  run_with_spinner "uv tool install" uv tool install --force -q --python "$PYTHON_VERSION" "$target"
+  # Source installs must pair the backend with the SDKs from the same ref;
+  # uv tool install does not apply the checkout's tool.uv.sources mapping.
+  set -- --force -q --python "$PYTHON_VERSION"
+  if building_from_source; then
+    set -- "$@" \
+      --with "omnigent-client @ ${INSTALL_URL}#subdirectory=sdks/python-client" \
+      --with "omnigent-ui-sdk @ ${INSTALL_URL}#subdirectory=sdks/ui"
+  fi
+  run_with_spinner "uv tool install" uv tool install "$@" "$target"
 }
 
 install_databricks_cli() (
