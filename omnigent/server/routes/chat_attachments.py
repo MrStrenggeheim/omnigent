@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import mimetypes
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -18,6 +19,7 @@ from omnigent.server.routes._auth_helpers import require_access, require_user
 from omnigent.server.workbench_resources import HostWorkspaceResources, relative_path
 from omnigent.server.workbench_workspace_service import WorkbenchWorkspaceService
 from omnigent.stores.artifact_store import ArtifactStore
+from omnigent.stores.workbench_workspace_store import WorkbenchWorkspace
 
 
 def create_chat_attachments_router(
@@ -26,8 +28,9 @@ def create_chat_attachments_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/sessions/{session_id}/attachments")
 
-    @router.get("/references/{item_id}")
-    async def reference(request: Request, session_id: str, item_id: str, path: str):
+    async def reference_scope(
+        request: Request, session_id: str, item_id: str
+    ) -> tuple[str | None, dict[str, Any]]:
         user = require_user(request, service.auth_provider)
         await require_access(
             user, session_id, LEVEL_OWNER, service.permission_store, service.conversation_store
@@ -40,6 +43,30 @@ def create_chat_attachments_router(
             raise HTTPException(
                 409, "This message has no captured workspace; attach the file explicitly"
             )
+        return user, scope
+
+    async def resolve_reference_location(
+        request: Request, session_id: str, scope: dict[str, Any], path: str
+    ) -> tuple[WorkbenchWorkspace, str]:
+        workspace = await service.resolve_session(request, session_id, captured=scope)
+        if scope.get("generation") and workspace.generation != scope["generation"]:
+            raise HTTPException(409, "The original workspace generation is no longer available")
+        path = relative_path(workspace, path)
+        if not path:
+            raise HTTPException(400, "A file path is required")
+        return workspace, path
+
+    @router.get("/references/{item_id}/location")
+    async def reference_location(
+        request: Request, session_id: str, item_id: str, path: str
+    ) -> dict[str, Any]:
+        _, scope = await reference_scope(request, session_id, item_id)
+        workspace, path = await resolve_reference_location(request, session_id, scope, path)
+        return {"workspace": await service.metadata(workspace), "path": path}
+
+    @router.get("/references/{item_id}")
+    async def reference(request: Request, session_id: str, item_id: str, path: str):
+        user, scope = await reference_scope(request, session_id, item_id)
         # Reference snapshots stay private to the reader; they must not turn a
         # private workspace path into a file shared with every chat participant.
         snapshot_id = (
@@ -70,12 +97,7 @@ def create_chat_attachments_router(
                 cached["mime"],
                 base64.b64decode(cached["content"], validate=True),
             )
-        workspace = await service.resolve_session(request, session_id, captured=scope)
-        if scope.get("generation") and workspace.generation != scope["generation"]:
-            raise HTTPException(409, "The original workspace generation is no longer available")
-        path = relative_path(workspace, path)
-        if not path:
-            raise HTTPException(400, "A file path is required")
+        workspace, path = await resolve_reference_location(request, session_id, scope, path)
         if workspace.target_kind == "runneronly":
             # Keep the runner's original identity; never fall back to the host.
             from starlette.requests import Request as StarletteRequest
