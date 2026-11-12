@@ -5,6 +5,9 @@ export const SIDEBAR_ROW =
 /** Shared hierarchy for the conversation list title and its section headings. */
 export const SIDEBAR_HEADING = "text-base font-bold";
 
+/** A root starts at the label edge; only descendants add an indentation step. */
+export const SIDEBAR_TREE_INDENT = "var(--sidebar-tree-indent, 10px)";
+
 // Match the Settings sidebar's ghost-button hover treatment across every home
 // sidebar row.
 export const SIDEBAR_HOVER_HIGHLIGHT =

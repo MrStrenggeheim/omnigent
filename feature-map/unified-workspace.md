@@ -5,25 +5,27 @@ Conversation and tool views share resizable, dockable panes while keeping their 
 ## Sub-features
 
 - `panes`: split, resize, move and reorder views without remounting their editors or terminal attachments.
-- `layouts`: shared arrangements, explicit chat saves and global view pins persist per account, server and browser.
+- `layouts`: each chat automatically owns its arrangement; explicit side-open/drop adds a chat to the current arrangement, with global view pins preserved.
 - `resources`: each Explorer, Search, Changes and Preview owns its machine, folder and presentation state.
 - `hierarchy`: durable branches preserve their captured fork boundary independently from delegated-agent parentage.
 - `communication`: structured attribution distinguishes agent messages from human input and separates acceptance from consumption.
 - `references`: whole chats, completed answers, selected messages and quotes enter drafts with stable source snapshots.
 - `activity`: retained shell history and the dedicated Activity view expose actual activity; the composer dock is disabled.
 - `navigation`: global commands, contextual find, explicit conversation sources and mobile view switching retain existing workflows.
-- `appearance`: shared content surfaces, violet tab focus, consistent switches and list density follow `design-system/omnigent/MASTER.md`.
+- `appearance`: shared content surfaces, primary bottom tab strips, consistent switches and list density follow `design-system/omnigent/MASTER.md`.
 - `migration`: existing conversation, file and shell references remain accessible without starting or stopping resources.
 
 ## How to get to it (user POV)
 
 - Use + Open in the application bar to add Explorer, Changes, Search, a manual terminal, Agent CLI, Activity or Automations.
-- Drag a tab to a pane edge to split; use its own close button to close it, or the pane menu to move/pin views.
-- Use Layout → Save layout for this chat; pin an Explorer in another chat and return to see both arrangements.
-- Expand conversations with children to revisit subchats; hover a row for actions, and use its spinner to identify running work.
+- Drag a tab to a pane edge to split; use its own close button to close it, use the tab pin before its close control to keep a view across chats.
+- Click a chat to restore its layout; choose Open to side or drag a sidebar chat into a tab group or split edge to add it to the current layout.
+- The app bar has no Layout control; a new chat starts in its own arrangement.
+- Expand conversations with children to revisit subchats; use the trailing count/chevron to expand subchats; draft, unread and running markers remain on the right, beside hover actions.
 - Use New subchat in the composer Add menu or `/side` to open a durable child with an unsent draft.
-- Type `@` in a composer, or select text and choose Use in chat…, to inspect and insert captured context.
-- Use the application search field or Ctrl/Cmd+K for commands; Ctrl/Cmd+F searches the last interacted region.
+- Type `@` in a composer, or select text and choose Send to…, to inspect and insert captured context.
+- Use the application search field or Ctrl/Cmd+K for commands; it opens below the trigger without a blurred backdrop.
+- The sidebar Search entry is hidden; contextual Ctrl/Cmd+F still searches the last interacted region.
 - Open Activity and choose a Host to reattach independent shells or inspect retained output; choose a Chat for its agents, messages and shell use.
 - Use the grouped Host/Chat source picker in Activity or a Preview's Comments control to choose its owner explicitly.
 - Use the combined workspace selector in the composer or resource-view toolbar; Host and Path are both directly reachable in its modal.
@@ -55,12 +57,12 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 ## Gotchas
 
 - Closing a view preserves its conversation, shell or schedule; explicit Stop/Delete retains its existing permission and confirmation checks.
-- Workspace header rows are 36px tall, or 32px in Compact appearance; sidebar padding follows the same density setting.
+- Workspace headers are 48px Comfortable or 36px Compact; sidebar padding follows the same density setting.
 - Desktop tab/container headers and view headers remain separate even with one tab; mobile reuses scrolling tabs across all panes.
 - Type icons live in desktop tabs, and close controls have accessible names without tooltips.
 - Narrow composer workspace labels collapse while the full location stays accessible; the mobile bottom safe area is reserved once.
-- Neutral hairlines separate viewports; pane focus uses tab fill, never an enclosing accent frame.
-- App bar is medium-light accent, sidebar/tab bars pale accent, focused tab medium-light, and view headers/content neutral; primary controls use white foregrounds.
+- Neutral hairlines separate equal-colored viewports; distinct surface colors provide their own boundary.
+- App bar is medium-light accent, sidebar pale accent, tabs/view headers/content neutral; active tabs have a primary bottom strip and primary controls use white foregrounds.
 - Tab/disclosure hover feedback changes instantly, and selected entries retain their selected appearance.
 - Shell inventory is integrated into Activity; legacy saved inventory views restore there without stopping their processes.
 - Chat workspace changes retain execution confirmation/recovery; browsing-view root changes only retarget that view.
@@ -72,3 +74,17 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Browser contracts and scripted providers do not prove live-provider behavior or physical mobile-wrapper support.
 - Canvas and saved conversation grids retain their existing routes; they are not silently converted into new layouts.
 - Their legacy shell unit coverage remains in `web/src/shell/AppShell.test.tsx`; default docked routes use the browser journeys above.
+
+## Approved iteration acceptance
+
+- Select chat text: Reply has one icon; Ask subchat… creates a durable child with an unsent quote; Send to… preserves the chosen chat's draft.
+- In an existing or new composer, microphone follows Add; control labels share typography and foreground, with effort secondary.
+- The workspace control reads computer icon and Host:/path; narrow composers still collapse its text.
+- Open an inline attachment into a preview tab, download its original, reload, and Reveal in Explorer; captured content and source workspace remain independent of current chat selection.
+- Change Appearance density on desktop and mobile; headers and sidebar spacing update consistently, and scrollbar treatment remains slim.
+- Views use the content surface and primary active-tab bottom strip; colored surface boundaries have no redundant border.
+- The mobile bottom gesture area blends into the content surface without a pane-bottom divider.
+- Chat/Terminal uses the existing segmented switch in the chat header, immediately before the three-dot actions.
+
+Verification: `tests/browser_ui/chat/test_workspace_iteration.py`, the existing workspace selection/design and unified workspace journeys, and the owning component suites.
+Layout miniatures and Inbox consolidation remain deferred.

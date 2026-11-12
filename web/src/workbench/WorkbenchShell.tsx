@@ -6,6 +6,11 @@ import { createWorkbenchResourceShortcuts } from "./resourceShortcuts";
 import { useAcceptedConversationRoute } from "./useAcceptedConversationRoute";
 import { focusedResourceTarget } from "./resourceTarget";
 import { CapturedFileActions } from "./CapturedFileActions";
+import {
+  AttachmentPreviewContext,
+  AttachmentPreviewView,
+  type AttachmentPreviewRequest,
+} from "@/components/ChatAttachment";
 import { conversationPlacement } from "./viewPlacement";
 import { joinBrowseLocation } from "@/lib/workspacePaths";
 import { ConversationSourcePicker } from "./ConversationSourcePicker";
@@ -82,9 +87,8 @@ import { useDockLayout } from "./useDockLayout";
 import {
   sameDockResource,
   createDockLayout,
-  addDockView,
-  dockPaneForView,
   type DockView,
+  type DockPlacement,
 } from "./dockLayout";
 import { OpenLocationDialog } from "./OpenLocationDialog";
 import "./workbenchShell.css";
@@ -265,6 +269,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
   });
   const dockRef = useRef(dock);
   dockRef.current = dock;
+
   const focusedPane = dock.layout.panes.find((pane) => pane.id === dock.layout.focusedPaneId);
   const focusedView = dock.layout.views.find((view) => view.id === focusedPane?.selectedViewId);
   const focusedConversationId =
@@ -310,16 +315,22 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
   );
   const titlesRef = useRef(titles);
   titlesRef.current = titles;
-  const lastConversationRef = useRef(lastConversation);
-  lastConversationRef.current = lastConversation;
   useEffect(() => {
-    for (const view of dockRef.current.retainedViews) {
+    for (const view of dock.retainedViews) {
       if (view.kind !== "conversation" || typeof view.resource.conversationId !== "string")
         continue;
       const title = titles.get(view.resource.conversationId);
-      if (title && title !== view.title) void dockRef.current.updateView(view.id, { title });
+      if (title && title !== view.title)
+        void dockRef.current
+          .updateView(view.id, { title })
+          .catch((error) =>
+            toast.error(error instanceof Error ? error.message : "Could not update chat title"),
+          );
     }
-  }, [titles]);
+  }, [dock.retainedViews, titles]);
+  const lastConversationRef = useRef(lastConversation);
+  lastConversationRef.current = lastConversation;
+
   useEffect(() => {
     for (const view of dock.retainedViews) {
       if (view.kind === "shells") {
@@ -361,6 +372,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
   }, []);
   useEffect(() => {
     if (!migrationSource) return;
+    const migrationScope = dockRef.current.scopeKey;
     let cancelled = false;
     const migrate = async () => {
       let workspace: WorkbenchWorkspace | undefined;
@@ -370,7 +382,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
         if (!(error instanceof ApiError && [403, 404, 405, 501].includes(error.status)))
           throw error;
       }
-      if (cancelled) return;
+      if (cancelled || dockRef.current.scopeKey !== migrationScope) return;
       const sessionState = readSessionWorkspaceState(migrationSource);
       const workspaceState = workspace
         ? readSessionWorkspaceState(`workbench:${workspace.id}`)
@@ -382,15 +394,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
         workspaceState,
       );
       if (!migrated.length) return;
-      dockRef.current.setLayout((layout) => {
-        let next = layout;
-        let paneId: string | undefined;
-        for (const view of migrated) {
-          next = addDockView(next, view, paneId ? { paneId } : { edge: "right" });
-          paneId = dockPaneForView(next, view.id)?.id;
-        }
-        return { ...next, focusedPaneId: layout.focusedPaneId ?? next.focusedPaneId };
-      });
+      dockRef.current.restoreConversationViews(migrationSource, migrated, { edge: "right" });
     };
     void migrate().catch((error) => {
       if (!cancelled)
@@ -412,10 +416,26 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
           edge: "right",
         });
         setLastConversation(id);
-        if (conversationId !== id) skipLayoutForRoute.current = id;
-        navigate(
-          `/c/${encodeURIComponent(id)}${options.messageId ? `?message=${encodeURIComponent(options.messageId)}` : ""}`,
-        );
+        return;
+      }
+      if (id === conversationId && !options?.messageId) {
+        const capturedScopeKey = current.scopeKey;
+        void current
+          .navigateConversation(id)
+          .then((allowed) => {
+            if (!allowed) return;
+            const latest = dockRef.current;
+            if (latest.scopeKey !== capturedScopeKey || latest.activeConversationId !== id) return;
+            const view = conversationView(id, titlesRef.current.get(id));
+            if (latest.layout.views.some((item) => item.id === view.id)) latest.focusView(view.id);
+            else latest.addView(view, conversationPlacement(latest.layout, latest.pinnedViewIds));
+            setLastConversation(id);
+          })
+          .catch((onRouteError) =>
+            toast.error(
+              onRouteError instanceof Error ? onRouteError.message : "Could not restore layout",
+            ),
+          );
         return;
       }
       navigate(
@@ -424,12 +444,29 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
     },
     [navigate, titles, conversationId],
   );
+  const openConversationAt = useCallback((id: string, placement: DockPlacement) => {
+    dockRef.current.addView(conversationView(id, titlesRef.current.get(id)), placement);
+    setLastConversation(id);
+    if (isMobileViewport()) setSidebarOpen(false);
+  }, []);
   const acceptConversation = useCallback(
     (id: string) => dockRef.current.navigateConversation(id),
     [],
   );
+  const restoredLayoutScope = useRef<string | null>(null);
   const onConversationAccepted = useCallback((id: string) => {
     const latest = dockRef.current;
+    if (restoredLayoutScope.current !== latest.scopeKey) {
+      restoredLayoutScope.current = latest.scopeKey;
+      if (
+        latest.activeConversationId === id &&
+        latest.hasChatLayout &&
+        latest.layout.views.length
+      ) {
+        setLastConversation(id);
+        return;
+      }
+    }
     const existing = latest.layout.views.find((view) => view.id === `conversation:${id}`);
     if (existing) latest.focusView(existing.id);
     else
@@ -850,6 +887,14 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
           {resource.unavailableReason} The linked location has been retained.
         </p>
       );
+    else if (
+      view.kind === "attachment-preview" &&
+      resource.request &&
+      typeof resource.request === "object" &&
+      "sessionId" in resource.request &&
+      typeof resource.request.sessionId === "string"
+    )
+      content = <AttachmentPreviewView request={resource.request as AttachmentPreviewRequest} />;
     else if (view.kind === "conversation" && sessionId)
       content = (
         <ConversationView
@@ -864,6 +909,11 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
     )
       content = (
         <ResourceView
+          revealRequest={
+            typeof resource.revealPath === "string" && typeof resource.revealToken === "string"
+              ? { path: resource.revealPath, token: resource.revealToken }
+              : undefined
+          }
           viewId={view.id}
           kind={view.kind as "files" | "changes" | "preview" | "search" | "pr"}
           workspace={workspace}
@@ -1026,6 +1076,91 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
     () => ({ openConversation, createSubchat: createQuoteSubchat }),
     [openConversation],
   );
+  const attachmentNavigation = useMemo(
+    () => ({
+      revealAttachment: async (request: AttachmentPreviewRequest) => {
+        if (!request.itemId || !request.reference) return;
+        const capturedScopeKey = dockRef.current.scopeKey;
+        const layoutOwner = dockRef.current.activeConversationId;
+        try {
+          const response = await authenticatedFetch(
+            `/v1/sessions/${encodeURIComponent(request.sessionId)}/attachments/references/${encodeURIComponent(request.itemId)}/location?${new URLSearchParams({ path: request.reference })}`,
+          );
+          if (!response.ok) throw await apiErrorFromResponse(response);
+          const target = (await response.json()) as { workspace: WorkbenchWorkspace; path: string };
+          if (
+            !target.workspace?.id ||
+            typeof target.workspace.root !== "string" ||
+            typeof target.path !== "string"
+          )
+            throw new Error("The original file location is unavailable");
+          const current = dockRef.current;
+          if (current.scopeKey !== capturedScopeKey || current.activeConversationId !== layoutOwner)
+            return;
+          const existing = current.layout.views.find(
+            (view) => view.kind === "files" && viewWorkspace(view)?.id === target.workspace.id,
+          );
+          const reveal = { revealPath: target.path, revealToken: randomUUID() };
+          if (existing) {
+            const accepted = await current.updateView(existing.id, {
+              resource: { ...existing.resource, ...reveal },
+            });
+            if (accepted) dockRef.current.focusView(existing.id);
+          } else {
+            const id = randomUUID();
+            setPanelFolder(panelFolderKey(target.workspace.id, id)!, target.workspace.root);
+            current.addView(
+              {
+                id,
+                kind: "files",
+                title: "Explorer",
+                resource: {
+                  workspace: target.workspace,
+                  conversationId: request.sessionId,
+                  ...reveal,
+                },
+              },
+              { paneId: current.layout.focusedPaneId ?? undefined, edge: "right" },
+            );
+          }
+          ensureVisible();
+        } catch (error) {
+          toast.error("Could not reveal file", {
+            description: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      openAttachment: (request: AttachmentPreviewRequest) => {
+        const current = dockRef.current;
+        const identity = JSON.stringify([
+          request.sessionId,
+          request.itemId,
+          request.reference,
+          request.attachment,
+        ]);
+        const existing = current.layout.views.find(
+          (view) => view.kind === "attachment-preview" && view.resource.identity === identity,
+        );
+        if (existing) current.focusView(existing.id);
+        else
+          current.addView(
+            {
+              id: randomUUID(),
+              kind: "attachment-preview",
+              title:
+                request.filename ||
+                request.attachment?.filename ||
+                request.reference?.split("/").at(-1) ||
+                "Attachment",
+              resource: { request: JSON.parse(JSON.stringify(request)), identity },
+            },
+            { paneId: current.layout.focusedPaneId ?? undefined },
+          );
+        ensureVisible();
+      },
+    }),
+    [ensureVisible],
+  );
   const openConversationIds = useMemo(
     () =>
       dock.layout.views
@@ -1039,190 +1174,173 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
   );
   return (
     <WorkbenchProvider value={workbench}>
-      <ContextReferenceNavigationContext.Provider value={referenceNavigation}>
-        <ContextSearchProvider value={search}>
-          {active && (
-            <WorkbenchBindings
-              conversationId={focusedConversationId}
-              approvalConversationId={
-                showDock && focusedView?.kind === "conversation"
-                  ? (focusedConversationId ?? null)
-                  : null
-              }
-              conversations={loadedConversations}
-              onChatFind={search.openSearch}
-              onExplorerFind={findExplorer}
-              onTogglePalette={() => {
-                setSessionsOnly(false);
-                setPaletteOpen((value) => !value);
-              }}
-              onSessionSearch={() => {
-                setSessionsOnly(true);
-                setPaletteOpen(true);
-              }}
-              onToggleSidebar={toggleSidebar}
-              onOpenFiles={() => runResourceShortcut("openFiles")}
-              onOpenTerminal={() => runResourceShortcut("openTerminal")}
-              onNewTerminal={() => runResourceShortcut("newTerminal")}
-              onSidebarDrag={handleSidebarDrag}
-              onOpenBrowser={openBrowser}
-            />
-          )}
-          <NotificationLayoutProvider
-            width={320}
-            bottom="calc(1rem + var(--omnigent-inset-bottom, 0px))"
-          >
-            <div
-              className="app-shell unified-workbench flex h-dvh min-h-0 flex-col bg-background text-foreground"
-              data-ios-native={isIOSShell() || undefined}
-              data-android-native={isAndroidShell() || undefined}
+      <AttachmentPreviewContext.Provider value={attachmentNavigation}>
+        <ContextReferenceNavigationContext.Provider value={referenceNavigation}>
+          <ContextSearchProvider value={search}>
+            {active && (
+              <WorkbenchBindings
+                conversationId={focusedConversationId}
+                approvalConversationId={
+                  showDock && focusedView?.kind === "conversation"
+                    ? (focusedConversationId ?? null)
+                    : null
+                }
+                conversations={loadedConversations}
+                onChatFind={search.openSearch}
+                onExplorerFind={findExplorer}
+                onTogglePalette={() => {
+                  setSessionsOnly(false);
+                  setPaletteOpen((value) => !value);
+                }}
+                onSessionSearch={() => {
+                  setSessionsOnly(true);
+                  setPaletteOpen(true);
+                }}
+                onToggleSidebar={toggleSidebar}
+                onOpenFiles={() => runResourceShortcut("openFiles")}
+                onOpenTerminal={() => runResourceShortcut("openTerminal")}
+                onNewTerminal={() => runResourceShortcut("newTerminal")}
+                onSidebarDrag={handleSidebarDrag}
+                onOpenBrowser={openBrowser}
+              />
+            )}
+            <NotificationLayoutProvider
+              width={320}
+              bottom="calc(1rem + var(--omnigent-inset-bottom, 0px))"
             >
-              {active && (
-                <WorkbenchAppBar
-                  sidebarOpen={sidebarOpen}
-                  onToggleSidebar={toggleSidebar}
-                  onSearch={() => {
-                    setSessionsOnly(false);
-                    setPaletteOpen(true);
-                  }}
-                  onSettings={() => navigate("/settings")}
-                  openActions={openActions}
-                  onSaveLayout={
-                    focusedConversationId
-                      ? () => dock.saveChatLayout(focusedConversationId)
-                      : undefined
-                  }
-                  onSharedLayout={() => {
-                    void dock.useSharedLayout().then((allowed) => {
-                      if (allowed && focusedConversationId)
-                        dock.addView(
-                          conversationView(
-                            focusedConversationId,
-                            titles.get(focusedConversationId),
-                          ),
-                        );
-                    });
-                  }}
-                  layoutOwner={
-                    dock.hasChatLayout
-                      ? titles.get(dock.activeConversationId ?? "") || "this chat"
-                      : undefined
-                  }
-                />
-              )}
-              <div className="relative flex min-h-0 min-w-0 flex-1">
+              <div
+                className="app-shell unified-workbench flex h-dvh min-h-0 flex-col bg-background text-foreground"
+                data-ios-native={isIOSShell() || undefined}
+                data-android-native={isAndroidShell() || undefined}
+              >
                 {active && (
-                  <Sidebar
-                    workbench
-                    dragProgress={sidebarDragProgress}
-                    open={sidebarOpen}
-                    onOpen={() => setSidebarOpen(true)}
-                    onClose={() => setSidebarOpen(false)}
-                    onOpenSearch={() => search.openSearch("all")}
+                  <WorkbenchAppBar
+                    sidebarOpen={sidebarOpen}
+                    onToggleSidebar={toggleSidebar}
+                    onSearch={() => {
+                      setSessionsOnly(false);
+                      setPaletteOpen(true);
+                    }}
+                    onSettings={() => navigate("/settings")}
+                    openActions={openActions}
                   />
                 )}
-                <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                  {dock.error && (
-                    <p role="status" className="px-3 py-1 text-sm text-destructive">
-                      Layout could not be saved: {dock.error.message}
-                    </p>
-                  )}
-                  <div
-                    className={showDock ? "relative flex min-h-0 flex-1" : "hidden"}
-                    inert={!showDock}
-                  >
-                    <DockWorkspace
-                      scopeKey={dock.scopeKey}
-                      layout={dock.layout}
-                      retainedViews={dock.retainedViews}
-                      onLayoutChange={dock.setLayout}
-                      renderView={renderView}
-                      onBeforeClose={closeGuard}
-                      onCloseView={closeView}
-                      pinnedViewIds={dock.pinnedViewIds}
-                      onPinView={(id) => dock.pinView(id)}
-                      onUnpinView={(id) => dock.unpinView(id)}
+                <div className="relative flex min-h-0 min-w-0 flex-1">
+                  {active && (
+                    <Sidebar
+                      workbench
+                      dragProgress={sidebarDragProgress}
+                      open={sidebarOpen}
+                      onOpen={() => setSidebarOpen(true)}
+                      onClose={() => setSidebarOpen(false)}
+                      onOpenSearch={() => search.openSearch("all")}
                     />
-                    {!dock.layout.views.length && (
-                      <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
-                        Use Open to add a conversation or tool.
+                  )}
+                  <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                    {dock.error && (
+                      <p role="status" className="px-3 py-1 text-sm text-destructive">
+                        Layout could not be saved: {dock.error.message}
+                      </p>
+                    )}
+                    <div
+                      className={showDock ? "relative flex min-h-0 flex-1" : "hidden"}
+                      inert={!showDock}
+                    >
+                      <DockWorkspace
+                        scopeKey={dock.scopeKey}
+                        layout={dock.layout}
+                        retainedViews={dock.retainedViews}
+                        onLayoutChange={dock.setLayout}
+                        renderView={renderView}
+                        onBeforeClose={closeGuard}
+                        onCloseView={closeView}
+                        pinnedViewIds={dock.pinnedViewIds}
+                        onOpenConversationAt={openConversationAt}
+                        onPinView={(id) => dock.pinView(id)}
+                        onUnpinView={(id) => dock.unpinView(id)}
+                      />
+                      {!dock.layout.views.length && (
+                        <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
+                          Use Open to add a conversation or tool.
+                        </div>
+                      )}
+                    </div>
+                    {active && !showDock && (
+                      <div className="workbench-routed-page flex min-h-0 flex-1 flex-col overflow-auto">
+                        <Outlet />
                       </div>
                     )}
-                  </div>
-                  {active && !showDock && (
-                    <div className="workbench-routed-page flex min-h-0 flex-1 flex-col overflow-auto">
-                      <Outlet />
-                    </div>
-                  )}
-                </main>
+                  </main>
+                </div>
               </div>
-            </div>
-            {active && (
-              <CommandPalette
-                sessionsOnly={sessionsOnly}
-                open={paletteOpen}
-                onOpenChange={setPaletteOpen}
-                onNavigate={(path) => {
-                  const match = path.match(/^\/c\/([^/]+)$/);
-                  if (match) openConversation(decodeURIComponent(match[1]));
-                  else navigate(path);
-                }}
-                actions={actions}
-                fileTarget={paletteFileTarget}
-                onOpenFile={(path, target) =>
-                  openView({
-                    kind: "preview",
-                    workspace: target.workspace,
-                    conversationId: target.conversationId,
-                    path: joinBrowseLocation(target.folder ?? "", path),
-                  })
-                }
-                onFileSearch={(query, target) =>
-                  openView({
-                    kind: "search",
-                    workspace: target.workspace,
-                    conversationId: target.conversationId,
-                    path: target.folder,
-                    searchQuery: query,
-                  })
-                }
-                onOpenProjects={() => {
-                  search.close();
-                  setSidebarOpen(true);
-                }}
-                onToggleLeftSidebar={toggleSidebar}
-                onToggleRightSidebar={() => openFocused("files")}
-                onMessageSearch={(id, query) => {
-                  dock.addView(
-                    conversationView(id, titles.get(id)),
-                    conversationPlacement(dock.layout, dock.pinnedViewIds, lastConversation),
-                  );
-                  setLastConversation(id);
-                  ensureVisible();
-                  search.openSearch("current");
-                  search.setQuery(query);
-                }}
-              />
-            )}
-            {active && (
-              <OpenLocationDialog
-                open={locationRequest !== null}
-                onClose={() => setLocationRequest(null)}
-                onSelect={(workspace) => {
-                  const request = locationRequest;
-                  setLocationRequest(null);
-                  if (request) openView({ ...request, workspace });
-                }}
-              />
-            )}
-            {active && !embedded && <ImportReviewGate />}
-            {active && isFeatureEnabled(serverInfo, "arca_shutdown_warnings") && (
-              <ArcaShutdownToast />
-            )}
-            {active && <Toaster />}
-          </NotificationLayoutProvider>
-        </ContextSearchProvider>
-      </ContextReferenceNavigationContext.Provider>
+              {active && (
+                <CommandPalette
+                  anchorSelector="[data-workbench-search]"
+                  sessionsOnly={sessionsOnly}
+                  open={paletteOpen}
+                  onOpenChange={setPaletteOpen}
+                  onNavigate={(path) => {
+                    const match = path.match(/^\/c\/([^/]+)$/);
+                    if (match) openConversation(decodeURIComponent(match[1]));
+                    else navigate(path);
+                  }}
+                  actions={actions}
+                  fileTarget={paletteFileTarget}
+                  onOpenFile={(path, target) =>
+                    openView({
+                      kind: "preview",
+                      workspace: target.workspace,
+                      conversationId: target.conversationId,
+                      path: joinBrowseLocation(target.folder ?? "", path),
+                    })
+                  }
+                  onFileSearch={(query, target) =>
+                    openView({
+                      kind: "search",
+                      workspace: target.workspace,
+                      conversationId: target.conversationId,
+                      path: target.folder,
+                      searchQuery: query,
+                    })
+                  }
+                  onOpenProjects={() => {
+                    search.close();
+                    setSidebarOpen(true);
+                  }}
+                  onToggleLeftSidebar={toggleSidebar}
+                  onToggleRightSidebar={() => openFocused("files")}
+                  onMessageSearch={(id, query) => {
+                    dock.addView(
+                      conversationView(id, titles.get(id)),
+                      conversationPlacement(dock.layout, dock.pinnedViewIds, lastConversation),
+                    );
+                    setLastConversation(id);
+                    ensureVisible();
+                    search.openSearch("current");
+                    search.setQuery(query);
+                  }}
+                />
+              )}
+              {active && (
+                <OpenLocationDialog
+                  open={locationRequest !== null}
+                  onClose={() => setLocationRequest(null)}
+                  onSelect={(workspace) => {
+                    const request = locationRequest;
+                    setLocationRequest(null);
+                    if (request) openView({ ...request, workspace });
+                  }}
+                />
+              )}
+              {active && !embedded && <ImportReviewGate />}
+              {active && isFeatureEnabled(serverInfo, "arca_shutdown_warnings") && (
+                <ArcaShutdownToast />
+              )}
+              {active && <Toaster />}
+            </NotificationLayoutProvider>
+          </ContextSearchProvider>
+        </ContextReferenceNavigationContext.Provider>
+      </AttachmentPreviewContext.Provider>
     </WorkbenchProvider>
   );
 }

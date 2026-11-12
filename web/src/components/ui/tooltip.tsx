@@ -266,6 +266,15 @@ function ButtonTooltip({
   const guarded = useMenuGuardedTooltip(expanded);
   if (hasTooltip) return children;
   const resolvedLabel = label || renderedLabel;
+  const visibleLabel = buttonLabel((children.props as { children?: React.ReactNode }).children);
+  if (
+    visibleLabel &&
+    typeof resolvedLabel === "string" &&
+    visibleLabel.replace(/\s+/g, " ").trim() === resolvedLabel.replace(/\s+/g, " ").trim() &&
+    !description &&
+    !shortcut?.length
+  )
+    return children;
   const readLabel = (event: React.SyntheticEvent<HTMLElement>) => {
     if (!label)
       setRenderedLabel(

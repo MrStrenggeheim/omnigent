@@ -172,9 +172,10 @@ it("supports a fixed execution host and a cloud target without forcing host sele
 it("uses one borderless host/path trigger with a chevron", () => {
   const onClick = vi.fn();
   render(<WorkspaceSelector hostLabel="Host A" path="/work" onClick={onClick} />);
-  const trigger = screen.getByRole("button", { name: "Select workspace: Host A / /work" });
+  const trigger = screen.getByRole("button", { name: "Select workspace: Host A:/work" });
   expect(trigger).toHaveClass("border-0");
-  expect(trigger.querySelectorAll("svg")).toHaveLength(3);
+  expect(trigger.querySelectorAll("svg")).toHaveLength(2);
+  expect(trigger).toHaveTextContent("Host A:/work");
   fireEvent.click(trigger);
   expect(onClick).toHaveBeenCalledOnce();
 });

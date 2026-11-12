@@ -310,12 +310,13 @@ function WorkspaceSwitchState({
     <>
       <WorkspaceSelector
         hostLabel={hostLabel}
+        menuOpen={open}
         path={
           changing ? "Changing workspace…" : operation?.blocked ? "Recover workspace" : workspace
         }
         data-testid="composer-workspace-dir"
-        aria-label={`Change workspace: ${workspace}`}
-        title={disabledReason ?? `Working directory: ${workspace}. Change workspace`}
+        aria-label={`Change workspace: ${hostLabel}:${workspace}`}
+        disabledReason={disabledReason}
         disabled={!!disabledReason && !operation?.blocked}
         onClick={() => {
           setFolder(operation?.blocked ? operation.target_workspace : workspace);

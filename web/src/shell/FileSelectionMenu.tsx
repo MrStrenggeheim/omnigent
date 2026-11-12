@@ -72,7 +72,7 @@ export function FileSelectionMenu({
     });
   if (source)
     actions.push({
-      label: "Use in chat…",
+      label: "Send to…",
       icon: <CornerDownLeftIcon />,
       closeOnSelect: false,
       onSelect: () => setQuoteText(getText()),

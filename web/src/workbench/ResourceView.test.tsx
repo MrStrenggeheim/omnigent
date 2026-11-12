@@ -179,9 +179,7 @@ it.each([
       }),
     );
     if (entry === "picker") {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Select workspace: Host A / /old/nested" }),
-      );
+      fireEvent.click(screen.getByRole("button", { name: "Select workspace: Host A:/old/nested" }));
       fireEvent.click(screen.getByRole("button", { name: "Choose new folder" }));
     } else fireEvent.click(screen.getByRole("button", { name: "Up one folder" }));
     await waitFor(() => expect(changed).toHaveBeenCalledWith({ ...target, chatSessionId: null }));
@@ -265,9 +263,7 @@ it.each(["picker", "up"])(
     await waitFor(() => expect(finishSave).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Location" }));
     if (entry === "picker") {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Select workspace: Host A / /old/nested" }),
-      );
+      fireEvent.click(screen.getByRole("button", { name: "Select workspace: Host A:/old/nested" }));
       fireEvent.click(screen.getByText("Choose new folder"));
     } else fireEvent.click(screen.getByRole("button", { name: "Up one folder" }));
     await waitFor(() => expect(state.accept).toBeDefined());

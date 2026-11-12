@@ -1,5 +1,5 @@
 .dock-workspace {
-  --dock-header-height: var(--workbench-header-height, 36px);
+  --dock-header-height: var(--workbench-header-height, 48px);
   position: relative;
   display: flex;
   flex: 1;
@@ -41,7 +41,7 @@
   align-items: center;
   height: var(--dock-header-height);
   border-bottom: 1px solid var(--border);
-  background: var(--workspace-chrome);
+  background: var(--workspace-content);
   pointer-events: auto;
   border-right: 1px solid var(--border);
 }
@@ -169,7 +169,7 @@
   padding-right: 4px;
 }
 .dock-tab-group:hover {
-  background: var(--workspace-content);
+  background: var(--workspace-hover-on-content);
 }
 .dock-tab {
   height: 100%;
@@ -178,9 +178,11 @@
 }
 .dock-tab-group:has([aria-selected="true"]) {
   background: var(--workspace-content);
+  box-shadow: inset 0 -3px var(--primary);
 }
 .dock-pane[data-focused="true"] .dock-tab-group:has([aria-selected="true"]) {
-  background: var(--workbench-focused-tab);
+  background: var(--workspace-content);
+  box-shadow: inset 0 -3px var(--primary);
 }
 .dock-tab-close {
   display: flex;
@@ -195,6 +197,32 @@
   background: var(--accent);
   color: var(--foreground);
 }
+.dock-tab-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  opacity: 0;
+  pointer-events: none;
+}
+.dock-tab-group:hover .dock-tab-pin,
+.dock-tab-group:focus-within .dock-tab-pin {
+  opacity: 1;
+  pointer-events: auto;
+}
+.dock-tab-pin:hover {
+  background: var(--workspace-hover-on-content);
+  color: var(--foreground);
+}
+@media (hover: none), (pointer: coarse) {
+  .dock-tab-pin {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .dock-tab,
   .dock-tab-group {
@@ -203,9 +231,10 @@
 }
 
 @media (any-pointer: coarse) {
-  .dock-tab-close {
-    width: 44px;
-    height: 44px;
+  .dock-tab-close,
+  .dock-tab-pin {
+    width: calc(var(--dock-header-height) - 4px);
+    height: calc(var(--dock-header-height) - 4px);
   }
 }
 

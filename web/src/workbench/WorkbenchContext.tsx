@@ -7,6 +7,7 @@ export type WorkbenchViewKind =
   | "conversation"
   | "files"
   | "preview"
+  | "attachment-preview"
   | "changes"
   | "search"
   | "shells"

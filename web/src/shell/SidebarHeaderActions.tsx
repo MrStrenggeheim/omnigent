@@ -14,6 +14,7 @@ const SETTINGS_KEYS = [MOD_KEY, ALT_KEY, ","] as const;
 export function SidebarHeaderActions({
   compact = false,
   showToggle = true,
+  showSearch = true,
   expanded,
   onToggle,
   onOpenSearch,
@@ -25,6 +26,8 @@ export function SidebarHeaderActions({
   compact?: boolean;
   /** Only the persistent title-bar copy needs a navigation toggle. */
   showToggle?: boolean;
+  /** The application bar retains search while the sidebar entry is paused. */
+  showSearch?: boolean;
   /**
    * Whether the sidebar currently reads as open — `open || peek`. Drives the
    * toggle only: expanded collapses, collapsed (or peeking) opens.
@@ -51,7 +54,7 @@ export function SidebarHeaderActions({
 }) {
   return (
     <div className="flex items-center gap-1" data-testid="sidebar-header-actions">
-      <SidebarSearchButton onOpenSearch={onOpenSearch} />
+      {showSearch && <SidebarSearchButton onOpenSearch={onOpenSearch} />}
       {!compact && (
         <SidebarSettingsButton onSettingsClick={onSettingsClick} className="max-md:hidden" />
       )}

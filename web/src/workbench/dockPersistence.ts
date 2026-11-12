@@ -23,6 +23,8 @@ export interface DockScope {
 
 export interface DockPersistence {
   version: 1;
+  /** Absent in legacy saves that used shared-layout fallback. */
+  automaticChatLayouts?: true;
   shared: DockLayout;
   chats: { conversationId: string; layout: DockLayout }[];
   pins: DockLayout;
@@ -45,7 +47,7 @@ export function dockStorageKey(scope: DockScope): string {
 
 export function createDockPersistence(initialLayout = createDockLayout()): DockPersistence {
   if (!parseDockLayout(initialLayout)) throw new Error("Invalid initial dock layout");
-  return {
+  return migrateDockChatLayouts({
     version: 1,
     shared: initialLayout,
     chats: [],
@@ -54,6 +56,63 @@ export function createDockPersistence(initialLayout = createDockLayout()): DockP
     pinRatio: 0.25,
     activeConversationId: null,
     focusedViewId: null,
+  });
+}
+
+/** Preserve legacy shared geometry under its owner without replacing explicit saves. */
+function migrateDockChatLayouts(state: DockPersistence): DockPersistence {
+  if (state.automaticChatLayouts) return state;
+  const focused = state.shared.panes.find((pane) => pane.id === state.shared.focusedPaneId);
+  const selected = state.shared.views.find((view) => view.id === focused?.selectedViewId);
+  const conversation =
+    selected?.kind === "conversation"
+      ? selected
+      : state.shared.views.find((view) => view.kind === "conversation");
+  const activeSaved = state.chats.some(
+    (chat) => chat.conversationId === state.activeConversationId,
+  );
+  const owner =
+    (activeSaved ? null : state.activeConversationId) ??
+    (typeof conversation?.resource.conversationId === "string"
+      ? conversation.resource.conversationId
+      : null);
+  return {
+    ...state,
+    automaticChatLayouts: true,
+    activeConversationId: state.activeConversationId ?? owner,
+    chats:
+      owner && !state.chats.some((chat) => chat.conversationId === owner)
+        ? [...state.chats, { conversationId: owner, layout: state.shared }]
+        : state.chats,
+  };
+}
+
+/** Normal navigation changes the layout owner; explicit addView calls never do. */
+export function navigateDockConversation(
+  state: DockPersistence,
+  conversationId: string | null,
+): DockPersistence {
+  if (conversationId === "") throw new Error("A conversation ID is required");
+  if (conversationId === state.activeConversationId) return state;
+  const saved = state.chats.some((chat) => chat.conversationId === conversationId);
+  const view = conversationId
+    ? (retainedDockViews(state).find(
+        (item) => item.kind === "conversation" && item.resource.conversationId === conversationId,
+      ) ?? {
+        id: `conversation:${conversationId}`,
+        kind: "conversation",
+        title: "Conversation",
+        resource: { conversationId },
+      })
+    : null;
+  return {
+    ...state,
+    activeConversationId: conversationId,
+    focusedViewId: null,
+    chats:
+      !saved && conversationId && view
+        ? [...state.chats, { conversationId, layout: createDockLayout([view]) }]
+        : state.chats,
   };
 }
 
@@ -230,6 +289,7 @@ export function parseDockPersistence(raw: string): DockPersistence | undefined {
     if (
       !value ||
       value.version !== 1 ||
+      !(value.automaticChatLayouts === undefined || value.automaticChatLayouts === true) ||
       !parseDockLayout(value.shared) ||
       !parseDockLayout(value.pins) ||
       !Array.isArray(value.chats) ||
@@ -253,7 +313,7 @@ export function parseDockPersistence(raw: string): DockPersistence | undefined {
       ids.add(chat.conversationId);
     }
     retainedDockViews(value);
-    return value;
+    return migrateDockChatLayouts(value);
   } catch {
     return undefined;
   }

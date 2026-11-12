@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ComposerWorkspaceStatus } from "./ComposerWorkspaceStatus";
@@ -16,7 +16,7 @@ const base = {
 };
 
 describe("ComposerWorkspaceStatus", () => {
-  it("renders the working directory and selected worktree as read-only secondary text", () => {
+  it("renders the working directory and selected worktree as read-only composer text", () => {
     render(<ComposerWorkspaceStatus {...base} />);
     const directory = screen.getByTestId("composer-workspace-dir");
     const worktree = screen.getByTestId("composer-git-branch");
@@ -26,8 +26,10 @@ describe("ComposerWorkspaceStatus", () => {
     expect(worktree).toHaveAccessibleName("Worktree: feature/login");
     expect(directory.tagName).toBe("SPAN");
     expect(worktree.tagName).toBe("SPAN");
-    expect(directory).toHaveClass("text-muted-foreground");
-    expect(worktree).toHaveClass("text-muted-foreground");
+    expect(directory).toHaveClass("text-ui", "font-normal", "text-foreground");
+    expect(worktree).toHaveClass("text-ui", "font-normal", "text-foreground");
+    expect(directory).not.toHaveAttribute("title");
+    expect(worktree).not.toHaveAttribute("title");
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -50,7 +52,7 @@ describe("ComposerWorkspaceStatus", () => {
     expect(screen.getByTestId("composer-git-branch")).toHaveTextContent("Checking branch…");
   });
 
-  it("keeps creation-time branch history in the read-only title, never the live label", () => {
+  it("keeps creation-time branch history in the canonical tooltip, never the live label", async () => {
     render(
       <ComposerWorkspaceStatus
         {...base}
@@ -61,9 +63,16 @@ describe("ComposerWorkspaceStatus", () => {
     );
     const worktree = screen.getByTestId("composer-git-branch");
     expect(worktree).toHaveTextContent("Branch unavailable");
-    expect(worktree).toHaveAttribute(
-      "title",
+    expect(worktree).not.toHaveAttribute("title");
+    fireEvent.focus(worktree);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "Branch unavailable. Created on branch feature/created.",
     );
+  });
+
+  it("omits a tooltip that only repeats the branch label", () => {
+    render(<ComposerWorkspaceStatus {...base} />);
+    fireEvent.focus(screen.getByTestId("composer-git-branch"));
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });

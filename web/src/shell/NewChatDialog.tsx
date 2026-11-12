@@ -6702,8 +6702,20 @@ export function NewChatLandingScreen() {
                         }}
                       />
                     </div>
+                    <ComposerMicButton
+                      className="size-8 md:size-7"
+                      enableHotkey
+                      disabled={creating}
+                      onVoiceStart={() => {
+                        voiceSnapshotRef.current = message;
+                      }}
+                      onVoiceDiscard={() => setMessage(voiceSnapshotRef.current)}
+                      onTranscript={dictation.appendFinal}
+                      onInterim={dictation.replaceInterim}
+                    />
                     <WorkspaceSelector
                       hostLabel={hostLabel}
+                      menuOpen={workspacePickerOpen}
                       path={sandboxSelected ? "Managed workspace" : visibleWorkspace}
                       disabled={creating || workspaceLoading}
                       data-testid="new-chat-landing-workspace-chip"
@@ -6735,7 +6747,7 @@ export function NewChatLandingScreen() {
                                   ? sandboxRepoLabel
                                   : "None selected"
                               }`}
-                              className="relative inline-flex h-6 min-w-10 max-w-[calc(50%-0.25rem)] cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 text-xs leading-4 font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:min-w-11"
+                              className="relative inline-flex h-6 min-w-10 max-w-[calc(50%-0.25rem)] cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 text-ui font-normal text-foreground transition-colors hover:bg-muted hover:text-foreground md:min-w-11"
                               data-testid="new-chat-landing-repo-chip"
                             >
                               <GitBranchIcon className="ui-icon" />
@@ -7266,20 +7278,9 @@ export function NewChatLandingScreen() {
                         autoHarnessActive={smartRoutingHarnessSelected}
                         onSelectAutoHarness={handleSelectSmartRoutingHarness}
                         contentClassName={COMPOSER_HARNESS_MENU_SIZE}
-                        triggerClassName="text-[13px] leading-5"
+                        triggerClassName="leading-5"
                       />
                     </div>
-                    <ComposerMicButton
-                      className="size-8 md:size-7"
-                      enableHotkey
-                      disabled={creating}
-                      onVoiceStart={() => {
-                        voiceSnapshotRef.current = message;
-                      }}
-                      onVoiceDiscard={() => setMessage(voiceSnapshotRef.current)}
-                      onTranscript={dictation.appendFinal}
-                      onInterim={dictation.replaceInterim}
-                    />
                     <TooltipProvider>
                       <Tooltip
                         open={submitTooltipState !== "closed"}

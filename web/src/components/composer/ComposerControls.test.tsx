@@ -6,13 +6,49 @@ import {
   ComposerWorkspaceTrigger,
   ComposerHarnessTrigger,
   ComposerPermissionPicker,
+  COMPOSER_CONTROL_TEXT_CLASS,
 } from "./ComposerControls";
+import { WorkspaceSelector } from "@/shell/WorkspaceSelector";
 import {
   COMPOSER_COLLAPSED_LABEL_CLASS,
   COMPOSER_WORKSPACE_COLLAPSED_LABEL_CLASS,
 } from "./ChatComposer";
 
 describe("shared composer controls", () => {
+  it("shares primary typography across workspace, permission and model controls with lighter effort", () => {
+    render(
+      <>
+        <WorkspaceSelector hostLabel="Host" path="/repo" />
+        <ComposerWorkspaceTrigger kind="worktree" label="main" />
+        <ComposerHostTrigger label="Host" />
+        <ComposerPermissionPicker
+          label="Permission mode"
+          value="Plan"
+          options={[]}
+          onSelect={vi.fn()}
+        />
+        <ComposerHarnessTrigger label="Configure model" model="Default" effort="High" />
+      </>,
+    );
+    for (const control of screen.getAllByRole("button")) {
+      expect(control).toHaveClass(...COMPOSER_CONTROL_TEXT_CLASS.split(" "));
+      expect(control).not.toHaveClass(
+        "text-xs",
+        "text-[13px]",
+        "font-medium",
+        "text-muted-foreground",
+      );
+    }
+    expect(screen.getByTestId("composer-agent-model-value")).toHaveClass(
+      ...COMPOSER_CONTROL_TEXT_CLASS.split(" "),
+    );
+    expect(screen.getByTestId("composer-agent-effort-value")).toHaveClass(
+      "text-ui",
+      "font-normal",
+      "text-muted-foreground",
+    );
+  });
+
   it("uses the same workspace header and host geometry in either context", () => {
     render(
       <>

@@ -155,7 +155,7 @@ afterEach(() => {
   toast.dismiss();
 });
 async function choose() {
-  fireEvent.click(screen.getByRole("button", { name: "Change workspace: /work/a" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Change workspace: .+:\/work\/a$/ }));
   fireEvent.change(await screen.findByDisplayValue("/work/a"), { target: { value: "/work/b" } });
   fireEvent.click(screen.getByRole("button", { name: "Use workspace" }));
 }
@@ -211,7 +211,7 @@ it("waits for the existing dirty-file guard before sending the workspace request
 
 it("does not let an active turn or queued messages start a switch", () => {
   mount({ reason: "Wait for the current turn" });
-  expect(screen.getByRole("button", { name: "Change workspace: /work/a" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /^Change workspace: .+:\/work\/a$/ })).toBeDisabled();
 });
 
 it("retains the selected folder and displays a failed preflight without clearing the draft URL", async () => {
@@ -373,7 +373,7 @@ it("keeps the combined picker and selected path when the dirty-file guard is can
 
 it("hands a different host and selected path to the existing move confirmation without applying a same-host switch", async () => {
   mount();
-  fireEvent.click(screen.getByRole("button", { name: "Change workspace: /work/a" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Change workspace: .+:\/work\/a$/ }));
   fireEvent.click(await screen.findByRole("button", { name: /Other host/ }));
   fireEvent.change(screen.getByRole("textbox", { name: "Current folder path" }), {
     target: { value: "/other/path" },
@@ -390,7 +390,7 @@ it("hands a different host and selected path to the existing move confirmation w
 it("keeps session capability restrictions on host switching", async () => {
   state.hostReason = "This agent cannot move between hosts";
   mount();
-  fireEvent.click(screen.getByRole("button", { name: "Change workspace: /work/a" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Change workspace: .+:\/work\/a$/ }));
   await screen.findByText("This agent cannot move between hosts");
   expect(screen.queryByRole("button", { name: /Other host/ })).toBeNull();
 });

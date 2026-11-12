@@ -17,6 +17,24 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Native scrollers share the product's slim, neutral treatment. Explicit
+ * transcript/editor scrollbar rules keep their own presentation. */
+:where(*) {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 24%, transparent) transparent;
+}
+:where(*)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+:where(*)::-webkit-scrollbar-track {
+  background: transparent;
+}
+:where(*)::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 24%, transparent);
+  border-radius: 999px;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   /* Native system UI font stack — defers to whatever the OS ships

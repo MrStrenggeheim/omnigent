@@ -1,7 +1,8 @@
 import { useScopedConversationId } from "./conversationScope";
 import { QuoteDestinationMenu } from "./QuoteDestinationMenu";
 import type { QuoteSource } from "@/lib/contextReferences";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { ContextReferenceNavigationContext } from "@/lib/contextReferenceNavigation";
 import { CornerUpLeftIcon, MessagesSquareIcon } from "lucide-react";
 import { TextSelectionMenu, type TextSelectionAction } from "./TextSelectionMenu";
 
@@ -12,14 +13,14 @@ export function SelectionPopup({
 }: {
   containerRef: React.RefObject<HTMLElement | null>;
   onReply: (text: string) => void;
-  // Present only when the session's harness supports side chat; renders the
-  // "Ask in side chat" action beside Reply.
+  // Compatibility for views without durable subchat navigation.
   onAskInSideChat?: (text: string) => void;
 }) {
   const sourceId = useScopedConversationId();
+  const navigation = useContext(ContextReferenceNavigationContext);
   const sourceRef = useRef<QuoteSource | null>(null);
   const [destinationSource, setDestinationSource] = useState<
-    (QuoteSource & { x: number; y: number }) | null
+    (QuoteSource & { x: number; y: number; intent: "pick" | "subchat" }) | null
   >(null);
   const [popupPos, setPopupPos] = useState<{ x: number; y: number } | null>(null);
   const selectedTextRef = useRef<string>("");
@@ -98,6 +99,7 @@ export function SelectionPopup({
         source={destinationSource}
         x={destinationSource.x}
         y={destinationSource.y}
+        intent={destinationSource.intent}
         onClose={() => setDestinationSource(null)}
       />
     );
@@ -113,21 +115,31 @@ export function SelectionPopup({
     window.getSelection()?.removeAllRanges();
   };
   const actions: TextSelectionAction[] = [
-    { label: "Reply ↵", icon: <CornerUpLeftIcon />, onSelect: select(onReply) },
+    { label: "Reply", icon: <CornerUpLeftIcon />, onSelect: select(onReply) },
   ];
-  if (sourceRef.current)
+  if (sourceRef.current && navigation?.createSubchat)
     actions.push({
-      label: "Use in chat…",
+      label: "Ask subchat…",
       icon: <MessagesSquareIcon />,
       onSelect: () => {
-        if (sourceRef.current) setDestinationSource({ ...sourceRef.current, ...popupPos });
+        if (sourceRef.current)
+          setDestinationSource({ ...sourceRef.current, ...popupPos, intent: "subchat" });
       },
     });
   else if (onAskInSideChat)
     actions.push({
-      label: "Ask in side chat",
+      label: "Ask subchat…",
       icon: <MessagesSquareIcon />,
       onSelect: select(onAskInSideChat),
+    });
+  if (sourceRef.current)
+    actions.push({
+      label: "Send to…",
+      icon: <MessagesSquareIcon />,
+      onSelect: () => {
+        if (sourceRef.current)
+          setDestinationSource({ ...sourceRef.current, ...popupPos, intent: "pick" });
+      },
     });
   return <TextSelectionMenu {...popupPos} actions={actions} onClose={close} />;
 }

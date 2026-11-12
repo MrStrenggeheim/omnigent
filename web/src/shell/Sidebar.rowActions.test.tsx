@@ -285,18 +285,16 @@ describe("quick pin/unpin hover button", () => {
     // stays inset from the right edge, aligning with the project/folder rows.
     renderSidebar();
 
-    // The pin + kebab share ONE absolutely-positioned flex container anchored
-    // at right-1 with gap-0.5, mirroring the project-folder header actions —
-    // so the spacing is defined once and can't drift (no per-button fixed-px
-    // offsets like the old right-[30px] / -right-3).
+    // Shared controls retain their compact hit areas in a separate flex group.
     const pin = screen.getByTestId("quick-pin-conversation");
     const kebab = screen.getByTestId("conversation-actions");
     expect(pin).toHaveClass("size-6");
     expect(kebab).toHaveClass("size-6");
-    // Both buttons live in the same wrapper, which owns the position + gap.
+    // Both buttons share spacing and consume width before the title truncates.
     const controls = pin.parentElement!;
     expect(controls).toBe(kebab.parentElement);
-    expect(controls).toHaveClass("absolute", "right-1", "flex", "items-center", "gap-0.5");
+    expect(controls).toHaveClass("shrink-0", "flex", "items-center", "gap-0.5");
+    expect(controls).not.toHaveClass("absolute");
     // The old per-button offsets are gone.
     expect(pin).not.toHaveClass("right-[30px]", "right-[1.875rem]", "right-[14px]", "absolute");
     expect(kebab).not.toHaveClass("-right-3", "absolute");
@@ -306,7 +304,7 @@ describe("quick pin/unpin hover button", () => {
     expect(rowLink).not.toHaveClass("w-[calc(100%+1rem)]");
   });
 
-  it("holds action padding while the kebab menu is open", () => {
+  it("holds the action group width while the kebab menu is open", () => {
     renderSidebar();
 
     const rowLink = screen.getByRole("link", { name: "My Session" });
@@ -314,7 +312,7 @@ describe("quick pin/unpin hover button", () => {
 
     fireEvent.pointerDown(screen.getByTestId("conversation-actions"), { button: 0 });
 
-    expect(rowLink).toHaveClass("md:pr-20");
+    expect(screen.getByTestId("conversation-actions").parentElement).toHaveClass("md:w-auto");
   });
 
   it("sizes the project-folder header controls to match the session-row kebab", () => {
@@ -431,7 +429,9 @@ describe("quick pin/unpin hover button", () => {
     renderSidebar();
 
     await user.hover(screen.getByTestId(testId));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(label);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent(label);
+    expect(tooltip.querySelector("svg")).toBeNull();
   });
 
   it("also offers Pin in the kebab menu (mobile affordance) and toggles the same pin state", () => {
@@ -494,16 +494,13 @@ describe("quick pin/unpin hover button", () => {
     expect(quickButton).not.toHaveClass("md:block");
   });
 
-  it("drops the row kebab on mobile, revealing it only from md up", () => {
-    // The per-row "..." menu is desktop-only: on mobile the chat page's own
-    // header menu covers these per-session actions, so the row kebab is hidden
-    // (`hidden`) and only surfaces from `md` up (`md:inline-flex`). It reveals
-    // like the quick-pin button — flex, not block — so its glyph stays
-    // centered.
+  it("keeps the row kebab reachable on touch with a desktop focus reveal", () => {
+    // Touch needs the menu for Open to side and the existing session actions.
     renderSidebar();
 
     const kebab = screen.getByTestId("conversation-actions");
-    expect(kebab).toHaveClass("hidden", "md:inline-flex");
+    expect(kebab).not.toHaveClass("hidden");
+    expect(kebab).toHaveClass("md:group-focus-within/conversation:opacity-100");
     expect(kebab).not.toHaveClass("md:block");
   });
 });
@@ -870,81 +867,53 @@ describe("quick-archive owner gate", () => {
 });
 
 describe("pinned row project flyout", () => {
-  // Pinning lifts a session out of its project folder into the flat "Pinned"
-  // section, so the folder no longer conveys which project it came from. The
-  // hover flyout restores that cue: title + project icon (the project's chosen
-  // emoji, or a folder fallback) + project name. It opens on focus/hover — fire
-  // focus on the row link and await the portal.
+  it.each([
+    {
+      source: "project label with branch metadata",
+      firstClass: false,
+      icon: undefined,
+      git_branch: "fix/sidebar-row-height",
+    },
+    { source: "first-class project with an emoji", firstClass: true, icon: "🚀" },
+    { source: "project label without an emoji", firstClass: false, icon: undefined },
+  ])(
+    "keeps $source out of row hover and focus guidance",
+    async ({ firstClass, icon, git_branch }) => {
+      vi.useFakeTimers();
+      try {
+        if (firstClass) mocks.projects = ["Moonshot"];
+        if (icon) mocks.projectIcons = { Moonshot: icon };
+        mocks.pinnedStore.set(["conv_1"]);
+        mockConversations([
+          {
+            ...CONV,
+            ...(firstClass
+              ? { project_id: "p_Moonshot" }
+              : { labels: { omni_project: "Moonshot" } }),
+            git_branch,
+          },
+        ]);
+        renderSidebar();
+        const pinned = screen.getByRole("button", { name: /^Pinned/ }).closest("section")!;
+        const row = within(pinned).getByRole("link", { name: "My Session" });
+        expect(row).toHaveAttribute("href", "/c/conv_1");
+        expect(row).not.toHaveAttribute("title");
+        expect(row).not.toHaveAttribute("data-slot", "hover-card-trigger");
 
-  it("shows the project name in the flyout for a pinned, project-owned row", async () => {
-    // Seed the pin so the row lifts into the always-expanded Pinned section
-    // (a project-owned row otherwise sits inside a collapsed project folder).
-    mocks.pinnedStore.set(["conv_1"]);
-    mockConversations([
-      {
-        ...CONV,
-        labels: { omni_project: "Moonshot" },
-        git_branch: "fix/sidebar-row-height",
-      },
-    ]);
-    renderSidebar();
-    expect(screen.getByText("Pinned")).toBeInTheDocument();
+        fireEvent.pointerEnter(row, { pointerType: "mouse" });
+        fireEvent.mouseEnter(row);
+        fireEvent.focus(row);
+        await act(() => vi.advanceTimersByTimeAsync(1000));
 
-    // Focus opens the HoverCard (onFocus is one of its open triggers); the
-    // content is portalled, so query the whole document after the open delay.
-    fireEvent.focus(screen.getByRole("link", { name: /My Session/ }));
-    const flyout = await screen.findByTestId("pinned-project-flyout");
-    expect(within(flyout).getByText("Moonshot")).toBeInTheDocument();
-    const flyoutTitle = within(flyout).getByText("My Session");
-    expect(flyoutTitle).toBeInTheDocument();
-    // The flyout title matches sidebar row names through the shared compact
-    // class, which resolves to the same text-ui step as Appearance content.
-    expect(flyoutTitle).toHaveClass("sidebar-compact-text");
-    expect(flyoutTitle).not.toHaveClass("text-ui");
-    expect(within(flyout).getByTestId("pinned-project-flyout-branch")).toHaveTextContent(
-      "fix/sidebar-row-height",
-    );
-  });
-
-  it("shows the project's real emoji icon in the flyout when the project has one", async () => {
-    // The flyout mirrors the folder/picker: a first-class project that carries a
-    // chosen emoji surfaces that glyph next to its name, not the generic folder.
-    // The icon is keyed off the row's first-class `project_id`, so seed one that
-    // resolves into the mocked projects list (id `p_<name>`).
-    mocks.projects = ["Moonshot"];
-    mocks.projectIcons = { Moonshot: "🚀" };
-    mocks.pinnedStore.set(["conv_1"]);
-    mockConversations([{ ...CONV, project_id: "p_Moonshot" }]);
-    renderSidebar();
-    expect(screen.getByText("Pinned")).toBeInTheDocument();
-
-    fireEvent.focus(screen.getByRole("link", { name: /My Session/ }));
-    const flyout = await screen.findByTestId("pinned-project-flyout");
-    expect(within(flyout).getByText("Moonshot")).toBeInTheDocument();
-    // The emoji renders via ProjectRowIcon (data-testid project-icon), replacing
-    // the folder svg the fallback would otherwise draw.
-    const icon = within(flyout).getByTestId("project-icon");
-    expect(icon).toHaveTextContent("🚀");
-    expect(icon).toHaveAttribute("aria-hidden", "true");
-    expect(within(flyout).queryByRole("img", { hidden: true })).toBeNull();
-  });
-
-  it("falls back to the folder icon in the flyout for a project with no emoji", async () => {
-    // A label-only project (no first-class id/icon) has no glyph to surface, so
-    // the flyout keeps the folder icon — proving the emoji path is opt-in.
-    mocks.pinnedStore.set(["conv_1"]);
-    mockConversations([{ ...CONV, labels: { omni_project: "Moonshot" } }]);
-    renderSidebar();
-    expect(screen.getByText("Pinned")).toBeInTheDocument();
-
-    fireEvent.focus(screen.getByRole("link", { name: /My Session/ }));
-    const flyout = await screen.findByTestId("pinned-project-flyout");
-    expect(within(flyout).getByText("Moonshot")).toBeInTheDocument();
-    // No emoji span; the project line leads with the folder svg fallback.
-    expect(within(flyout).queryByTestId("project-icon")).toBeNull();
-    const projectLine = within(flyout).getByText("Moonshot").closest("p")!;
-    expect(projectLine.querySelector("svg")).not.toBeNull();
-  });
+        expect(screen.queryByTestId("pinned-project-flyout")).toBeNull();
+        expect(screen.queryByTestId("session-tooltip-content")).toBeNull();
+        expect(screen.queryByRole("tooltip")).toBeNull();
+        expect(row.querySelector("[title]")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("renders no project flyout for a pinned row with no project", () => {
     // No project label → nothing to surface, so the row keeps its plain native
@@ -960,24 +929,34 @@ describe("pinned row project flyout", () => {
     expect(screen.queryByTestId("pinned-project-flyout")).toBeNull();
   });
 
-  it("disables the flyout on a mobile viewport, keeping the native title", () => {
-    // Mobile has no real hover, so the flyout is gated off there: a tap that
-    // navigates must not also open (and strand) a HoverCard over the chat. The
-    // row falls back to the plain link path — no hover-card trigger, native
-    // title restored — even though it IS pinned + project-owned.
-    mocks.isMobile = true;
-    mocks.pinnedStore.set(["conv_1"]);
-    mockConversations([{ ...CONV, labels: { omni_project: "Moonshot" } }]);
-    renderSidebar();
-    expect(screen.getByText("Pinned")).toBeInTheDocument();
+  it("keeps mobile pinned rows free of flyouts and native titles while preserving actions", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.isMobile = true;
+      mocks.pinnedStore.set(["conv_1"]);
+      mockConversations([{ ...CONV, labels: { omni_project: "Moonshot" } }]);
+      renderSidebar();
+      const pinned = screen.getByRole("button", { name: /^Pinned/ }).closest("section")!;
+      const row = within(pinned).getByRole("link", { name: "My Session" });
+      expect(row).toHaveAttribute("href", "/c/conv_1");
+      expect(row).not.toHaveAttribute("title");
+      expect(row).not.toHaveAttribute("data-slot", "hover-card-trigger");
 
-    const row = screen.getByRole("link", { name: /My Session/ });
-    // No hover-card trigger is mounted, and the native title tooltip is kept.
-    expect(row).not.toHaveAttribute("data-slot", "hover-card-trigger");
-    expect(row).toHaveAttribute("title", "My Session");
-    // Focusing the row opens nothing — the flyout never mounts on mobile.
-    fireEvent.focus(row);
-    expect(screen.queryByTestId("pinned-project-flyout")).toBeNull();
+      fireEvent.pointerEnter(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row);
+      fireEvent.focus(row);
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+
+      expect(screen.queryByTestId("pinned-project-flyout")).toBeNull();
+      expect(screen.queryByRole("tooltip")).toBeNull();
+      expect(row.querySelector("[title]")).toBeNull();
+      fireEvent.pointerDown(within(pinned).getByRole("button", { name: "Conversation actions" }), {
+        button: 0,
+      });
+      expect(screen.getByTestId("rename-conversation")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1169,16 +1148,16 @@ describe("mark as unread", () => {
     expect(screen.getByText("(unread)")).toBeInTheDocument();
   });
 
-  it("holds the dot on a running session until the turn finishes", () => {
+  it("keeps an explicit unread dot alongside the running state", () => {
     mockConversations([{ ...CONV, status: "running" }]);
     renderSidebar();
 
     fireEvent.pointerDown(screen.getByTestId("conversation-actions"), { button: 0 });
     fireEvent.click(screen.getByTestId("mark-unread-conversation"));
 
-    // The dot stays suppressed mid-turn (the explicit override lifts the
-    // active-row suppression, not the running one).
-    expect(screen.queryByText("(unread)")).toBeNull();
+    expect(screen.getByText("(unread)")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "New messages" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Session running" })).toBeInTheDocument();
 
     // Once the turn finishes (row re-renders as idle), the dot lights — the
     // baseline (kept in the in-memory mirror) now reads unseen for a

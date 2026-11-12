@@ -65,13 +65,38 @@ describe("useSession — refresh_state", () => {
     expect(refreshFlags()).toEqual([true]);
   });
 
-  it("never fetches for a client-only temp id (no /v1/sessions/temp:*)", async () => {
+  it.each([null, undefined, "", "temp:0a1b2c3d"])(
+    "never fetches for an absent or client-only id (%s)",
+    async (id) => {
+      const { client, Wrapper } = harness();
+      const { result } = renderHook(() => useSession(id), { wrapper: Wrapper });
+      await flush();
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: ["session"] });
+      });
+      await flush();
+      expect(getSessionSlimMock).not.toHaveBeenCalled();
+      expect(result.current).toEqual({ session: null, isLoading: false, error: null });
+    },
+  );
+
+  it("clears the previous session when its owner becomes empty and resumes for a real id", async () => {
     const { Wrapper } = harness();
-    renderHook(() => useSession("temp:0a1b2c3d"), { wrapper: Wrapper });
+    const { result, rerender } = renderHook(({ id }) => useSession(id), {
+      wrapper: Wrapper,
+      initialProps: { id: "conv_1" },
+    });
     await flush();
-    // The navigate-first invariant: a temp id has no server session, so the
-    // query is disabled by construction — no request is issued.
-    expect(getSessionSlimMock).not.toHaveBeenCalled();
+    expect(result.current.session?.id).toBe("conv_1");
+    rerender({ id: "" });
+    await flush();
+    expect(result.current).toEqual({ session: null, isLoading: false, error: null });
+    expect(getSessionSlimMock).toHaveBeenCalledTimes(1);
+    getSessionSlimMock.mockResolvedValue(session("conv_2"));
+    rerender({ id: "conv_2" });
+    await flush();
+    expect(result.current.session?.id).toBe("conv_2");
+    expect(getSessionSlimMock.mock.calls.map(([id]) => id)).toEqual(["conv_1", "conv_2"]);
   });
 
   // Switching the session's agent invalidates this query. The refetch has to

@@ -4726,9 +4726,9 @@ describe("NewChatLandingScreen", () => {
     expect(screen.getByTestId("new-chat-landing-agent-model-value")).toHaveClass(
       "min-w-0",
       "truncate",
-      "text-[13px]",
+      "text-ui",
       "leading-5",
-      "font-medium",
+      "font-normal",
       "text-foreground",
     );
     expect(screen.queryByTestId("new-chat-landing-config-gear")).toBeNull();
@@ -4768,7 +4768,7 @@ describe("NewChatLandingScreen", () => {
     expect(screen.getByTestId("new-chat-landing-agent-effort-value")).toHaveTextContent("High");
     expect(screen.getByTestId("new-chat-landing-agent-effort-value")).toHaveClass(
       "shrink-0",
-      "text-[13px]",
+      "text-ui",
       "leading-5",
       "font-normal",
       "text-muted-foreground",
@@ -5301,6 +5301,11 @@ describe("NewChatLandingScreen", () => {
     expect(model).toHaveTextContent("Extraordinarily Long Claude Model Name");
     expect(voice).toHaveClass("shrink-0", "size-8", "md:size-7");
     expect(submit.parentElement).toHaveClass("shrink-0");
+    const leading = screen.getByTestId("new-chat-landing-left-controls");
+    const controls = within(leading).getAllByRole("button");
+    expect(controls[0]).toHaveAccessibleName("Add");
+    expect(controls[1]).toBe(voice);
+    expect(leading).toHaveClass("gap-1");
   });
 
   it("opens permission modes from a compact anchored composer menu", () => {

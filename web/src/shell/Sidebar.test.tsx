@@ -421,9 +421,8 @@ describe("Sidebar session list", () => {
 
       const sharedRow = screen.getByText("shared_session").closest("li")!;
       const indicator = within(sharedRow).getByRole("img", { name: "Shared session" });
-      expect(indicator).toHaveAttribute("title", "Shared with you");
-      expect(indicator).toHaveClass("w-6", "justify-center");
-      expect(indicator).toHaveClass("absolute", "right-1");
+      expect(indicator).not.toHaveAttribute("title");
+      expect(indicator.parentElement).toHaveAttribute("data-testid", "conversation-indicators");
       expect(
         within(screen.getByText("private_session").closest("li")!).queryByRole("img"),
       ).toBeNull();
@@ -441,8 +440,10 @@ describe("Sidebar session list", () => {
     selectSessionFilter("all");
 
     const row = screen.getByText("shared_running").closest("li")!;
-    expect(within(row).getByRole("img", { name: "Shared session" })).toHaveClass("right-8");
-    expect(within(row).getByTestId("session-state-badge").parentElement).toHaveClass("right-1");
+    const shared = within(row).getByRole("img", { name: "Shared session" });
+    const state = within(row).getByRole("img", { name: "Session running" });
+    expect(shared.parentElement).toBe(state.parentElement);
+    expect(shared.compareDocumentPosition(state) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("does not mark the viewer's own sessions or sessions without ownership metadata", () => {
@@ -635,33 +636,26 @@ describe("Sidebar session list", () => {
 
     const indicator = within(draftRow).getByTestId("conversation-draft-indicator");
     expect(indicator).toHaveAccessibleName("Draft");
-    expect(indicator.parentElement).toHaveClass("absolute", "right-1");
+    expect(indicator.parentElement).toHaveClass("flex", "shrink-0");
     expect(within(emptyRow).queryByTestId("conversation-draft-indicator")).toBeNull();
   });
 
-  it("uses balanced title padding until row actions are revealed", () => {
+  it("lets the title shrink before the row actions", () => {
     mockConversations([conv("conv_balanced", "Codex", { title: "Balanced row title" })]);
     renderSidebar();
-
-    const row = screen.getByText("Balanced row title").closest("a")!;
-    // Mobile drops the pin + kebab, so at rest it reserves the same slim `pr-2`
-    // as desktop; only desktop hover widens it for the revealed controls.
-    expect(row).toHaveClass("pr-2");
-    expect(row.className).not.toMatch(/(?:^|\s)pr-28(?:\s|$)/);
-    expect(row.className).toContain("md:group-hover:pr-20");
-    // Keyed on `:focus-visible`, matching when the trailing controls appear and
-    // the state marker fades. `focus-within` would also fire for a plain click,
-    // narrowing the reserve on the selected row while the marker stayed put.
-    expect(row.className).toContain("md:group-has-[:focus-visible]:pr-20");
-    expect(row.className).not.toContain("md:group-focus-within:pr-20");
-    expect(row.className).not.toMatch(/(?:^|\s)md:pr-20(?:\s|$)/);
+    const link = screen.getByRole("link", { name: "Balanced row title" });
+    expect(link).toHaveClass("min-w-0", "flex-1");
+    const controls = screen.getByTestId("conversation-actions").parentElement!;
+    expect(controls).toHaveClass(
+      "shrink-0",
+      "md:w-0",
+      "md:group-hover/conversation:w-auto",
+      "md:group-focus-within/conversation:w-auto",
+    );
+    expect(controls).not.toHaveClass("absolute");
   });
 
-  it("narrows the awaiting row's reserve on the same trigger that fades its tag", () => {
-    // The "Needs response" tag is absolutely positioned, so the row's right
-    // padding is the only thing keeping the title clear of it. If the padding
-    // narrows on a trigger the tag's fade doesn't share, the title slides under
-    // a still-visible tag — which is what a plain click did via `focus-within`.
+  it("keeps the approval tag in its own flex slot as actions appear", () => {
     mockConversations([
       conv("conv_awaiting", "Claude Code", {
         title: "Awaiting row title",
@@ -669,33 +663,25 @@ describe("Sidebar session list", () => {
       }),
     ]);
     renderSidebar();
-
-    const row = screen.getByText("Awaiting row title").closest("a")!;
     const tag = screen.getByTestId("session-state-badge");
     expect(tag).toHaveAttribute("data-state", "awaiting");
-
-    // Every state that narrows the reserve must also fade the tag, and vice
-    // versa, so the two can never disagree about whether the space is free.
-    for (const trigger of ["md:group-hover:", "md:group-has-[:focus-visible]:"]) {
-      expect(row.className).toContain(`${trigger}pr-20`);
-      expect(tag.parentElement!.className).toContain(`${trigger}opacity-0`);
-    }
-    // `focus-within` fires for a plain mouse click, which the tag's fade does
-    // not react to — the mismatch that put the title under the selected row's
-    // tag.
-    expect(row.className).not.toContain("focus-within");
+    expect(tag.parentElement).toHaveClass("shrink-0");
+    expect(tag.parentElement!.className).not.toMatch(/absolute|opacity-0/);
+    expect(screen.getByRole("link", { name: "Awaiting row title" })).toHaveClass(
+      "min-w-0",
+      "flex-1",
+    );
   });
 
-  it("centers a row's dot marker in a size-6 slot at the right-1 edge", () => {
-    // The row dot and the collapsed-project dot share this geometry so they
-    // line up vertically; keep the row side pinned here.
+  it("places the running marker in the trailing indicator group", () => {
     mockConversations([
       conv("conv_running", "Claude Code", { title: "Running row", status: "running" }),
     ]);
     renderSidebar();
-
-    const slot = screen.getByTestId("session-state-badge").parentElement!;
-    expect(slot).toHaveClass("right-1", "w-6", "justify-center");
+    const slot = screen.getByTestId("conversation-indicators");
+    expect(within(slot).getByRole("img", { name: "Session running" })).toBeInTheDocument();
+    expect(slot).toHaveClass("flex", "shrink-0", "items-center");
+    expect(slot).not.toHaveClass("absolute");
   });
 
   it("does not constrain a row's awaiting pill to the dot slot", () => {
@@ -710,7 +696,7 @@ describe("Sidebar session list", () => {
     renderSidebar();
 
     const slot = screen.getByTestId("session-state-badge").parentElement!;
-    expect(slot).toHaveClass("right-1");
+    expect(slot).toHaveClass("shrink-0");
     expect(slot).not.toHaveClass("w-6");
   });
 
@@ -925,13 +911,12 @@ describe("Sidebar session list", () => {
     });
   });
 
-  it("requests integrated search when the Search button is clicked", () => {
+  it("temporarily removes the sidebar Search entry without invoking its handler", () => {
     mockConversations(THREE_TYPE_CONVERSATIONS);
     const onOpenSearch = vi.fn();
     renderSidebar(true, "/", onOpenSearch);
-
-    fireEvent.click(screen.getByTestId("sidebar-search-button"));
-    expect(onOpenSearch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("sidebar-search-button")).toBeNull();
+    expect(onOpenSearch).not.toHaveBeenCalled();
   });
 
   it("swaps the card content to the settings section nav on /settings", () => {
@@ -952,20 +937,14 @@ describe("Sidebar session list", () => {
     );
   });
 
-  it("renders compact Search and Settings actions without a duplicate collapse control", () => {
+  it("keeps compact Settings without sidebar Search or a duplicate collapse control", () => {
     mockConversations(THREE_TYPE_CONVERSATIONS);
     renderSidebar();
 
     const headerActions = screen.getByTestId("sidebar-header-actions");
-    const search = within(headerActions).getByTestId("sidebar-search-button");
+    expect(within(headerActions).queryByTestId("sidebar-search-button")).toBeNull();
     const settings = screen.getByTestId("settings-button");
 
-    expect(search).toHaveAttribute("aria-label", "Search");
-    expect(search).toHaveAttribute("data-size", "icon-xs");
-    expect(search).toHaveClass("size-6", "rounded-[var(--radius-md)]");
-    expect(search).not.toHaveClass("rounded-sm");
-    expect(search.querySelector("svg")).toHaveClass("size-4");
-    expect(search.querySelector("svg")).not.toHaveClass("ui-icon");
     expect(settings).toHaveAttribute("aria-label", "Settings");
     expect(settings).toHaveAttribute("data-size", "icon-xs");
     expect(settings).toHaveClass("size-6", "rounded-[8px]");
@@ -1368,7 +1347,7 @@ describe("Sidebar session list", () => {
     renderSidebar();
 
     const wakingRow = screen.getByRole("link", { name: /conv_waking/ }).closest("li")!;
-    expect(within(wakingRow).getByTestId("session-state-badge")).toHaveAttribute(
+    expect(within(wakingRow).getByRole("img", { name: "Session starting up" })).toHaveAttribute(
       "data-state",
       "starting",
     );
@@ -1588,7 +1567,7 @@ describe("Sidebar failed session indicator", () => {
     }
   });
 
-  it("replaces an unread dot with the error icon and keeps it after marking read", () => {
+  it("retains the error alongside unread state and keeps it after marking read", () => {
     const session = conv("conv_error", "Codex", {
       status: "failed",
       updated_at: 200,
@@ -1600,9 +1579,9 @@ describe("Sidebar failed session indicator", () => {
     const row = screen.getByRole("link", { name: /conv_error/ }).closest("li")!;
     const badge = within(row).getByRole("img", { name: "Latest message is an error" });
     expect(badge).toHaveAttribute("data-state", "error");
-    expect(badge.parentElement).toHaveClass("right-1", "w-6", "justify-center");
+    expect(badge.parentElement).toHaveClass("flex", "shrink-0");
     expect(within(row).getByText("(unread)")).toBeInTheDocument();
-    expect(within(row).queryByRole("img", { name: "New messages" })).toBeNull();
+    expect(within(row).getByRole("img", { name: "New messages" })).toBeInTheDocument();
 
     act(() => markConversationSeen(session.id, session.updated_at));
 
@@ -1687,7 +1666,7 @@ describe("Sidebar failed session indicator", () => {
     renderSidebar();
 
     const wakingRow = screen.getByRole("link", { name: new RegExp(wakingId) }).closest("li")!;
-    expect(within(wakingRow).getByTestId("session-state-badge")).toHaveAttribute(
+    expect(within(wakingRow).getByRole("img", { name: "Session starting up" })).toHaveAttribute(
       "data-state",
       "starting",
     );
@@ -3568,8 +3547,8 @@ describe("Sidebar view options", () => {
     const row = screen.getByText("conv_meta").closest("li")!;
     expect(within(row).queryByTestId("session-row-meta")).toBeNull();
     expect(within(row).queryByTestId("session-row-updated")).toBeNull();
-    const controls = () => within(row).getByTestId("quick-pin-conversation").closest(".absolute");
-    expect(controls()).toHaveClass("top-1/2");
+    const controls = () => within(row).getByTestId("quick-pin-conversation").parentElement;
+    expect(controls()).not.toHaveClass("absolute");
 
     openViewSubmenu("session-show-menu");
     // Checkbox items keep the menu open, so all three toggle in one visit.
@@ -3582,8 +3561,11 @@ describe("Sidebar view options", () => {
     expect(within(row).getByText("Remote")).toHaveClass("sr-only");
     expect(within(row).getByTestId("session-row-updated")).toHaveTextContent("2m");
     // With a second line, the controls and the timestamp stay on the title line.
-    expect(controls()).toHaveClass("top-4", "md:top-3.5");
-    expect(within(row).getByTestId("session-row-updated")).toHaveClass("top-4", "md:top-3.5");
+    expect(controls()).toHaveClass("self-start", "mt-[var(--list-row-padding-block)]");
+    expect(within(row).getByTestId("session-row-updated").parentElement).toHaveClass(
+      "self-start",
+      "mt-[var(--list-row-padding-block)]",
+    );
     // A session without a branch omits that part rather than leaving a gap.
     const bare = screen.getByText("conv_no_branch").closest("li")!;
     expect(within(bare).getByTestId("session-row-meta")).toHaveTextContent(/^Local machine$/);
@@ -3622,7 +3604,10 @@ describe("Sidebar view options", () => {
     fireEvent.click(screen.getByTestId("session-show-branch"));
     const row = within(screen.getByText("conv_workspace").closest("li")!);
     expect(row.getByTestId("session-row-meta")).toHaveTextContent(/^feature\/web$/);
-    expect(row.getByTestId("quick-pin-conversation").closest(".absolute")).toHaveClass("top-4");
+    expect(row.getByTestId("quick-pin-conversation").parentElement).toHaveClass(
+      "self-start",
+      "mt-[var(--list-row-padding-block)]",
+    );
     expect(screen.getByText("recorded/branch")).toBeInTheDocument();
     expect(useSessionWorktreesMock).toHaveBeenCalledWith(
       "conv_workspace",

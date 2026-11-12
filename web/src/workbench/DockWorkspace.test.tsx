@@ -1,16 +1,8 @@
 import { useEffect, useState } from "react";
-import {
-  act,
-  fireEvent,
-  render,
-  renderHook,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { DockWorkspace, type DockWorkspaceProps } from "./DockWorkspace";
+import { CONVERSATION_DRAG_MIME, DockWorkspace, type DockWorkspaceProps } from "./DockWorkspace";
 import {
   addDockView,
   createDockLayout,
@@ -19,6 +11,7 @@ import {
   resizeDockSplit,
   selectDockView,
   type DockLayout,
+  type DockPlacement,
   type DockView,
 } from "./dockLayout";
 import { dockStorageKey } from "./dockPersistence";
@@ -31,6 +24,16 @@ const view = (id: string, kind = "editor"): DockView => ({
   resource: { scope: "host-a", path: `/${id}` },
 });
 const scope = { accountId: "account", serverId: "server", clientId: "client" };
+const conversationView = (id: string): DockView => ({
+  id: `conversation:${id}`,
+  kind: "conversation",
+  title: id,
+  resource: { conversationId: id },
+});
+
+function chatTransfer(payload: unknown, type = CONVERSATION_DRAG_MIME) {
+  return { types: [type], getData: () => JSON.stringify(payload), dropEffect: "none" };
+}
 
 function memoryStorage(): DockStorage {
   const entries = new Map<string, string>();
@@ -188,9 +191,10 @@ describe("DockWorkspace resource mounts", () => {
     expect(screen.queryByRole("separator", { name: "Resize panes" })).not.toBeInTheDocument();
   });
 
-  it("reorders, splits and resizes through keyboard-accessible controls without remounting a resource", async () => {
-    const user = userEvent.setup();
-    let current: DockLayout = createDockLayout([view("a"), view("b")]);
+  it("reorders, selects and resizes through keyboard controls without remounting a resource", () => {
+    let current: DockLayout = addDockView(createDockLayout([view("a"), view("b")]), view("c"), {
+      edge: "right",
+    });
     function Workspace() {
       const [layout, setLayout] = useState(current);
       current = layout;
@@ -206,25 +210,14 @@ describe("DockWorkspace resource mounts", () => {
     const resource = screen.getByLabelText("Resource a");
     fireEvent.keyDown(screen.getByRole("tab", { name: "a" }), { key: "ArrowRight", altKey: true });
     expect(current.panes[0].viewIds).toEqual(["b", "a"]);
-    await user.click(
-      within(screen.getByRole("tab", { name: "a" }).closest("section")!).getByRole("button", {
-        name: "Pane actions",
-      }),
-    );
-    await user.click(screen.getByRole("menuitem", { name: "Split right" }));
-    expect(current.panes).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Pane actions" })).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize panes" }), {
       key: "ArrowRight",
     });
     expect(current.tree).toMatchObject({ ratio: 0.55 });
     expect(screen.getByLabelText("Resource a")).toBe(resource);
-    await user.click(
-      within(screen.getByRole("tab", { name: "a" }).closest("section")!).getByRole("button", {
-        name: "Pane actions",
-      }),
-    );
-    await user.click(screen.getByRole("menuitem", { name: "Move to b" }));
-    expect(current.panes).toHaveLength(1);
+    fireEvent.keyDown(screen.getByRole("tab", { name: "a" }), { key: "ArrowLeft" });
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Resource a")).toBe(resource);
   });
 
@@ -327,7 +320,209 @@ describe("DockWorkspace resource mounts", () => {
   });
 });
 
+describe("sidebar conversation drops", () => {
+  it.each(["center", "left", "right", "top", "bottom", "tab"] as const)(
+    "opens at the targeted %s destination without touching other panes or dirty resources",
+    async (destination) => {
+      const initial = addDockView(
+        createDockLayout([conversationView("A"), view("dirty")]),
+        view("other"),
+        { edge: "right" },
+      );
+      let current = initial;
+      const guard = vi.fn(() => false);
+      const open = vi.fn((id: string, placement: DockPlacement) => {
+        current = addDockView(current, conversationView(id), placement);
+      });
+      render(
+        <DockWorkspace
+          layout={initial}
+          onLayoutChange={vi.fn()}
+          onBeforeClose={guard}
+          onOpenConversationAt={open}
+          renderView={(item) => <input aria-label={`Drop resource ${item.id}`} />}
+        />,
+      );
+      const original = screen.getByLabelText("Drop resource dirty");
+      const transfer = chatTransfer({ id: "B", title: "B" });
+      const root = document.querySelector(".dock-workspace")!;
+      fireEvent.dragEnter(root, { dataTransfer: transfer });
+      const target =
+        destination === "tab"
+          ? screen.getByRole("tab", { name: "dirty" })
+          : document.querySelector(
+              `[data-pane-id="main"] .dock-drop-zone[data-edge="${destination}"]`,
+            )!;
+      fireEvent.dragOver(target, { dataTransfer: transfer });
+      if (destination !== "tab") expect(target).toHaveAttribute("data-over", "true");
+      fireEvent.drop(target, { dataTransfer: transfer });
+      await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+      expect(open).toHaveBeenCalledWith(
+        "B",
+        destination === "tab"
+          ? { paneId: "main", index: 1 }
+          : destination === "center"
+            ? { paneId: "main" }
+            : { paneId: "main", edge: destination },
+      );
+      expect(current.panes.find((pane) => pane.id === "pane-1")).toEqual(initial.panes[1]);
+      expect(current.views.find((item) => item.id === "dirty")).toBe(initial.views[1]);
+      expect(screen.getByLabelText("Drop resource dirty")).toBe(original);
+      expect(guard).not.toHaveBeenCalled();
+      expect(document.querySelector(".dock-drop-overlay")).not.toBeInTheDocument();
+    },
+  );
+
+  it("leaves file drops alone, ignores malformed chat data, and respects refused or failed opens", async () => {
+    const initial = createDockLayout([view("dirty")]);
+    const open = vi
+      .fn<NonNullable<DockWorkspaceProps["onOpenConversationAt"]>>()
+      .mockResolvedValue(false);
+    const change = vi.fn();
+    render(
+      <DockWorkspace
+        layout={initial}
+        onLayoutChange={change}
+        onOpenConversationAt={open}
+        renderView={() => <input aria-label="Unchanged draft" />}
+      />,
+    );
+    const root = document.querySelector(".dock-workspace")!;
+    const tab = screen.getByRole("tab", { name: "dirty" });
+    const files = chatTransfer({}, "Files");
+    fireEvent.dragEnter(root, { dataTransfer: files });
+    expect(document.querySelector(".dock-drop-overlay")).not.toBeInTheDocument();
+    expect(fireEvent.drop(tab, { dataTransfer: files })).toBe(true);
+    for (const payload of [null, {}, { id: "", title: "B" }, { id: "B" }, { id: 42, title: "B" }]) {
+      fireEvent.drop(tab, { dataTransfer: chatTransfer(payload) });
+    }
+    fireEvent.drop(tab, {
+      dataTransfer: { types: [CONVERSATION_DRAG_MIME], getData: () => "invalid" },
+    });
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.drop(tab, { dataTransfer: chatTransfer({ id: "B", title: "B" }) });
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(change).not.toHaveBeenCalled();
+    open.mockRejectedValue(new Error("Open refused"));
+    fireEvent.drop(tab, { dataTransfer: chatTransfer({ id: "B", title: "B" }) });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Open refused");
+    expect(change).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Unchanged draft")).toBeInTheDocument();
+  });
+
+  it("marks only the actual outside edges, including resized nested panes and compact views", () => {
+    const layout = addDockView(
+      addDockView(createDockLayout([view("left")]), view("top"), { edge: "right" }),
+      view("bottom"),
+      { edge: "bottom" },
+    );
+    const props = {
+      layout: resizeDockSplit(layout, [], 0.6),
+      onLayoutChange: vi.fn(),
+      renderView: (item: DockView) => <span>{item.id} slot</span>,
+    };
+    const rendered = render(<DockWorkspace {...props} />);
+    const slot = (id: string) => screen.getByText(`${id} slot`).closest("[data-dock-view]")!;
+    expect(slot("left")).toHaveAttribute("data-dock-bottom-edge", "true");
+    expect(slot("left")).toHaveAttribute("data-dock-right-edge", "false");
+    expect(slot("top")).toHaveAttribute("data-dock-bottom-edge", "false");
+    expect(slot("top")).toHaveAttribute("data-dock-right-edge", "true");
+    expect(slot("bottom")).toHaveAttribute("data-dock-bottom-edge", "true");
+    expect(slot("bottom")).toHaveAttribute("data-dock-right-edge", "true");
+    rendered.rerender(<DockWorkspace {...props} compact />);
+    expect(slot("bottom")).toHaveAttribute("data-dock-bottom-edge", "true");
+    expect(slot("bottom")).toHaveAttribute("data-dock-right-edge", "true");
+  });
+});
+
 describe("useDockLayout", () => {
+  it("automatically restores A plus Explorer, keeps explicitly opened B in A, and reloads each owner", async () => {
+    const storage = memoryStorage();
+    const initialLayout = createDockLayout([conversationView("A")]);
+    const { result, unmount } = renderHook(() => useDockLayout({ scope, storage, initialLayout }));
+    expect(result.current.activeConversationId).toBe("A");
+    act(() => {
+      result.current.addView(view("explorer", "explorer"), { edge: "right" });
+      result.current.setLayout((layout) => resizeDockSplit(layout, [], 0.65));
+    });
+    const a = result.current.layout;
+    await act(async () => {
+      await result.current.navigateConversation("B");
+    });
+    expect(result.current.layout.views.map((item) => item.resource.conversationId)).toEqual(["B"]);
+    act(() => result.current.addView(view("b-search", "search"), { edge: "bottom" }));
+    const b = result.current.layout;
+    await act(async () => {
+      await result.current.navigateConversation("A");
+    });
+    expect(result.current.layout).toEqual(a);
+    act(() => result.current.addView(conversationView("B"), { paneId: "main", edge: "right" }));
+    expect(result.current.activeConversationId).toBe("A");
+    expect(result.current.layout.views.map((item) => item.id)).toEqual([
+      "conversation:A",
+      "explorer",
+      "conversation:B",
+    ]);
+    const aWithB = result.current.layout;
+    unmount();
+    const reloaded = renderHook(() => useDockLayout({ scope, storage, initialLayout }));
+    expect(reloaded.result.current.activeConversationId).toBe("A");
+    expect(reloaded.result.current.layout).toEqual(aWithB);
+    await act(async () => {
+      await reloaded.result.current.navigateConversation("B");
+    });
+    expect(reloaded.result.current.layout).toEqual(b);
+    await act(async () => {
+      await reloaded.result.current.navigateConversation("A");
+    });
+    expect(reloaded.result.current.layout).toEqual(aWithB);
+  });
+
+  it("pins from the tab before close and unpins into the current owner's layout", async () => {
+    const user = userEvent.setup();
+    let dock!: ReturnType<typeof useDockLayout>;
+    function Workspace() {
+      dock = useDockLayout({
+        scope,
+        storage: null,
+        initialLayout: createDockLayout([conversationView("A"), view("Explorer", "explorer")]),
+      });
+      return (
+        <DockWorkspace
+          layout={dock.layout}
+          onLayoutChange={dock.setLayout}
+          retainedViews={dock.retainedViews}
+          pinnedViewIds={dock.pinnedViewIds}
+          onPinView={dock.pinView}
+          onUnpinView={dock.unpinView}
+          renderView={(item) => <input aria-label={`Pin resource ${item.id}`} />}
+        />
+      );
+    }
+    render(<Workspace />);
+    const explorer = screen.getByLabelText("Pin resource Explorer");
+    const pin = screen.getByRole("button", { name: "Pin Explorer" });
+    expect(pin.nextElementSibling).toBe(screen.getByRole("button", { name: "Close Explorer" }));
+    pin.focus();
+    await user.keyboard("{Enter}");
+    expect(dock.pinnedViewIds).toEqual(["Explorer"]);
+    expect(screen.getByRole("button", { name: "Unpin Explorer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await act(async () => {
+      await dock.navigateConversation("B");
+    });
+    expect(screen.getByLabelText("Pin resource Explorer")).toBe(explorer);
+    expect(explorer.closest("[data-dock-view]")).not.toHaveAttribute("hidden");
+    await user.click(screen.getByRole("button", { name: "Unpin Explorer" }));
+    expect(dock.pinnedViewIds).toEqual([]);
+    await act(async () => {
+      await dock.navigateConversation("A");
+    });
+    expect(screen.getByLabelText("Pin resource Explorer")).toBe(explorer);
+  });
+
   it("persists splits, selection, focus and explicit chat saves; shared navigation does not delete them", async () => {
     const storage = memoryStorage();
     const initialLayout = createDockLayout([view("shared")]);
@@ -339,8 +534,8 @@ describe("useDockLayout", () => {
     await act(async () => {
       expect(await result.current.navigateConversation("B")).toBe(true);
     });
-    expect(result.current.layout.views.map((item) => item.id)).toEqual(["shared"]);
-    expect(result.current.hasChatLayout).toBe(false);
+    expect(result.current.layout.views.map((item) => item.id)).toEqual(["conversation:B"]);
+    expect(result.current.hasChatLayout).toBe(true);
     act(() => result.current.addView(view("explorer")));
     act(() => result.current.pinView("explorer"));
     await act(async () => {
@@ -422,7 +617,45 @@ describe("useDockLayout", () => {
     expect(screen.getByLabelText("Saved diff")).toBe(diff);
     expect(diff.value).toBe("draft");
     expect(screen.getByLabelText("Saved explorer")).toBe(explorer);
-    expect(mounted.mock.calls.map(([id]) => id)).toEqual(["shared", "diff", "explorer"]);
+    expect(mounted.mock.calls.map(([id]) => id)).toEqual([
+      "shared",
+      "diff",
+      "conversation:B",
+      "explorer",
+    ]);
+  });
+
+  it("does not apply a pending local close to another owner's copy of the same view", async () => {
+    const decision = deferred<boolean>();
+    const guard = vi.fn().mockReturnValueOnce(decision.promise).mockResolvedValue(true);
+    const { result } = renderHook(() =>
+      useDockLayout({
+        scope,
+        storage: null,
+        initialLayout: createDockLayout([conversationView("A")]),
+        onBeforeClose: guard,
+      }),
+    );
+    act(() => result.current.addView(conversationView("B")));
+    let close!: Promise<boolean>;
+    act(() => {
+      close = result.current.closeView("conversation:B");
+    });
+    await act(async () => {
+      expect(await result.current.navigateConversation("B")).toBe(true);
+    });
+    await act(async () => {
+      decision.resolve(true);
+      expect(await close).toBe(false);
+    });
+    expect(result.current.layout.views.map((item) => item.id)).toEqual(["conversation:B"]);
+    await act(async () => {
+      await result.current.navigateConversation("A");
+    });
+    expect(result.current.layout.views.map((item) => item.id)).toEqual([
+      "conversation:A",
+      "conversation:B",
+    ]);
   });
 
   it("isolates accounts/servers/clients and cancels pending actions after a scope change", async () => {
@@ -549,6 +782,177 @@ describe("useDockLayout", () => {
     });
     expect(result.current.activeConversationId).toBe("A");
     expect(result.current.layout.views.map((item) => item.id)).toEqual(["a", "dirty", "newer"]);
+  });
+
+  it("accepts title-only updates during guards and persists the latest source and destination titles", async () => {
+    const storage = memoryStorage();
+    const decision = deferred<boolean>();
+    const guard = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useDockLayout({
+        scope,
+        storage,
+        initialLayout: createDockLayout([conversationView("A")]),
+        onBeforeClose: guard,
+      }),
+    );
+    await act(async () => {
+      await result.current.navigateConversation("B");
+    });
+    await act(async () => {
+      await result.current.navigateConversation("A");
+    });
+    guard.mockImplementation(() => decision.promise);
+    let navigation!: Promise<boolean>;
+    act(() => {
+      navigation = result.current.navigateConversation("B");
+    });
+    await act(async () => {
+      await result.current.updateView("conversation:A", { title: "Latest A" });
+      await result.current.updateView("conversation:B", { title: "Latest B" });
+    });
+    await act(async () => {
+      decision.resolve(true);
+      expect(await navigation).toBe(true);
+    });
+    expect(result.current.activeConversationId).toBe("B");
+    expect(result.current.layout.views[0].title).toBe("Latest B");
+    const persisted = JSON.parse(storage.getItem(dockStorageKey(scope))!);
+    expect(
+      persisted.chats.map((chat: { layout: DockLayout }) => chat.layout.views[0].title),
+    ).toEqual(["Latest A", "Latest B"]);
+  });
+
+  it.each(["resource", "topology", "owner", "request", "scope"] as const)(
+    "rejects pending navigation after a newer %s change",
+    async (change) => {
+      const decision = deferred<boolean>();
+      const guard = vi.fn().mockReturnValueOnce(decision.promise).mockResolvedValue(true);
+      const { result, rerender } = renderHook(
+        ({ accountId }) =>
+          useDockLayout({
+            scope: { ...scope, accountId },
+            storage: null,
+            initialLayout: createDockLayout([conversationView("A"), view("dirty")]),
+            onBeforeClose: guard,
+          }),
+        { initialProps: { accountId: scope.accountId } },
+      );
+      let navigation!: Promise<boolean>;
+      act(() => {
+        navigation = result.current.navigateConversation("B");
+      });
+      await act(async () => {
+        if (change === "resource")
+          await result.current.updateView("dirty", {
+            resource: { title: "A changed resource, not view metadata" },
+          });
+        else if (change === "topology")
+          result.current.setLayout((layout) =>
+            moveDockView(layout, "dirty", { paneId: "main", edge: "right" }),
+          );
+        else if (change === "owner") await result.current.navigateConversation("C");
+        else if (change === "request") await result.current.navigateConversation("A");
+        else rerender({ accountId: "other" });
+      });
+      const latest = result.current.layout;
+      await act(async () => {
+        decision.resolve(true);
+        expect(await navigation).toBe(false);
+      });
+      expect(result.current.layout).toEqual(latest);
+      expect(result.current.activeConversationId).toBe(change === "owner" ? "C" : "A");
+    },
+  );
+
+  it("restores late legacy views into A while preserving B, pins and A's saved geometry and selection", async () => {
+    const storage = memoryStorage();
+    const { result } = renderHook(() =>
+      useDockLayout({ scope, storage, initialLayout: createDockLayout([conversationView("A")]) }),
+    );
+    act(() => {
+      result.current.addView(view("a-tool"), { edge: "right" });
+      result.current.setLayout((layout) => resizeDockSplit(layout, [], 0.65));
+    });
+    const originalA = result.current.layout;
+    await act(async () => {
+      await result.current.navigateConversation("B");
+    });
+    act(() => {
+      result.current.addView(view("pin"));
+      result.current.pinView("pin");
+    });
+    const originalB = result.current.layout;
+    act(() =>
+      result.current.restoreConversationViews("A", [
+        view("legacy"),
+        { ...view("a-tool"), resource: { path: "/stale" } },
+      ]),
+    );
+    expect(result.current.activeConversationId).toBe("B");
+    expect(result.current.layout).toEqual(originalB);
+    const persisted = JSON.parse(storage.getItem(dockStorageKey(scope))!);
+    const restoredA: DockLayout = persisted.chats.find(
+      (chat: { conversationId: string }) => chat.conversationId === "A",
+    ).layout;
+    expect(restoredA.tree).toEqual(originalA.tree);
+    expect(restoredA.focusedPaneId).toBe(originalA.focusedPaneId);
+    expect(restoredA.panes.map((pane) => pane.selectedViewId)).toEqual(
+      originalA.panes.map((pane) => pane.selectedViewId),
+    );
+    expect(restoredA.views).toEqual([...originalA.views, view("legacy")]);
+    const saved = storage.getItem(dockStorageKey(scope));
+    act(() => result.current.restoreConversationViews("A", [view("legacy")]));
+    expect(storage.getItem(dockStorageKey(scope))).toBe(saved);
+    await act(async () => {
+      await result.current.navigateConversation("A");
+    });
+    expect(result.current.layout.views.some((item) => item.id === "legacy")).toBe(true);
+    expect(result.current.pinnedViewIds).toEqual(["pin"]);
+  });
+
+  it("restores the first missing legacy view to the right and subsequent views into that pane", async () => {
+    const storage = memoryStorage();
+    const { result } = renderHook(() =>
+      useDockLayout({ scope, storage, initialLayout: createDockLayout([conversationView("A")]) }),
+    );
+    await act(async () => {
+      await result.current.navigateConversation("B");
+    });
+    const originalB = result.current.layout;
+    act(() =>
+      result.current.restoreConversationViews(
+        "A",
+        [conversationView("A"), view("legacy-one"), view("legacy-two")],
+        { edge: "right" },
+      ),
+    );
+    expect(result.current.activeConversationId).toBe("B");
+    expect(result.current.layout).toEqual(originalB);
+    const persisted = JSON.parse(storage.getItem(dockStorageKey(scope))!);
+    const restoredA: DockLayout = persisted.chats.find(
+      (chat: { conversationId: string }) => chat.conversationId === "A",
+    ).layout;
+    expect(restoredA.tree).toEqual({ axis: "columns", ratio: 0.5, children: ["main", "pane-1"] });
+    expect(restoredA.panes[1].viewIds).toEqual(["legacy-one", "legacy-two"]);
+    expect(restoredA.focusedPaneId).toBe("main");
+    expect(restoredA.panes[0].selectedViewId).toBe("conversation:A");
+  });
+
+  it("restores a missing owner's snapshot without activating it", () => {
+    const storage = memoryStorage();
+    const { result } = renderHook(() =>
+      useDockLayout({ scope, storage, initialLayout: createDockLayout([conversationView("B")]) }),
+    );
+    const original = result.current.layout;
+    act(() => result.current.restoreConversationViews("A", [conversationView("A")]));
+    expect(result.current.activeConversationId).toBe("B");
+    expect(result.current.layout).toEqual(original);
+    const persisted = JSON.parse(storage.getItem(dockStorageKey(scope))!);
+    expect(
+      persisted.chats.find((chat: { conversationId: string }) => chat.conversationId === "A").layout
+        .views,
+    ).toEqual([{ ...conversationView("A"), title: "Conversation" }]);
   });
 
   it("reports corrupt storage and quota failures without overwriting on load or losing current state", async () => {

@@ -10,6 +10,9 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { getEmbedRoot } from "@/lib/host";
 
+export const textSelectionMenuClassName =
+  "selectionmenu slim-scrollbar fixed z-50 overflow-auto rounded-md bg-popover text-popover-foreground shadow-menu ring-1 ring-border";
+
 export interface TextSelectionAction {
   label: string;
   icon: ReactNode;
@@ -87,7 +90,7 @@ export function TextSelectionMenu({
       data-text-selection-menu
       role="menu"
       aria-label="Selected text"
-      className="fixed z-50 flex flex-wrap items-center gap-1 overflow-auto rounded-md bg-popover p-1 text-popover-foreground shadow-menu ring-1 ring-border"
+      className={`${textSelectionMenuClassName} flex flex-wrap items-center gap-1 p-1`}
       style={{ left: x, top: y }}
       onPointerDown={(event) => event.preventDefault()}
       onMouseDown={(event) => event.preventDefault()}

@@ -4,6 +4,8 @@ import { FolderIcon, GitForkIcon } from "lucide-react";
 import { COMPOSER_WORKSPACE_COLLAPSED_LABEL_CLASS } from "./ChatComposer";
 import type { ComposerBranchState } from "@/hooks/useComposerGitStatus";
 import { cn } from "@/lib/utils";
+import { COMPOSER_CONTROL_TEXT_CLASS } from "./ComposerControls";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** Trailing path segment, e.g. ``feature-login``. */
 function pathTail(path: string): string {
@@ -97,10 +99,12 @@ function WorkspaceStatusItem({
   ariaLabel: string;
   testId: string;
 }) {
-  return (
+  const item = (
     <span
-      className="relative inline-flex h-8 min-w-0 max-w-40 items-center gap-1 px-1 text-xs leading-4 font-normal text-muted-foreground md:h-7"
-      title={title}
+      className={cn(
+        "relative inline-flex h-8 min-w-0 max-w-40 items-center gap-1 px-1 md:h-7",
+        COMPOSER_CONTROL_TEXT_CLASS,
+      )}
       aria-label={ariaLabel}
       data-testid={testId}
     >
@@ -112,5 +116,13 @@ function WorkspaceStatusItem({
         {label}
       </span>
     </span>
+  );
+  return title === label ? (
+    item
+  ) : (
+    <Tooltip>
+      <TooltipTrigger asChild>{item}</TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
   );
 }

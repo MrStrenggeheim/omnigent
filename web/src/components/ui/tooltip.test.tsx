@@ -60,7 +60,9 @@ describe("canonical button tooltips", () => {
         <DialogContent showCloseButton={false} aria-describedby={undefined}>
           <DialogTitle>Tools</DialogTitle>
           <Button>Reset zoom</Button>
-          <Button>Download original</Button>
+          <Button title="Download the original file without preview conversion">
+            Download original
+          </Button>
         </DialogContent>
       </Dialog>,
     );
@@ -68,7 +70,7 @@ describe("canonical button tooltips", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     await userEvent.tab();
     expect(screen.getByRole("button", { name: "Download original" })).toHaveFocus();
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Download original");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("without preview conversion");
     expect(document.querySelectorAll('[data-slot="tooltip-content"]')).toHaveLength(1);
   });
 
@@ -200,8 +202,11 @@ describe("canonical button tooltips", () => {
       expect(ref.current).toBe(button);
       expect(button).not.toHaveAttribute("title");
       await userEvent.tab();
-      expect(await screen.findByRole("tooltip")).toHaveTextContent("Save file");
-      expect(button).toHaveAccessibleDescription("Save file");
+      if (source === "text") expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      else {
+        expect(await screen.findByRole("tooltip")).toHaveTextContent("Save file");
+        expect(button).toHaveAccessibleDescription("Save file");
+      }
       await userEvent.keyboard("{Enter}");
       expect(submit).toHaveBeenCalledOnce();
       expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
@@ -311,7 +316,7 @@ describe("canonical button tooltips", () => {
     );
     const files = screen.getByRole("tab", { name: "Files" });
     fireEvent.focus(files);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Files");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Search files" }), {
       button: 0,
       ctrlKey: false,
@@ -323,7 +328,7 @@ describe("canonical button tooltips", () => {
   });
 });
 
-it("gives disclosure buttons canonical state-aware guidance without changing expansion", async () => {
+it("keeps disclosure expansion without automatic Expand/Collapse details tooltips", async () => {
   const user = userEvent.setup();
   render(
     <TooltipProvider delayDuration={0}>
@@ -335,12 +340,27 @@ it("gives disclosure buttons canonical state-aware guidance without changing exp
   );
   const trigger = screen.getByRole("button", { name: "Tool details" });
   await user.hover(trigger);
-  expect(await screen.findByRole("tooltip")).toHaveTextContent("Expand details");
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   await user.click(trigger);
   expect(screen.getByText("Command output")).toBeVisible();
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
   await user.unhover(trigger);
   await user.hover(trigger);
-  expect(await screen.findByRole("tooltip")).toHaveTextContent("Collapse details");
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   await user.keyboard(" ");
   expect(screen.queryByText("Command output")).not.toBeInTheDocument();
+});
+
+it("retains explicitly supplied disclosure guidance in the canonical tooltip", async () => {
+  render(
+    <TooltipProvider delayDuration={0}>
+      <Collapsible>
+        <CollapsibleTrigger title="Includes stdout and stderr">Tool details</CollapsibleTrigger>
+      </Collapsible>
+    </TooltipProvider>,
+  );
+  const trigger = screen.getByRole("button", { name: "Tool details" });
+  await userEvent.hover(trigger);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Includes stdout and stderr");
+  expect(trigger).not.toHaveAttribute("title");
 });

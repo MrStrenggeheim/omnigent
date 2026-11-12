@@ -65,7 +65,6 @@ import {
   Loader2Icon,
   MailIcon,
   MailOpenIcon,
-  MessageCircleDashedIcon,
   MessageCirclePlusIcon,
   Maximize2Icon,
   Minimize2Icon,
@@ -197,7 +196,6 @@ import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { ProjectRowIcon } from "./ProjectPicker";
 import { EmojiPicker } from "@/components/ProjectIconPicker";
 import { SessionStateBadge } from "@/components/SessionStateBadge";
-import { RunningDot } from "@/components/RunningDot";
 import { useSessionRunnerOnline } from "@/hooks/RunnerHealthProvider";
 import { useActiveRootSessionId } from "@/hooks/useSession";
 import { isSessionStoppable } from "@/lib/sessionStop";
@@ -297,36 +295,28 @@ import {
   SIDEBAR_GRID_MEMBER_HIGHLIGHT,
   SIDEBAR_GRID_SELECTED_RING,
   SIDEBAR_OPEN_MENU_HIGHLIGHT,
+  SIDEBAR_TREE_INDENT,
 } from "./sidebarStyles";
 import { MAIN_CANVAS_ID } from "@/canvas/canvasLayout";
 import { CANVAS_QUERY_PARAM, canvasLocation, isCanvasPathname } from "@/canvas/canvasNavigation";
-import { TooltipArrow } from "radix-ui/tooltip";
 import { getEmbedRoot } from "../lib/host";
+import {
+  SIDEBAR_CONVERSATION_DRAG_MIME,
+  writeSidebarConversationDrag,
+  type SidebarConversationDrag,
+} from "./sidebarConversationDrag";
 import {
   CompactShortcutKeys,
   newSessionAriaShortcut,
   newSessionShortcutKeys,
 } from "@/components/KeyboardShortcut";
 
-// Positioning for a row's trailing session-state badge. Anchored at the row's
-// trailing icon edge in every viewport: on desktop it fades on hover so the pin
-// + kebab take its place; on mobile those controls are gone, so the badge holds
-// that edge.
-const SESSION_STATE_SLOT_CLASS =
-  "-translate-y-1/2 pointer-events-none absolute flex h-5 items-center transition-opacity md:group-hover/conversation:opacity-0 md:group-has-[:focus-visible]/conversation:opacity-0 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-0";
+const DROP_TARGET_HIGHLIGHT = SIDEBAR_ACTIVE_HIGHLIGHT;
 
-// Small markers (running/starting/unseen dot, or the draft pencil when there's
-// no session state) get a fixed size-6 centered box so their glyph lands 16px
-// from the right edge — lining up vertically with the desktop kebab and the
-// size-6 section-header icons above (the marker column) in every viewport. The
-// "awaiting" pill keeps its natural width — a fixed box would clip its "Needs
-// response" label.
+/** Section summaries center compact markers while approval pills keep their width. */
 function isDotMarker(state: SessionState | null): boolean {
   return state === null || state.kind !== "awaiting";
 }
-const SESSION_STATE_DOT_SLOT_CLASS = "w-6 justify-center";
-
-const DROP_TARGET_HIGHLIGHT = SIDEBAR_ACTIVE_HIGHLIGHT;
 
 // Stable sensor options keep dnd-kit from rerendering every row on list updates.
 const KEYBOARD_SENSOR_OPTIONS = {
@@ -361,6 +351,10 @@ const RowActivationContext = createContext<
 >(() => {});
 // True while a pin, unpin, or reorder is saving; pin controls are disabled then.
 const PinSavingContext = createContext(false);
+const NativeSidebarDragContext = createContext<{
+  start: (conversation: SidebarConversationDrag) => void;
+  end: () => void;
+} | null>(null);
 // Set only around the Pinned section, so its rows become drag-to-reorder targets.
 // `draggingId` is the session being dragged; `overId` the row it's over.
 const PinOrderContext = createContext<{
@@ -1164,26 +1158,28 @@ function SidebarImpl({
             session. Reuses onNavClick so a plain primary click closes
             the sidebar on mobile (where it's a full-screen overlay) but
             modifier/middle clicks still open `/` in a new tab. */}
-              <Link
-                to="/"
-                onClick={onNavClick}
-                data-testid="sidebar-brand"
-                componentId="sidebar.home"
-                className="sidebar-brand rounded-none transition-opacity duration-200 ease-[var(--ease-otto)] hover:opacity-70"
-              >
-                {workbench ? (
-                  <span className={SIDEBAR_HEADING}>Conversations</span>
-                ) : branding.app_name ? (
-                  <span className={cn(SIDEBAR_HEADING, "tracking-tight")}>{branding.app_name}</span>
-                ) : (
-                  <img
-                    src={omnigentWordmark}
-                    alt="Omnigent"
-                    data-testid="sidebar-wordmark"
-                    className="h-[15px] w-auto shrink-0 translate-y-px dark:invert"
-                  />
-                )}
-              </Link>
+              {!workbench && (
+                <Link
+                  to="/"
+                  onClick={onNavClick}
+                  data-testid="sidebar-brand"
+                  componentId="sidebar.home"
+                  className="sidebar-brand rounded-none transition-opacity duration-200 ease-[var(--ease-otto)] hover:opacity-70"
+                >
+                  {branding.app_name ? (
+                    <span className={cn(SIDEBAR_HEADING, "tracking-tight")}>
+                      {branding.app_name}
+                    </span>
+                  ) : (
+                    <img
+                      src={omnigentWordmark}
+                      alt="Omnigent"
+                      data-testid="sidebar-wordmark"
+                      className="h-[15px] w-auto shrink-0 translate-y-px dark:invert"
+                    />
+                  )}
+                </Link>
+              )}
               {/* On the macOS shell this copy is hidden and an identical cluster
             renders in the title-bar strip instead (see AppShell), so the icons
             keep their place when the sidebar collapses or peeks. Everywhere
@@ -1191,6 +1187,7 @@ function SidebarImpl({
               <SidebarHeaderActions
                 compact={workbench}
                 showToggle={false}
+                showSearch={false}
                 expanded={!peek}
                 // onOpen is optional (the sidebar renders standalone in tests), so
                 // fall back to a no-op rather than widening the child's contract.
@@ -1615,6 +1612,8 @@ function ProjectFolder({
   return (
     <div
       ref={setNodeRef}
+      data-sidebar-drop="project"
+      data-sidebar-drop-name={name}
       className={cn(
         "relative rounded-[var(--radius-otto-sm)] transition-colors duration-200 ease-[var(--ease-otto)]",
         // Subtle background tint on drag-over — no border, no shadow.
@@ -2294,12 +2293,22 @@ function ConversationList({
   // null. Set on drag start, cleared on end/cancel; drives the DragOverlay
   // preview and which drop zones light up (ungroup only for a filed session, pin
   // only for an unpinned one).
-  const [activeDrag, setActiveDrag] = useState<{
-    id: string;
-    label: string;
-    project: string | null;
-    isPinned: boolean;
-  } | null>(null);
+  const [activeDrag, setActiveDrag] = useState<SidebarConversationDrag | null>(null);
+  const nativeDrag = useRef<SidebarConversationDrag | null>(null);
+  const nativeDragHandlers = useMemo(
+    () => ({
+      start: (conversation: SidebarConversationDrag) => {
+        nativeDrag.current = conversation;
+        setActiveDrag(conversation);
+      },
+      end: () => {
+        nativeDrag.current = null;
+        setActiveDrag(null);
+        setOverPin(null);
+      },
+    }),
+    [],
+  );
   // Mouse: a small drag threshold so a plain click still navigates / opens the
   // kebab. Touch: a press-and-hold delay so scrolling the list isn't hijacked
   // into a drag. Project headers also support keyboard sorting.
@@ -2325,36 +2334,19 @@ function ConversationList({
       return;
     }
     const data = event.active.data.current as
-      { label?: string; project?: string | null; isPinned?: boolean } | undefined;
+      | { label?: string; project?: string | null; isPinned?: boolean; canManage?: boolean }
+      | undefined;
     setActiveDrag({
       id: String(event.active.id),
       label: data?.label ?? String(event.active.id),
       project: data?.project ?? null,
       isPinned: data?.isPinned ?? false,
+      canManage: data?.canManage !== false,
     });
   }, []);
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      if (event.active.data.current?.type === "project-order") {
-        setDraggedProject(null);
-        setOverProject(null);
-        if (event.over?.data.current?.type !== "project-order" || saveOrder.isPending) return;
-        const from = projects.findIndex((p) => p.name === event.active.data.current?.name);
-        const to = projects.findIndex((p) => p.name === event.over?.data.current?.name);
-        if (from >= 0 && to >= 0 && from !== to) saveOrder.mutate(arrayMove(projects, from, to));
-        return;
-      }
-      const dragged = activeDrag;
-      setActiveDrag(null);
-      setOverPin(null);
-      if (!dragged) return;
-      const gridTarget = event.over?.data.current as GridDropTarget | undefined;
-      if (gridTarget?.type === "session-grid") {
-        grids?.split(gridTarget.targetId, dragged.id, gridTarget.edge);
-        return;
-      }
-      if (event.active.data.current?.canManage === false) return;
-      const target = (event.over?.data.current as SidebarDropTarget | undefined) ?? null;
+  const applySessionDrop = useCallback(
+    (dragged: SidebarConversationDrag, target: SidebarDropTarget | null) => {
+      if (!dragged.canManage) return;
       const action = resolveSidebarDrop(
         { id: dragged.id, project: dragged.project, isPinned: dragged.isPinned },
         target,
@@ -2406,19 +2398,54 @@ function ConversationList({
         if (action.unpin) pinAt({ id: dragged.id, pinned: false }).catch(() => {});
       }
     },
-    [
-      activeDrag,
-      grids,
-      moveToProject,
-      expandProject,
-      onTogglePinned,
-      projects,
-      saveOrder,
-      sections.pinned,
-      pinAt,
-      reorderPins,
-    ],
+    [moveToProject, expandProject, onTogglePinned, sections.pinned, pinAt, reorderPins],
   );
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (event.active.data.current?.type === "project-order") {
+        setDraggedProject(null);
+        setOverProject(null);
+        if (event.over?.data.current?.type !== "project-order" || saveOrder.isPending) return;
+        const from = projects.findIndex((p) => p.name === event.active.data.current?.name);
+        const to = projects.findIndex((p) => p.name === event.over?.data.current?.name);
+        if (from >= 0 && to >= 0 && from !== to) saveOrder.mutate(arrayMove(projects, from, to));
+        return;
+      }
+      const dragged = activeDrag;
+      setActiveDrag(null);
+      setOverPin(null);
+      if (!dragged) return;
+      const gridTarget = event.over?.data.current as GridDropTarget | undefined;
+      if (gridTarget?.type === "session-grid") {
+        grids?.split(gridTarget.targetId, dragged.id, gridTarget.edge);
+        return;
+      }
+      applySessionDrop(
+        dragged,
+        (event.over?.data.current as SidebarDropTarget | undefined) ?? null,
+      );
+    },
+    [activeDrag, grids, projects, saveOrder, applySessionDrop],
+  );
+
+  const nativeDropTarget = (element: EventTarget | null): SidebarDropTarget | null => {
+    if (!(element instanceof Element)) return null;
+    const target = element.closest<HTMLElement>("[data-sidebar-drop]");
+    switch (target?.dataset.sidebarDrop) {
+      case "project":
+        return { type: "project", name: target.dataset.sidebarDropName! };
+      case "pin-order":
+        return pinReorderEnabled && !pinWriting
+          ? { type: "pin-order", id: target.dataset.sidebarSessionId! }
+          : null;
+      case "pin":
+        return pinWriting ? null : { type: "pin" };
+      case "ungroup":
+        return { type: "ungroup" };
+      default:
+        return null;
+    }
+  };
 
   const expandAllProjects = useCallback((allNames: string[]) => {
     setExpandedProjects(() => {
@@ -2823,306 +2850,339 @@ function ConversationList({
         }}
       >
         {activeDrag && <GridDropTargets sessionId={activeDrag.id} />}
-        <RowEditHoldContext.Provider value={reportRowEditing}>
-          <PinSavingContext.Provider value={pinWriting}>
-            <div
-              className="flex flex-col gap-6"
-              data-testid="sidebar-conversation-list"
-              // Only DOM descendants hold the order; portalled menus bubble
-              // mouse events here even when the pointer is outside the list.
-              onMouseOver={(event) =>
-                setPointerInside(event.currentTarget.contains(event.target as Node))
-              }
-              onMouseLeave={() => setPointerInside(false)}
-            >
-              {workbench && branches.error && (
-                <div role="alert" className="px-2 text-xs text-destructive">
-                  Could not refresh subchats.{" "}
-                  <button type="button" onClick={branches.retry}>
-                    Retry
-                  </button>
-                </div>
-              )}
-              {/* Removing a filed session from its project means dropping it back
+        <NativeSidebarDragContext.Provider value={nativeDragHandlers}>
+          <RowEditHoldContext.Provider value={reportRowEditing}>
+            <PinSavingContext.Provider value={pinWriting}>
+              <div
+                className="flex flex-col gap-6"
+                data-testid="sidebar-conversation-list"
+                onDragOver={(event) => {
+                  if (
+                    !nativeDrag.current ||
+                    !Array.from(event.dataTransfer.types).includes(SIDEBAR_CONVERSATION_DRAG_MIME)
+                  )
+                    return;
+                  const target = nativeDropTarget(event.target);
+                  if (!target) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setOverPin(target.type === "pin-order" ? target.id : null);
+                }}
+                onDrop={(event) => {
+                  const dragged = nativeDrag.current;
+                  if (
+                    !dragged ||
+                    !Array.from(event.dataTransfer.types).includes(SIDEBAR_CONVERSATION_DRAG_MIME)
+                  )
+                    return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const target = nativeDropTarget(event.target);
+                  nativeDragHandlers.end();
+                  applySessionDrop(dragged, target);
+                }}
+                // Only DOM descendants hold the order; portalled menus bubble
+                // mouse events here even when the pointer is outside the list.
+                onMouseOver={(event) =>
+                  setPointerInside(event.currentTarget.contains(event.target as Node))
+                }
+                onMouseLeave={() => setPointerInside(false)}
+              >
+                {workbench && branches.error && (
+                  <div role="alert" className="px-2 text-xs text-destructive">
+                    Could not refresh subchats.{" "}
+                    <button type="button" onClick={branches.retry}>
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {/* Removing a filed session from its project means dropping it back
             onto the flat "Chats" list — so the Chats section itself is the
             ungroup target (wrapped below). This top strip is only a FALLBACK
             for when there are no ungrouped chats yet, so the Chats section
             isn't rendered and there'd otherwise be nowhere to drop. */}
-              {!showShared &&
-                !grouped &&
-                activeDrag?.project != null &&
-                sections.sessions.length === 0 && <UngroupDropZone />}
-              {totalVisible === 0 && searchQuery && !sessionStatus && !importing ? (
-                <>
-                  <p className="px-2 py-1 text-ui text-muted-foreground">{emptyMessage}</p>
-                  {/* The list is one paginated stream in the selected order across
+                {!showShared &&
+                  !grouped &&
+                  activeDrag?.project != null &&
+                  sections.sessions.length === 0 && <UngroupDropZone />}
+                {totalVisible === 0 && searchQuery && !sessionStatus && !importing ? (
+                  <>
+                    <p className="px-2 py-1 text-ui text-muted-foreground">{emptyMessage}</p>
+                    {/* The list is one paginated stream in the selected order across
               owned + shared sessions, so the current filter can be empty on the
               loaded window while its sessions live on a later page. Keep the
               sentinel mounted so pagination continues instead of stranding the
               user on a false "empty" state. */}
-                  {hasMorePages && (
-                    <InfiniteScrollSentinel
-                      scopeKey={activeTab}
-                      budgetRef={autoLoadBudget}
-                      maxAutoLoads={displayPagination.maxAutoLoads}
-                      hasMore={hasMorePages}
-                      isFetching={isFetchingNextPage}
-                      fetchMore={fetchNextPage}
-                      scrollRoot={scrollContainerRef}
-                    />
-                  )}
-                </>
-              ) : (
-                <>
-                  {sections.pinned.length > 0 && (
-                    // Drop a session here to pin it — pin-precedence then floats it
-                    // out of any project into this section. Active only while dragging
-                    // an unpinned session; outline-only highlight.
-                    <PinDropZone active={activeDrag != null && !activeDrag.isPinned}>
-                      <PinOrderContext.Provider value={pinOrder}>
-                        <ConversationSection
-                          title="Pinned"
-                          conversations={sections.pinned}
-                          activeConversationId={displayedActiveId}
-                          pinnedConversationIds={pinnedConversationIds}
-                          collapsed={effectiveCollapsedSections.includes("Pinned")}
-                          onToggleCollapsed={() => effectiveToggleSectionCollapsed("Pinned")}
-                          onRowClick={onRowClick}
-                          onTogglePinned={onTogglePinned}
-                          selectionMode={false}
-                          selectedIds={selectedIds}
-                          onToggleSelected={onToggleSelected}
-                          onProjectAssigned={expandProject}
-                        />
-                      </PinOrderContext.Provider>
-                    </PinDropZone>
-                  )}
-                  {/* Projects have their own archive filter, independent of the session filter. */}
-                  {!grouped && (
-                    <SectionGroup
-                      title="Projects"
-                      collapsed={effectiveCollapsedSections.includes("Projects")}
-                      onToggleCollapsed={() => effectiveToggleSectionCollapsed("Projects")}
-                      persistentHeaderAction={
-                        <ProjectFilterMenu
-                          value={showArchivedProjects}
-                          onChange={(value) => {
-                            setShowArchivedProjects(value);
-                            writeShowArchivedProjects(value);
-                          }}
-                        />
-                      }
-                      afterHeader={
-                        projectsSelecting ? (
-                          <BulkActionBar
-                            selectedIds={selectedIds}
-                            allConversations={
-                              unifiedSelection
-                                ? [...projectSessionPool, ...displayPagination.rows]
-                                : projectSessionPool
-                            }
-                            onDeselectAll={onDeselectAll}
-                            onExit={onExitSelectionMode}
-                            onProjectAssigned={expandProject}
-                          />
-                        ) : undefined
-                      }
-                      headerAction={
-                        !selectionMode ? (
-                          <>
-                            <ProjectHeaderActions
-                              onOrderChange={(manual) => {
-                                const ranks = new Map(
-                                  projectOrder.data?.ordered_project_ids?.map((id, index) => [
-                                    id,
-                                    index,
-                                  ]),
-                                );
-                                const restored = [...projects].sort(
-                                  (a, b) =>
-                                    (ranks.get(a.id ?? "") ?? Infinity) -
-                                    (ranks.get(b.id ?? "") ?? Infinity),
-                                );
-                                saveOrder.mutate(manual ? restored : null);
-                              }}
-                              manualOrder={projectOrder.data?.sort_mode === "manual"}
-                              orderDisabled={saveOrder.isPending || !projectOrder.data}
-                              projectNames={sections.projectGroups.map((group) => group.name)}
-                              collapsed={effectiveCollapsedSections.includes("Projects")}
-                              expandedProjects={expandedProjects}
-                              // A unified selection starts from the header's own button.
-                              hasProjectSessions={
-                                !unifiedSelection &&
-                                sections.projectGroups.some(
-                                  (group) => group.conversations.length > 0,
-                                )
-                              }
-                              onExpandAll={expandAllProjects}
-                              onCollapseAll={collapseAllProjects}
-                              onProjectCreated={expandProject}
-                              onEnterSelectionMode={() => onEnterSelectionMode("projects")}
-                            />
-                            {unifiedSelection && selectSessionsButton}
-                          </>
-                        ) : undefined
-                      }
-                    >
-                      <SortableContext
-                        items={projects.map((p) => projectDragId(p.name))}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        {sections.projectGroups.map((group, index) => (
-                          <ProjectFolder
-                            key={group.name}
-                            ordering={{
-                              disabled:
-                                !projectOrder.data ||
-                                saveOrder.isPending ||
-                                selectionMode ||
-                                editingIds.size > 0,
-                              first: index === 0,
-                              last: index === visibleProjects.length - 1,
-                              move: (destination) => moveProject(group.name, destination),
-                              insertion:
-                                overProject === group.name &&
-                                draggedProject !== group.name &&
-                                draggedProject !== null
-                                  ? projects.findIndex((p) => p.name === draggedProject) < index
-                                    ? "after"
-                                    : "before"
-                                  : undefined,
-                            }}
-                            name={group.name}
-                            projectId={group.id}
-                            icon={group.icon}
-                            archived={group.archived}
-                            windowConversations={group.conversations}
+                    {hasMorePages && (
+                      <InfiniteScrollSentinel
+                        scopeKey={activeTab}
+                        budgetRef={autoLoadBudget}
+                        maxAutoLoads={displayPagination.maxAutoLoads}
+                        hasMore={hasMorePages}
+                        isFetching={isFetchingNextPage}
+                        fetchMore={fetchNextPage}
+                        scrollRoot={scrollContainerRef}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {sections.pinned.length > 0 && (
+                      // Drop a session here to pin it — pin-precedence then floats it
+                      // out of any project into this section. Active only while dragging
+                      // an unpinned session; outline-only highlight.
+                      <PinDropZone active={activeDrag != null && !activeDrag.isPinned}>
+                        <PinOrderContext.Provider value={pinOrder}>
+                          <ConversationSection
+                            title="Pinned"
+                            conversations={sections.pinned}
                             activeConversationId={displayedActiveId}
-                            expanded={expandedProjects.includes(group.name)}
-                            active={newSessionProjectName === group.name}
-                            onToggleCollapsed={() => toggleProjectExpanded(group.name)}
                             pinnedConversationIds={pinnedConversationIds}
-                            activeOverride={activeOverride}
-                            frozenSortKeys={frozenKeys}
-                            scrollRoot={scrollContainerRef}
+                            collapsed={effectiveCollapsedSections.includes("Pinned")}
+                            onToggleCollapsed={() => effectiveToggleSectionCollapsed("Pinned")}
                             onRowClick={onRowClick}
                             onTogglePinned={onTogglePinned}
-                            selectionMode={projectsSelecting}
+                            selectionMode={false}
                             selectedIds={selectedIds}
                             onToggleSelected={onToggleSelected}
                             onProjectAssigned={expandProject}
-                            onConversationsLoaded={handleFolderConversationsLoaded}
                           />
-                        ))}
-                      </SortableContext>
-                      {sections.projectGroups.length === 0 &&
-                        !effectiveCollapsedSections.includes("Projects") && (
-                          <p className="px-2 py-1 text-ui text-muted-foreground">No projects</p>
-                        )}
-                    </SectionGroup>
-                  )}
-                  {/* Other owners' sessions, above the viewer's own. On the Shared
-                    filter it's the only list, so it takes the list controls. */}
-                  {(sections.shared.length > 0 || sharedListOnly) && (
-                    <ConversationSection
-                      title="Shared"
-                      conversations={sections.shared}
-                      emptyMessage={
-                        sharedListOnly && !sessionStatus ? SIDEBAR_FILTER_EMPTY.shared : undefined
-                      }
-                      footer={sharedListOnly ? sessionStatus : undefined}
-                      collapsed={effectiveCollapsedSections.includes("Shared")}
-                      onToggleCollapsed={() => effectiveToggleSectionCollapsed("Shared")}
-                      afterHeader={sharedListOnly ? sessionsBulkBar : undefined}
-                      headerAction={sharedListOnly ? sessionsHeaderActions : undefined}
-                      persistentHeaderAction={sharedListOnly ? sessionsFilterMenu : undefined}
-                      headerStatus={sharedListOnly ? importStatus : undefined}
-                      {...sessionRowProps}
-                    />
-                  )}
-                  {!sharedListOnly && (
-                    // Drop a session here to send it to the flat "Chats" list — where
-                    // unfiled, unpinned sessions live. Active while dragging a filed
-                    // session (removes it from its project) or a pinned one (unpins
-                    // it), since both have somewhere to land here.
-                    <ChatsDropZone
-                      active={activeDrag != null && sessionsListAcceptsDrop(activeDrag, grouped)}
-                    >
-                      {sessionGroups ? (
-                        // Grouped: one titled section per group; the first carries
-                        // the header controls, the last the load status.
-                        <div className="flex flex-col gap-6">
-                          {sessionGroups.map((group, index) => (
-                            <ConversationSection
-                              key={group.title}
-                              title={
-                                index === 0 || view.grouping === "harness"
-                                  ? group.title
-                                  : group.title.replace(
-                                      /^(?:Created|Updated) (.)/,
-                                      (_, initial: string) => initial.toUpperCase(),
-                                    )
+                        </PinOrderContext.Provider>
+                      </PinDropZone>
+                    )}
+                    {/* Projects have their own archive filter, independent of the session filter. */}
+                    {!grouped && (
+                      <SectionGroup
+                        title="Projects"
+                        collapsed={effectiveCollapsedSections.includes("Projects")}
+                        onToggleCollapsed={() => effectiveToggleSectionCollapsed("Projects")}
+                        persistentHeaderAction={
+                          <ProjectFilterMenu
+                            value={showArchivedProjects}
+                            onChange={(value) => {
+                              setShowArchivedProjects(value);
+                              writeShowArchivedProjects(value);
+                            }}
+                          />
+                        }
+                        afterHeader={
+                          projectsSelecting ? (
+                            <BulkActionBar
+                              selectedIds={selectedIds}
+                              allConversations={
+                                unifiedSelection
+                                  ? [...projectSessionPool, ...displayPagination.rows]
+                                  : projectSessionPool
                               }
-                              conversations={group.conversations}
-                              emptyMessage={
-                                group.title === "Working" && !sessionStatus
-                                  ? emptyMessage
-                                  : undefined
-                              }
-                              footer={
-                                index === sessionGroups.length - 1 ? sessionStatus : undefined
-                              }
-                              collapsed={effectiveCollapsedSections.includes(group.title)}
-                              onToggleCollapsed={() => effectiveToggleSectionCollapsed(group.title)}
-                              afterHeader={index === 0 ? sessionsBulkBar : undefined}
-                              headerAction={index === 0 ? sessionsHeaderActions : undefined}
-                              headerStatus={index === 0 ? importStatus : undefined}
-                              persistentHeaderAction={index === 0 ? sessionsFilterMenu : undefined}
-                              {...sessionRowProps}
+                              onDeselectAll={onDeselectAll}
+                              onExit={onExitSelectionMode}
+                              onProjectAssigned={expandProject}
+                            />
+                          ) : undefined
+                        }
+                        headerAction={
+                          !selectionMode ? (
+                            <>
+                              <ProjectHeaderActions
+                                onOrderChange={(manual) => {
+                                  const ranks = new Map(
+                                    projectOrder.data?.ordered_project_ids?.map((id, index) => [
+                                      id,
+                                      index,
+                                    ]),
+                                  );
+                                  const restored = [...projects].sort(
+                                    (a, b) =>
+                                      (ranks.get(a.id ?? "") ?? Infinity) -
+                                      (ranks.get(b.id ?? "") ?? Infinity),
+                                  );
+                                  saveOrder.mutate(manual ? restored : null);
+                                }}
+                                manualOrder={projectOrder.data?.sort_mode === "manual"}
+                                orderDisabled={saveOrder.isPending || !projectOrder.data}
+                                projectNames={sections.projectGroups.map((group) => group.name)}
+                                collapsed={effectiveCollapsedSections.includes("Projects")}
+                                expandedProjects={expandedProjects}
+                                // A unified selection starts from the header's own button.
+                                hasProjectSessions={
+                                  !unifiedSelection &&
+                                  sections.projectGroups.some(
+                                    (group) => group.conversations.length > 0,
+                                  )
+                                }
+                                onExpandAll={expandAllProjects}
+                                onCollapseAll={collapseAllProjects}
+                                onProjectCreated={expandProject}
+                                onEnterSelectionMode={() => onEnterSelectionMode("projects")}
+                              />
+                              {unifiedSelection && selectSessionsButton}
+                            </>
+                          ) : undefined
+                        }
+                      >
+                        <SortableContext
+                          items={projects.map((p) => projectDragId(p.name))}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          {sections.projectGroups.map((group, index) => (
+                            <ProjectFolder
+                              key={group.name}
+                              ordering={{
+                                disabled:
+                                  !projectOrder.data ||
+                                  saveOrder.isPending ||
+                                  selectionMode ||
+                                  editingIds.size > 0,
+                                first: index === 0,
+                                last: index === visibleProjects.length - 1,
+                                move: (destination) => moveProject(group.name, destination),
+                                insertion:
+                                  overProject === group.name &&
+                                  draggedProject !== group.name &&
+                                  draggedProject !== null
+                                    ? projects.findIndex((p) => p.name === draggedProject) < index
+                                      ? "after"
+                                      : "before"
+                                    : undefined,
+                              }}
+                              name={group.name}
+                              projectId={group.id}
+                              icon={group.icon}
+                              archived={group.archived}
+                              windowConversations={group.conversations}
+                              activeConversationId={displayedActiveId}
+                              expanded={expandedProjects.includes(group.name)}
+                              active={newSessionProjectName === group.name}
+                              onToggleCollapsed={() => toggleProjectExpanded(group.name)}
+                              pinnedConversationIds={pinnedConversationIds}
+                              activeOverride={activeOverride}
+                              frozenSortKeys={frozenKeys}
+                              scrollRoot={scrollContainerRef}
+                              onRowClick={onRowClick}
+                              onTogglePinned={onTogglePinned}
+                              selectionMode={projectsSelecting}
+                              selectedIds={selectedIds}
+                              onToggleSelected={onToggleSelected}
+                              onProjectAssigned={expandProject}
+                              onConversationsLoaded={handleFolderConversationsLoaded}
                             />
                           ))}
-                        </div>
-                      ) : (
-                        <ConversationSection
-                          title="Sessions"
-                          conversations={sections.sessions}
-                          emptyMessage={sessionStatus ? undefined : SIDEBAR_FILTER_EMPTY[activeTab]}
-                          footer={sessionStatus}
-                          collapsed={effectiveCollapsedSections.includes("Chats")}
-                          onToggleCollapsed={() => effectiveToggleSectionCollapsed("Chats")}
-                          afterHeader={sessionsBulkBar}
-                          headerAction={sessionsHeaderActions}
-                          headerStatus={importStatus}
-                          persistentHeaderAction={sessionsFilterMenu}
-                          {...sessionRowProps}
-                        />
-                      )}
-                    </ChatsDropZone>
-                  )}
-                  {/* Every filter renders this same Pinned / Projects / Shared /
+                        </SortableContext>
+                        {sections.projectGroups.length === 0 &&
+                          !effectiveCollapsedSections.includes("Projects") && (
+                            <p className="px-2 py-1 text-ui text-muted-foreground">No projects</p>
+                          )}
+                      </SectionGroup>
+                    )}
+                    {/* Other owners' sessions, above the viewer's own. On the Shared
+                    filter it's the only list, so it takes the list controls. */}
+                    {(sections.shared.length > 0 || sharedListOnly) && (
+                      <ConversationSection
+                        title="Shared"
+                        conversations={sections.shared}
+                        emptyMessage={
+                          sharedListOnly && !sessionStatus ? SIDEBAR_FILTER_EMPTY.shared : undefined
+                        }
+                        footer={sharedListOnly ? sessionStatus : undefined}
+                        collapsed={effectiveCollapsedSections.includes("Shared")}
+                        onToggleCollapsed={() => effectiveToggleSectionCollapsed("Shared")}
+                        afterHeader={sharedListOnly ? sessionsBulkBar : undefined}
+                        headerAction={sharedListOnly ? sessionsHeaderActions : undefined}
+                        persistentHeaderAction={sharedListOnly ? sessionsFilterMenu : undefined}
+                        headerStatus={sharedListOnly ? importStatus : undefined}
+                        {...sessionRowProps}
+                      />
+                    )}
+                    {!sharedListOnly && (
+                      // Drop a session here to send it to the flat "Chats" list — where
+                      // unfiled, unpinned sessions live. Active while dragging a filed
+                      // session (removes it from its project) or a pinned one (unpins
+                      // it), since both have somewhere to land here.
+                      <ChatsDropZone
+                        active={activeDrag != null && sessionsListAcceptsDrop(activeDrag, grouped)}
+                      >
+                        {sessionGroups ? (
+                          // Grouped: one titled section per group; the first carries
+                          // the header controls, the last the load status.
+                          <div className="flex flex-col gap-6">
+                            {sessionGroups.map((group, index) => (
+                              <ConversationSection
+                                key={group.title}
+                                title={
+                                  index === 0 || view.grouping === "harness"
+                                    ? group.title
+                                    : group.title.replace(
+                                        /^(?:Created|Updated) (.)/,
+                                        (_, initial: string) => initial.toUpperCase(),
+                                      )
+                                }
+                                conversations={group.conversations}
+                                emptyMessage={
+                                  group.title === "Working" && !sessionStatus
+                                    ? emptyMessage
+                                    : undefined
+                                }
+                                footer={
+                                  index === sessionGroups.length - 1 ? sessionStatus : undefined
+                                }
+                                collapsed={effectiveCollapsedSections.includes(group.title)}
+                                onToggleCollapsed={() =>
+                                  effectiveToggleSectionCollapsed(group.title)
+                                }
+                                afterHeader={index === 0 ? sessionsBulkBar : undefined}
+                                headerAction={index === 0 ? sessionsHeaderActions : undefined}
+                                headerStatus={index === 0 ? importStatus : undefined}
+                                persistentHeaderAction={
+                                  index === 0 ? sessionsFilterMenu : undefined
+                                }
+                                {...sessionRowProps}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <ConversationSection
+                            title="Sessions"
+                            conversations={sections.sessions}
+                            emptyMessage={
+                              sessionStatus ? undefined : SIDEBAR_FILTER_EMPTY[activeTab]
+                            }
+                            footer={sessionStatus}
+                            collapsed={effectiveCollapsedSections.includes("Chats")}
+                            onToggleCollapsed={() => effectiveToggleSectionCollapsed("Chats")}
+                            afterHeader={sessionsBulkBar}
+                            headerAction={sessionsHeaderActions}
+                            headerStatus={importStatus}
+                            persistentHeaderAction={sessionsFilterMenu}
+                            {...sessionRowProps}
+                          />
+                        )}
+                      </ChatsDropZone>
+                    )}
+                    {/* Every filter renders this same Pinned / Projects / Shared /
               Sessions tree; `sections` is scoped to the active filter's conversations,
               and Projects is empty for Shared and Archived. */}
-                  {/* Archived sessions are no longer listed here — they live on the
+                    {/* Archived sessions are no longer listed here — they live on the
               Settings page ("Archived chats"), reachable from the footer. */}
-                  {/* Infinite-scroll sentinel. A new page can land in any list section,
+                    {/* Infinite-scroll sentinel. A new page can land in any list section,
               so it hides only when all of them are collapsed (a loader under a
               collapsed group reads orphaned). */}
-                  {!listSectionKeys.every((key) => effectiveCollapsedSections.includes(key)) && (
-                    <InfiniteScrollSentinel
-                      scopeKey={activeTab}
-                      budgetRef={autoLoadBudget}
-                      maxAutoLoads={displayPagination.maxAutoLoads}
-                      hasMore={hasMorePages}
-                      isFetching={isFetchingNextPage}
-                      fetchMore={fetchNextPage}
-                      scrollRoot={scrollContainerRef}
-                    />
-                  )}
-                </>
-              )}
-            </div>
-          </PinSavingContext.Provider>
-        </RowEditHoldContext.Provider>
+                    {!listSectionKeys.every((key) => effectiveCollapsedSections.includes(key)) && (
+                      <InfiniteScrollSentinel
+                        scopeKey={activeTab}
+                        budgetRef={autoLoadBudget}
+                        maxAutoLoads={displayPagination.maxAutoLoads}
+                        hasMore={hasMorePages}
+                        isFetching={isFetchingNextPage}
+                        fetchMore={fetchNextPage}
+                        scrollRoot={scrollContainerRef}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            </PinSavingContext.Provider>
+          </RowEditHoldContext.Provider>
+        </NativeSidebarDragContext.Provider>
         {/* The dragged row's preview follows the pointer: a compact card showing
           the session's title. Portaled to <body>: the aside always carries a CSS
           translate (the mobile slide-in), which makes it the containing block for
@@ -3167,6 +3227,7 @@ function ChatsDropZone({ active, children }: { active: boolean; children: ReactN
     <div
       ref={setNodeRef}
       data-testid="sidebar-chats-drop-zone"
+      data-sidebar-drop="ungroup"
       className={cn(
         "rounded-[var(--radius-otto-sm)] transition-colors duration-200 ease-[var(--ease-otto)]",
         active && isOver && DROP_TARGET_HIGHLIGHT,
@@ -3193,6 +3254,7 @@ function PinDropZone({ active, children }: { active: boolean; children: ReactNod
     <div
       ref={setNodeRef}
       data-testid="sidebar-pin-drop-zone"
+      data-sidebar-drop="pin"
       className={cn(
         "rounded-[var(--radius-otto-sm)] transition-colors duration-200 ease-[var(--ease-otto)]",
         active && isOver && DROP_TARGET_HIGHLIGHT,
@@ -3215,6 +3277,7 @@ function UngroupDropZone() {
     <div
       ref={setNodeRef}
       data-testid="sidebar-ungroup-drop-zone"
+      data-sidebar-drop="ungroup"
       className={cn(
         "flex items-center gap-1.5 rounded-md border border-dashed border-border px-2 py-1.5 text-muted-foreground text-sm transition-colors",
         isOver && cn(DROP_TARGET_HIGHLIGHT, "text-foreground"),
@@ -4168,6 +4231,7 @@ function ConversationMenuItems({
 }) {
   const atPinCap = useContext(PinCapacityContext);
   const pinSaving = useContext(PinSavingContext);
+  const workbench = useWorkbench();
   const grids = useGridSessions();
   const gridLayout = grids?.enabled
     ? (grids.activeGrid?.layout ?? grids.conversationId)
@@ -4242,6 +4306,12 @@ function ConversationMenuItems({
 
   return (
     <>
+      {workbench && (
+        <C.Item onSelect={() => workbench.openConversation(conversation.id, { beside: true })}>
+          <LayoutDashboardIcon className="size-3.5" />
+          Open to side
+        </C.Item>
+      )}
       {/* Pin/Unpin — mobile-only (md:hidden); desktop uses the
           hover-revealed quick-pin button. Archived rows omit it (archive
           outranks pin). */}
@@ -4609,7 +4679,7 @@ function ConversationBranchRow({
     <>
       <ConversationRow
         {...props}
-        treeDepth={ancestors.length + 1}
+        treeDepth={ancestors.length}
         openElsewhere={!props.isActive && branches.openIds.includes(id)}
         treeControl={
           !props.conversation.provisional &&
@@ -4620,7 +4690,7 @@ function ConversationBranchRow({
               aria-label={`${expanded ? "Collapse" : "Expand"} subchats of ${label}`}
               aria-expanded={expanded}
               aria-controls={groupId}
-              className="flex h-6 w-[var(--tree-indent)] items-center justify-center rounded text-muted-foreground transition-none hover:bg-muted"
+              className="flex h-6 shrink-0 items-center justify-center gap-1 rounded px-1 text-muted-foreground transition-none hover:bg-muted"
               onMouseDown={(event) => event.stopPropagation()}
               onTouchStart={(event) => event.stopPropagation()}
               onClick={(event) => {
@@ -4629,7 +4699,10 @@ function ConversationBranchRow({
                 branches.toggle(id);
               }}
             >
-              <ChevronRightIcon className={cn("size-3.5", expanded && "rotate-90")} />
+              <span aria-hidden className="text-xs tabular-nums">
+                {children.length}
+              </span>
+              <ChevronRightIcon aria-hidden className={cn("size-3.5", expanded && "rotate-90")} />
             </TooltipButton>
           )
         }
@@ -4699,6 +4772,8 @@ function ConversationRowImpl({
   onToggleSelected: (conversationId: string, shiftKey?: boolean) => void;
   onProjectAssigned?: (projectName: string) => void;
 }) {
+  const workbench = useWorkbench();
+  const nativeDragHandlers = useContext(NativeSidebarDragContext);
   const atPinCap = useContext(PinCapacityContext);
   const pinSaving = useContext(PinSavingContext);
   let pinTooltip = isPinned ? "Unpin" : "Pin";
@@ -4822,17 +4897,11 @@ function ConversationRowImpl({
     conversation.updated_at,
     conversation.status,
   );
-  // The dot shows when the conversation is content-unseen AND either the
-  // row isn't the one you're viewing OR you explicitly marked it unread.
-  // `isConversationUnseen` still gates on status, so a *running* turn never
-  // shows the dot — marking a working session unread is recorded but stays
-  // invisible until the turn finishes (then the dot lights like any unseen
-  // row). The explicit override only lifts the active-row suppression, so
-  // flagging the thread you're currently viewing surfaces the dot at once.
-  const hasUnseenMessages = readState.unseen && (!isActive || readState.explicitlyUnread);
+  // Explicit unread flags remain visible alongside live work and on the active row.
+  const hasUnseenMessages = readState.explicitlyUnread || (readState.unseen && !isActive);
   // "Mark as unread" is offered on any row not already showing the dot.
   const canMarkUnread = !hasUnseenMessages;
-  // Approvals and failures outrank the unread dot without clearing read state.
+  // Live state and unread flags retain separate indicators.
   const errorConversations = useMemo(() => [conversation], [conversation]);
   const [latestError] = useSessionErrorStates(errorConversations);
   const derivedState = getSessionState(conversation, latestError);
@@ -4852,17 +4921,13 @@ function ConversationRowImpl({
       : isStartingUp
         ? { kind: "starting" as const }
         : (derivedState ?? (hasUnseenMessages ? { kind: "unseen" as const } : null));
-  // Drafts share the row's trailing indicator slot, but the active session's
-  // composer already makes its draft visible. Live session state wins while
-  // present; otherwise only an inactive row needs the draft marker.
-  const isWorkingState = sessionState?.kind === "running" || sessionState?.kind === "starting";
-  const showDraftIndicator = hasDraft && !isActive && !isWorkingState;
+  // The open composer shows its own draft; other rows retain drafts alongside live state.
+  const showDraftIndicator = hasDraft && !isActive;
   const showSharedIndicator = !isOwner;
-  const hasSessionIndicator = (sessionState !== null && !isWorkingState) || showDraftIndicator;
+  const hasSessionIndicator = sessionState !== null || showDraftIndicator;
   // The "Show → Updated" timestamp takes the indicator slot only when it's free.
   const show = useContext(SidebarShowContext);
   const showUpdated = show.includes("updated") && !hasSessionIndicator;
-  const hasTrailingIndicator = hasSessionIndicator || showSharedIndicator || showUpdated;
   const metaEnvironment = show.includes("environment") ? (
     <SessionEnvironmentLabel conversation={conversation} hostsById={hostsById} />
   ) : null;
@@ -4907,6 +4972,8 @@ function ConversationRowImpl({
   // on the same anchor still fires a click); swallow that one click so a drag
   // doesn't also navigate into the session. Flagged when a drag finishes,
   // cleared on the next tick (after the click that follows pointer-up).
+  const nativeDraggable =
+    !!workbench && !selectionMode && !isArchived && !isEditing && !isProvisionalRow;
   const justDraggedRef = useRef(false);
   const wasDraggingRef = useRef(false);
   useEffect(() => {
@@ -5085,8 +5152,33 @@ function ConversationRowImpl({
       to={selectionMode ? "#" : `/c/${conversation.id}`}
       componentId="sidebar.conversation_switcher"
       aria-current={isActive ? "page" : undefined}
-      draggable={gridsEnabled ? false : undefined}
-      onDragStart={gridsEnabled ? (event) => event.preventDefault() : undefined}
+      style={{ "--tree-depth": 0 } as CSSProperties}
+      draggable={nativeDraggable ? true : gridsEnabled || workbench ? false : undefined}
+      onDragStart={(event) => {
+        if (!nativeDraggable) {
+          event.preventDefault();
+          return;
+        }
+        event.stopPropagation();
+        writeSidebarConversationDrag(event.dataTransfer, { id: conversation.id, label });
+        justDraggedRef.current = true;
+        nativeDragHandlers?.start({
+          id: conversation.id,
+          label,
+          project: currentProject,
+          isPinned,
+          canManage: isOwner,
+        });
+      }}
+      onDragEnd={() => {
+        nativeDragHandlers?.end();
+      }}
+      onPointerDown={() => {
+        justDraggedRef.current = false;
+      }}
+      onKeyDown={() => {
+        justDraggedRef.current = false;
+      }}
       className={cn(
         SIDEBAR_ROW,
         "density-row",
@@ -5094,32 +5186,7 @@ function ConversationRowImpl({
         SIDEBAR_HOVER_HIGHLIGHT,
         // Full width (not 100%+1rem) so the highlight stays inset from the
         // right edge, aligning with the project/folder rows above.
-        "w-full",
-        // Mobile drops the pin + kebab (see the trailing controls below), so it
-        // reserves only what the badge needs — the same width desktop uses at
-        // rest, before hover reveals the controls.
-        !selectionMode &&
-          (sessionState?.kind === "awaiting"
-            ? showSharedIndicator
-              ? "pr-36"
-              : "pr-29"
-            : showUpdated
-              ? showSharedIndicator
-                ? "pr-18"
-                : "pr-11"
-              : hasSessionIndicator && showSharedIndicator
-                ? "pr-14"
-                : hasTrailingIndicator
-                  ? "pr-8"
-                  : "pr-2"),
-        // The narrowed reserve must track exactly when the trailing controls
-        // appear and the state marker fades — both keyed on `:focus-visible`.
-        // `focus-within` also fires for a plain click, which shrank the reserve
-        // on the selected row while the marker stayed put, sliding the title
-        // under it.
-        !selectionMode &&
-          "md:group-hover/conversation:pr-20 md:group-has-[:focus-visible]/conversation:pr-20",
-        !selectionMode && menuOpen && "md:pr-20",
+        "w-full min-w-0 flex-1",
         selectionMode && "pr-2 pl-8",
         !selectionMode && isActive && SIDEBAR_ACTIVE_HIGHLIGHT,
         !selectionMode && !isActive && inActiveGrid && SIDEBAR_GRID_MEMBER_HIGHLIGHT,
@@ -5163,17 +5230,6 @@ function ConversationRowImpl({
       {/* Row 1: the session name. Working, needs-approval, unseen, and draft
           markers render in the shared trailing indicator slot below. */}
       <div className="flex w-full items-center gap-1">
-        {isWorkingState && (
-          <span
-            role="img"
-            aria-label={
-              sessionState.kind === "starting" ? "Session starting up" : "Session running"
-            }
-            className="flex shrink-0 items-center"
-          >
-            <RunningDot className="size-3" />
-          </span>
-        )}
         <span
           className={cn(
             "relative min-w-0 truncate font-medium",
@@ -5209,11 +5265,21 @@ function ConversationRowImpl({
     <li
       ref={setRowRef}
       data-sidebar-session-id={conversation.id}
+      data-sidebar-drop={isPinned && pinOrder ? "pin-order" : undefined}
       data-open-elsewhere={openElsewhere || undefined}
-      style={{ "--tree-depth": treeDepth } as CSSProperties}
+      style={{
+        paddingInlineStart: `calc(${treeDepth} * ${SIDEBAR_TREE_INDENT})`,
+      }}
       onMouseDown={(event) => {
         // Portaled dialogs bubble through this row but must not start a drag.
-        if (event.currentTarget.contains(event.target as Node)) {
+        if (
+          event.currentTarget.contains(event.target as Node) &&
+          !(
+            nativeDraggable &&
+            event.target instanceof Element &&
+            event.target.closest('a[draggable="true"]')
+          )
+        ) {
           dragListeners?.onMouseDown?.(event);
         }
       }}
@@ -5222,18 +5288,16 @@ function ConversationRowImpl({
           dragListeners?.onTouchStart?.(event);
         }
       }}
-      className={cn("group/conversation relative", isDragging && "opacity-40")}
-    >
-      {treeControl && (
-        <div
-          className={cn("absolute -translate-y-1/2 z-10", overlayTop)}
-          style={{
-            left: `calc(var(--list-row-padding-inline) + ${treeDepth - 1} * var(--tree-indent))`,
-          }}
-        >
-          {treeControl}
-        </div>
+      className={cn(
+        "group/conversation relative flex items-center rounded-[var(--radius-otto-button)] pr-1",
+        SIDEBAR_HOVER_HIGHLIGHT,
+        !selectionMode && isActive && SIDEBAR_ACTIVE_HIGHLIGHT,
+        !selectionMode && !isActive && inActiveGrid && SIDEBAR_GRID_MEMBER_HIGHLIGHT,
+        !selectionMode && gridSelected && SIDEBAR_GRID_SELECTED_RING,
+        selectionMode && isSelected && SIDEBAR_ACTIVE_HIGHLIGHT,
+        isDragging && "opacity-40",
       )}
+    >
       {pinInsertion && pinOrder?.draggingId !== conversation.id && (
         <span
           data-testid="pin-order-insertion"
@@ -5268,79 +5332,24 @@ function ConversationRowImpl({
             <SquareIcon className="size-4 text-muted-foreground" />
           )}
         </span>
-      ) : hasSessionIndicator ? (
-        <span
-          className={cn(
-            SESSION_STATE_SLOT_CLASS,
-            overlayTop,
-            "right-1",
-            // The wide "awaiting" pill keeps its natural width; every other
-            // marker (running/starting/unseen dot, or the draft pencil) sits in
-            // the fixed centered box so it lines up under the kebab.
-            isDotMarker(sessionState) && SESSION_STATE_DOT_SLOT_CLASS,
-          )}
-        >
-          {sessionState !== null ? (
-            <SessionStateBadge state={sessionState} />
-          ) : (
-            <span
-              role="img"
-              aria-label="Draft"
-              data-testid="conversation-draft-indicator"
-              className="inline-flex h-5 shrink-0 items-center justify-center text-muted-foreground"
-            >
-              <MessageCircleDashedIcon aria-hidden className="size-3.5" />
-            </span>
-          )}
-        </span>
-      ) : showUpdated ? (
-        <span
-          data-testid="session-row-updated"
-          className={cn(
-            SESSION_STATE_SLOT_CLASS,
-            overlayTop,
-            "right-2 text-sm text-muted-foreground",
-          )}
-        >
-          <SessionUpdatedLabel updatedAt={conversation.updated_at} />
-        </span>
       ) : null}
-      {!selectionMode && showSharedIndicator && (
-        <span
-          role="img"
-          aria-label="Shared session"
-          className={cn(
-            "-translate-y-1/2 pointer-events-none absolute inline-flex h-5 w-6 shrink-0 items-center justify-center text-muted-foreground transition-opacity md:group-hover/conversation:opacity-0 md:group-has-[:focus-visible]/conversation:opacity-0 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-0",
-            overlayTop,
-            hasSessionIndicator ? "right-8" : showUpdated ? "right-11" : "right-1",
-          )}
-        >
-          <UsersIcon className="size-3.5" aria-hidden="true" />
-        </span>
-      )}
-      {/* Trailing controls (pin + kebab) share one absolutely-positioned flex
-          row, so their spacing is defined once (gap-0.5) and stays aligned
-          with the project-folder header actions, which use the same pattern.
-          The kebab is the rightmost child (pinned to right-1); the pin sits a
-          gap to its left. Hidden entirely while selecting (bulk mode owns the
-          row controls). */}
+      {/* Actions take their own width before the persistent status and disclosure. */}
       {!selectionMode && (
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div
               className={cn(
-                "-translate-y-1/2 absolute right-1 flex items-center gap-0.5",
-                overlayTop,
+                "flex shrink-0 items-center gap-0.5 md:w-0 md:overflow-hidden md:group-hover/conversation:w-auto md:group-hover/conversation:overflow-visible md:group-focus-within/conversation:w-auto md:group-focus-within/conversation:overflow-visible",
+                menuOpen && "md:w-auto md:overflow-visible",
+                (metaEnvironment !== null || metaRepo !== null || metaBranch !== null) &&
+                  "self-start mt-[var(--list-row-padding-block)]",
               )}
             >
               {/* Archived rows omit the pin entirely: pinning is meaningless there
               (archive outranks pin), so there's no pin action even on hover. */}
               {!isArchived && (
                 <Tooltip disableHoverableContent>
-                  <TooltipContent>
-                    <TooltipArrow />
-                    {pinTooltip}
-                  </TooltipContent>
+                  <TooltipContent>{pinTooltip}</TooltipContent>
                   <TooltipTrigger asChild>
                     <Button
                       type="button"
@@ -5366,7 +5375,7 @@ function ConversationRowImpl({
                         "text-muted-foreground transition-opacity",
                         "hidden md:inline-flex",
                         "md:opacity-0 md:group-hover/conversation:opacity-100",
-                        "md:group-has-[:focus-visible]/conversation:opacity-100 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
+                        "md:group-focus-within/conversation:opacity-100 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
                       )}
                       onClick={(e) => {
                         // Keep the toggle click off the surrounding Link (no navigation).
@@ -5390,10 +5399,7 @@ function ConversationRowImpl({
               with an explanation. */}
               {isOwner && (
                 <Tooltip disableHoverableContent>
-                  <TooltipContent>
-                    <TooltipArrow />
-                    {isArchived ? "Unarchive" : "Archive"}
-                  </TooltipContent>
+                  <TooltipContent>{isArchived ? "Unarchive" : "Archive"}</TooltipContent>
                   <TooltipTrigger asChild>
                     <Button
                       type="button"
@@ -5405,7 +5411,7 @@ function ConversationRowImpl({
                         "text-muted-foreground transition-opacity",
                         "hidden md:inline-flex",
                         "md:opacity-0 md:group-hover/conversation:opacity-100",
-                        "md:group-has-[:focus-visible]/conversation:opacity-100 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
+                        "md:group-focus-within/conversation:opacity-100 md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
                       )}
                       onClick={(e) => {
                         // Keep the toggle click off the surrounding Link (no navigation).
@@ -5436,15 +5442,10 @@ function ConversationRowImpl({
                     size="icon-xs"
                     aria-label="Conversation actions"
                     data-testid="conversation-actions"
-                    // Desktop-only: the chat page's own header menu covers these
-                    // per-session actions on mobile, so the row kebab is dropped
-                    // there. From `md` up it stays hidden until hover / keyboard
-                    // focus, with `aria-expanded` keeping it surfaced while the menu
-                    // is open so the trigger doesn't vanish under the cursor.
+                    // Touch keeps the menu reachable; desktop reveals it on hover or focus.
                     className={cn(
                       "text-muted-foreground transition-opacity",
-                      "hidden md:inline-flex",
-                      "md:opacity-0 md:group-hover/conversation:opacity-100 md:group-has-[:focus-visible]/conversation:opacity-100",
+                      "md:opacity-0 md:group-hover/conversation:opacity-100 md:group-focus-within/conversation:opacity-100",
                       "md:group-has-[[data-testid=conversation-actions][aria-expanded=true]]/conversation:opacity-100",
                     )}
                     onClick={(e) => {
@@ -5475,6 +5476,46 @@ function ConversationRowImpl({
           </ContextMenuContent>
         </ContextMenu>
       )}
+      {!selectionMode && (hasSessionIndicator || showSharedIndicator || showUpdated) && (
+        <span
+          data-testid="conversation-indicators"
+          className={cn(
+            "flex shrink-0 items-center gap-1",
+            (metaEnvironment !== null || metaRepo !== null || metaBranch !== null) &&
+              "self-start mt-[var(--list-row-padding-block)]",
+          )}
+        >
+          {showUpdated && (
+            <span data-testid="session-row-updated" className="text-sm text-muted-foreground">
+              <SessionUpdatedLabel updatedAt={conversation.updated_at} />
+            </span>
+          )}
+          {showSharedIndicator && (
+            <span
+              role="img"
+              aria-label="Shared session"
+              className="inline-flex h-5 items-center text-muted-foreground"
+            >
+              <UsersIcon className="size-3.5" aria-hidden />
+            </span>
+          )}
+          {showDraftIndicator && (
+            <span
+              role="img"
+              aria-label="Draft"
+              data-testid="conversation-draft-indicator"
+              className="inline-flex h-5 items-center text-muted-foreground"
+            >
+              <PencilIcon aria-hidden className="size-3.5" />
+            </span>
+          )}
+          {sessionState !== null && <SessionStateBadge state={sessionState} />}
+          {hasUnseenMessages && sessionState?.kind !== "unseen" && (
+            <SessionStateBadge state={{ kind: "unseen" }} />
+          )}
+        </span>
+      )}
+      {!selectionMode && treeControl}
       {/* Mount only while open — one per row, its hook tree + JSX would
           otherwise run closed on every row re-render. */}
       {shareOpen && (

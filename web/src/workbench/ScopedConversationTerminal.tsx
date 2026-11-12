@@ -1,10 +1,10 @@
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useSession } from "@/hooks/useSession";
 import { isNativeTerminalSession } from "@/lib/nativeCodingAgents";
 import { TerminalFirstContextProvider, type TerminalFirstView } from "@/shell/TerminalFirstContext";
-import { useWorkbench } from "./WorkbenchContext";
+import { findAgentTerminal, useTerminals } from "@/hooks/useTerminals";
 
-/** Native behavior remains session-specific; terminals open as independent dock views. */
+/** One session-specific switch drives both the view header and existing terminal surface. */
 export function ScopedConversationTerminal({
   conversationId,
   children,
@@ -13,26 +13,23 @@ export function ScopedConversationTerminal({
   children: ReactNode;
 }) {
   const { session } = useSession(conversationId);
-  const workbench = useWorkbench();
-  const setView = useCallback(
-    (view: TerminalFirstView) => {
-      if (view === "terminal") workbench?.openView({ kind: "agent-terminal", conversationId });
-    },
-    [conversationId, workbench],
-  );
+  const [view, setView] = useState<TerminalFirstView>("chat");
+  const terminalFirst = session?.labels?.["omnigent.ui"] === "terminal";
+  const { terminals } = useTerminals(terminalFirst ? conversationId : null, { workspace: null });
+  const terminal = findAgentTerminal(terminals);
   const value = useMemo(
     () => ({
       isClaudeNative: session?.labels?.["omnigent.wrapper"] === "claude-code-native-ui",
       isNativeWrapper: isNativeTerminalSession(session),
-      isTerminalFirst: false,
+      isTerminalFirst: terminalFirst,
       isShellView: false,
-      view: "chat" as const,
+      view,
       setView,
       terminalViewKey: null,
-      terminalsAvailable: false,
-      terminalStartingUp: false,
+      terminalsAvailable: !!terminal,
+      terminalStartingUp: terminalFirst && !terminal && session?.terminalPending === true,
     }),
-    [session, setView],
+    [session, terminalFirst, view, terminal],
   );
   return <TerminalFirstContextProvider value={value}>{children}</TerminalFirstContextProvider>;
 }

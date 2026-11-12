@@ -17,6 +17,8 @@ import { FileViewerContext } from "@/shell/FileViewerContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { FilePathAwareMessageResponse } from "./ChatMarkdown";
+import { AttachmentPreviewContext } from "@/components/ChatAttachment";
+import type { ComponentProps } from "react";
 
 vi.mock("@/components/ui/toast", () => ({ showToast: vi.fn() }));
 import { showToast } from "@/components/ui/toast";
@@ -103,6 +105,7 @@ function renderMarkdown(
   changed: string[] = [],
   viewer: typeof FILE_VIEWER = FILE_VIEWER,
   sourceItemId?: string,
+  previewContext: ComponentProps<typeof AttachmentPreviewContext.Provider>["value"] = {},
 ): QueryClient {
   changedPaths = changed;
   openFile.mockClear();
@@ -114,9 +117,11 @@ function renderMarkdown(
       <FileViewerContext.Provider value={viewer}>
         <TooltipProvider delayDuration={0}>
           <ConversationScopeContext.Provider value="conv_1">
-            <FilePathAwareMessageResponse sourceItemId={sourceItemId}>
-              {markdown}
-            </FilePathAwareMessageResponse>
+            <AttachmentPreviewContext.Provider value={previewContext}>
+              <FilePathAwareMessageResponse sourceItemId={sourceItemId}>
+                {markdown}
+              </FilePathAwareMessageResponse>
+            </AttachmentPreviewContext.Provider>
           </ConversationScopeContext.Provider>
         </TooltipProvider>
       </FileViewerContext.Provider>
@@ -126,6 +131,45 @@ function renderMarkdown(
 }
 
 describe("implicit captured file references", () => {
+  it.each([
+    "Read [the file](/original/workspace/guide.txt).",
+    "Read `/original/workspace/guide.txt:12`.",
+  ])(
+    "routes the source message into a dock preview after the active workspace changes: %s",
+    async (markdown) => {
+      const openAttachment = vi.fn();
+      fetchMock.mockResolvedValue(
+        new Response("Historical content", { headers: { "Content-Type": "text/plain" } }),
+      );
+      renderMarkdown(
+        markdown,
+        [],
+        {
+          ...FILE_VIEWER_WITH_SESSION,
+          conversationId: "different-chat",
+          workspaceRoot: "/different/workspace",
+        },
+        "original-item",
+        { openAttachment },
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "guide.txt" }));
+      expect(openAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "conv_1",
+          itemId: "original-item",
+          reference: "/original/workspace/guide.txt",
+        }),
+      );
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(openFile).not.toHaveBeenCalled();
+      if (markdown.includes("`"))
+        expect(fetchMock.mock.calls[0][0]).toContain(
+          "/sessions/conv_1/attachments/references/original-item?",
+        );
+      else expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     [400, "Not a file"],
     [403, "Owner access required"],
@@ -238,6 +282,7 @@ describe("markdown links to workspace files", () => {
   );
 
   it("renders stored file links inline while retaining the stored file identity", async () => {
+    const openAttachment = vi.fn();
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -251,17 +296,22 @@ describe("markdown links to workspace files", () => {
       [],
       FILE_VIEWER_WITH_SESSION,
       "original-item",
+      { openAttachment },
     );
     const chip = await screen.findByRole("button", { name: "stored.pdf" });
     expect(chip).toHaveClass("inline-flex", "align-baseline");
     expect(screen.queryByRole("button", { name: "Download stored.pdf" })).toBeNull();
     fireEvent.click(chip);
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/v1/sessions/conv_1/resources/files/original-file/content",
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      ),
+    expect(openAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "conv_1",
+        itemId: "original-item",
+        filename: "stored.pdf",
+        attachment: { file_id: "original-file", filename: "the report" },
+      }),
     );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/content"))).toBe(false);
   });
   it("plays an existing root-level recording outside the changed-file list", async () => {
     fetchMock.mockResolvedValue(dirListing(["demo.webm"]));

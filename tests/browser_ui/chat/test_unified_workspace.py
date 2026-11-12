@@ -240,8 +240,9 @@ def _open(page: Page, title: str) -> None:
 
 
 def _action(page: Page, title: str, action: str) -> None:
-    page.get_by_role("button", name=f"Actions for {title}", exact=True).click()
-    page.get_by_role("menuitem", name=action, exact=True).click()
+    assert action == "Keep open across chats"
+    page.get_by_role("tab", name=title, exact=True).hover()
+    page.get_by_role("button", name=f"Pin {title}", exact=True).click()
 
 
 def _drag_view(page: Page, title: str, target: str, edge: str) -> None:
@@ -289,8 +290,6 @@ def test_unified_chat_draft_layout_and_global_commands(
     composer = page.get_by_label("Message the agent")
     expect(composer).to_be_visible()
     composer.fill("A draft retained through layout changes")
-    page.get_by_role("button", name="Layout", exact=True).click()
-    page.get_by_role("menuitem", name="Save layout for this chat").click()
     expect(composer).to_have_value("A draft retained through layout changes")
     page.get_by_role("button", name="Search or run a command").click()
     page.get_by_test_id("command-palette-input").fill("Activity")
@@ -302,7 +301,7 @@ def test_unified_chat_draft_layout_and_global_commands(
     page.get_by_role("button", name="Close navigation", exact=True).click()
     _capture(page, output_path, "workspace-desktop")
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(page.get_by_role("combobox", name="Open views")).to_be_visible()
+    expect(page.get_by_role("tab", name="Workspace conversation", exact=True)).to_be_visible()
     expect(composer).to_have_value("A draft retained through layout changes")
     _capture(page, output_path, "workspace-mobile")
     page.reload()
@@ -326,7 +325,8 @@ def test_busy_workspace_moves_resize_and_targeted_send(
     _navigate_chat(page, second)
     second_draft = _view(page, "Chat B").get_by_label("Message the agent")
     second_draft.fill("Send only to B")
-    _action(page, "Chat B", "Split right")
+    page.locator(f'aside [data-sidebar-session-id="{first.session_id}"]').click(button="right")
+    page.get_by_role("menuitem", name="Open to side", exact=True).click()
     expect(first_draft).to_be_visible()
     expect(second_draft).to_be_visible()
     first_draft.click()
@@ -426,8 +426,6 @@ def test_saved_a_b_a_pin_composition_and_mobile_navigation(
     _open(page, "Changes")
     expect(_view(page, "Changes")).to_be_visible()
     composer.click()
-    page.get_by_role("button", name="Layout", exact=True).click()
-    page.get_by_role("menuitem", name="Save layout for this chat").click()
     saved_a = _saved_dock(page)["chats"][0]["layout"]
     _navigate_chat(page, second)
     _open(page, "Explorer")
@@ -458,13 +456,9 @@ def test_saved_a_b_a_pin_composition_and_mobile_navigation(
     _assert_transcript_painted_at_top(page, "Chat A", output_path, "saved-chat-a")
     _capture(page, output_path, "saved-a-global-explorer")
     page.set_viewport_size({"width": 390, "height": 844})
-    switcher = page.get_by_role("combobox", name="Open views")
-    expect(switcher).to_be_visible()
-    switcher.click()
-    page.get_by_role("option", name=re.compile("Explorer")).click()
+    page.get_by_role("tab", name="Explorer", exact=True).click()
     expect(_view(page, "Explorer")).to_be_visible()
-    switcher.click()
-    page.get_by_role("option", name="Chat A", exact=True).click()
+    page.get_by_role("tab", name="Chat A", exact=True).click()
     expect(composer).to_have_value("Saved A draft")
     assert explorer_node.evaluate("el => el.isConnected")
     assert (
@@ -485,6 +479,7 @@ def test_closing_shell_view_detaches_without_stopping_process(
     browser_errors: list[str],
 ) -> None:
     journey = workspace_journey
+    journey.chats[0].contract.json("/v1/workbench-workspaces", list_payload([journey.workspace]))
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(journey.chats[0].url)
     expect(_view(page, "Chat A").get_by_label("Message the agent")).to_be_visible()
@@ -498,9 +493,11 @@ def test_closing_shell_view_detaches_without_stopping_process(
     expect(terminal).to_have_count(0)
     expect(page.get_by_role("dialog")).to_have_count(0)
     assert journey.stops == []
-    _open(page, "Existing shells")
-    history = _view(page, "Existing shells")
-    expect(history.get_by_text("Running", exact=True)).to_be_visible()
+    _open(page, "Activity")
+    history = _view(page, "Activity")
+    history.get_by_role("button", name="Choose activity source", exact=False).click()
+    page.get_by_role("option", name="Browser host", exact=True).click()
+    expect(history.get_by_role("button", name="shell · fixture", exact=True)).to_be_visible()
     assert journey.stops == []
     _capture(page, output_path, "shell-history-after-view-close")
     assert browser_errors == []
@@ -543,7 +540,11 @@ def test_file_deeplink_keeps_explicit_workspace_ownership(
         "linked_workspace_target", timeout=30_000
     )
     expect(preview.locator(".view-lines")).not_to_contain_text("selection_target")
-    layout = _saved_dock(page)["shared"]
+    layout = next(
+        saved["layout"]
+        for saved in _saved_dock(page)["chats"]
+        if saved["conversationId"] == chat.session_id
+    )
     references = [view for view in layout["views"] if view["kind"] == "preview"]
     assert len(references) == 1, references
     assert references[0]["resource"]["workspace"]["id"] == linked["id"]
@@ -554,7 +555,12 @@ def test_file_deeplink_keeps_explicit_workspace_ownership(
     expect(preview.locator(".view-lines")).to_contain_text(
         "linked_workspace_target", timeout=30_000
     )
-    restored = [view for view in _saved_dock(page)["shared"]["views"] if view["kind"] == "preview"]
+    restored_layout = next(
+        saved["layout"]
+        for saved in _saved_dock(page)["chats"]
+        if saved["conversationId"] == chat.session_id
+    )
+    restored = [view for view in restored_layout["views"] if view["kind"] == "preview"]
     assert len(restored) == 1, restored
     assert restored[0]["id"] == references[0]["id"]
     assert journey.writes == []
@@ -572,8 +578,6 @@ def test_cancelled_dirty_navigation_can_repeat_the_same_destination(
     page.set_viewport_size({"width": 1600, "height": 1000})
     page.goto(second.url)
     expect(_view(page, "Chat B").get_by_label("Message the agent")).to_be_visible()
-    page.get_by_role("button", name="Layout", exact=True).click()
-    page.get_by_role("menuitem", name="Save layout for this chat").click()
     _navigate_chat(page, first)
     composer = _view(page, "Chat A").get_by_label("Message the agent")
     composer.fill("A draft must not be redirected")
@@ -582,8 +586,6 @@ def test_cancelled_dirty_navigation_can_repeat_the_same_destination(
     preview = _view(page, "notes.py")
     expect(preview.locator(".view-lines")).to_contain_text("selection_target", timeout=30_000)
     composer.click()
-    page.get_by_role("button", name="Layout", exact=True).click()
-    page.get_by_role("menuitem", name="Save layout for this chat").click()
     journey.reject_writes = True
     original_content = journey.files["notes.py"]
     editor = preview.get_by_role("textbox", name="Editor content", exact=True)

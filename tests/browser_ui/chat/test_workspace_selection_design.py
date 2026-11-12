@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -26,6 +27,11 @@ from tests.browser_ui.conftest import BrowserContract
 
 
 def _close_navigation(page: Page) -> None:
+    scrim = page.get_by_test_id("sidebar-scrim")
+    if scrim.is_visible() and scrim.get_attribute("aria-hidden") == "false":
+        scrim.click(position={"x": page.viewport_size["width"] - 4, "y": 150})
+        expect(page.get_by_role("button", name="Open navigation", exact=True)).to_be_visible()
+        return
     close = page.get_by_role("button", name="Close navigation", exact=True)
     if close.is_visible():
         close.click()
@@ -51,7 +57,7 @@ def test_mobile_composer_keeps_tabs_and_follows_appearance_density(
     selector = chat.get_by_test_id("composer-workspace-dir")
     expect(selector).to_be_visible()
     expect(selector.locator(".workspace-selector-details")).to_be_hidden()
-    expect(selector).to_have_attribute("aria-label", "Change workspace: /workspace")
+    expect(selector).to_have_attribute("aria-label", "Change workspace: Browser host:/workspace")
     expect(page.get_by_role("combobox", name="Open views", exact=True)).to_have_count(0)
     expect(page.get_by_role("tablist", name="Views in main")).to_be_visible()
 
@@ -70,9 +76,9 @@ def test_mobile_composer_keeps_tabs_and_follows_appearance_density(
       };
     }""")
     assert geometry == {
-        "appbar": 36,
-        "navigation": 36,
-        "viewHeader": 36,
+        "appbar": 48,
+        "navigation": 48,
+        "viewHeader": 48,
         "gutter": 8,
         "belowForm": 0,
     }, geometry
@@ -82,7 +88,7 @@ def test_mobile_composer_keeps_tabs_and_follows_appearance_density(
         ".dock-pane:not([hidden]) .dock-pane-header",
         ".workspace-control-header",
     ):
-        assert page.locator(row).first.evaluate("el => el.getBoundingClientRect().height") == 32
+        assert page.locator(row).first.evaluate("el => el.getBoundingClientRect().height") == 36
     page.get_by_role("button", name="Open navigation", exact=True).click()
     entry = page.locator(".conversations-sidebar .sidebar-row").first
     expect(entry).to_have_css("padding-top", "2px")
@@ -110,6 +116,19 @@ def test_mobile_composer_keeps_tabs_and_follows_appearance_density(
     assert (
         chat.locator(".chat-composer-form").evaluate("el => getComputedStyle(el).paddingBottom")
         == "8px"
+    )
+    assert (
+        chat.evaluate(
+            "el => getComputedStyle(el.closest('.dock-view-slot'), '::after').borderBottomWidth"
+        )
+        == "0px"
+    )
+    assert chat.evaluate(
+        """el => {
+          const pane = getComputedStyle(el.closest('.dock-view-slot'));
+          const shell = getComputedStyle(document.querySelector('.unified-workbench'));
+          return pane.backgroundColor === shell.backgroundColor;
+        }"""
     )
 
     page.evaluate("""() => {
@@ -221,7 +240,7 @@ def test_combined_workspace_picker_changes_explorer_requests_and_cancel_retains_
     ):
         page.set_viewport_size({"width": width, "height": height})
         selector = explorer.get_by_role(
-            "button", name=f"Select workspace: Browser host / {root}", exact=True
+            "button", name=f"Select workspace: Browser host:{root}", exact=True
         )
         selector.click()
         dialog = _assert_picker(page, host_id, root)
@@ -246,7 +265,7 @@ def test_combined_workspace_picker_changes_explorer_requests_and_cancel_retains_
         expect(explorer.get_by_text("candidate.txt", exact=True)).to_be_visible()
         expect(
             explorer.get_by_role(
-                "button", name=f"Select workspace: Browser host / {next_root}", exact=True
+                "button", name=f"Select workspace: Browser host:{next_root}", exact=True
             )
         ).to_be_visible()
         assert created[-1] == {"host_id": host_id, "root": next_root}
@@ -276,7 +295,7 @@ def test_settings_from_closed_navigation_retains_draft_and_approved_chrome(
     appbar = page.get_by_role("banner", name="Application")
     assert tab.evaluate(
         "el => getComputedStyle(el.parentElement).backgroundColor"
-    ) == appbar.evaluate("el => getComputedStyle(el).backgroundColor")
+    ) != appbar.evaluate("el => getComputedStyle(el).backgroundColor")
     send = _view(page, "Chat A").get_by_role("button", name="Send", exact=True)
     expect(send).to_be_enabled()
     assert send.locator("svg").evaluate("el => getComputedStyle(el).color") == "rgb(255, 255, 255)"
@@ -291,7 +310,9 @@ def test_settings_from_closed_navigation_retains_draft_and_approved_chrome(
         page.set_viewport_size({"width": width, "height": height})
         _close_navigation(page)
         appbar.get_by_role("button", name="Settings", exact=True).click()
-        expect(page).to_have_url(chat.contract.base_url + "/settings")
+        expect(page).to_have_url(
+            re.compile(re.escape(chat.contract.base_url) + r"/settings(?:/general)?$")
+        )
         expect(page.get_by_test_id("settings-group-composer")).to_be_visible()
         if name == "desktop":
             expect(page.get_by_test_id("settings-nav-general")).to_be_in_viewport()

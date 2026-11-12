@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   addDockView,
   closeDockView,
+  dockPaneForView,
   parseDockLayout,
   sameDockResource,
   selectDockView,
@@ -17,6 +18,7 @@ import {
   composeDockLayout,
   createDockPersistence,
   dockStorageKey,
+  navigateDockConversation,
   parseDockPersistence,
   pinDockView,
   retainedDockViews,
@@ -42,6 +44,20 @@ export interface UseDockLayoutOptions {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/** Only view titles may change while a navigation decision is pending. */
+function navigationSnapshot(state: DockPersistence): string {
+  const withoutTitles = (layout: DockLayout) => ({
+    ...layout,
+    views: layout.views.map((view) => ({ ...view, title: undefined })),
+  });
+  return JSON.stringify({
+    ...state,
+    shared: withoutTitles(state.shared),
+    pins: withoutTitles(state.pins),
+    chats: state.chats.map((chat) => ({ ...chat, layout: withoutTitles(chat.layout) })),
+  });
 }
 
 function loadSession(
@@ -148,6 +164,41 @@ export function useDockLayout({
     [setLayout],
   );
 
+  const restoreConversationViews = useCallback(
+    (id: string, views: readonly DockView[], placement: DockPlacement = {}) => {
+      if (!id) throw new Error("A conversation ID is required");
+      commit((state) => {
+        const target = navigateDockConversation(state, id);
+        const saved = target.chats.find((chat) => chat.conversationId === id);
+        const original = saved?.layout ?? state.shared;
+        let layout = original;
+        let paneId: string | undefined;
+        for (const view of views) {
+          if (layout.views.some((existing) => existing.id === view.id)) continue;
+          layout = addDockView(layout, view, paneId ? { paneId } : placement);
+          paneId = dockPaneForView(layout, view.id)?.id;
+        }
+        if (layout === original && state.chats.some((chat) => chat.conversationId === id))
+          return state;
+        layout = {
+          ...layout,
+          focusedPaneId: original.focusedPaneId ?? layout.focusedPaneId,
+          panes: layout.panes.map((pane) => {
+            const previous = original.panes.find((item) => item.id === pane.id);
+            return previous ? { ...pane, selectedViewId: previous.selectedViewId } : pane;
+          }),
+        };
+        return {
+          ...state,
+          chats: saved
+            ? target.chats.map((chat) => (chat.conversationId === id ? { ...chat, layout } : chat))
+            : [...state.chats, { conversationId: id, layout }],
+        };
+      });
+    },
+    [commit],
+  );
+
   const closeView = useCallback(
     (id: string): Promise<boolean> => {
       const lockKey = JSON.stringify([scopeKey, id]);
@@ -160,6 +211,14 @@ export function useDockLayout({
         if (guard.current && !(await guard.current(view))) return false;
         const latest = current.current;
         if (!alive.current || latest.generation !== captured.generation) return false;
+        if (
+          latest.state.activeConversationId !== captured.state.activeConversationId &&
+          !(
+            captured.state.pins.views.some((item) => item.id === id) &&
+            latest.state.pins.views.some((item) => item.id === id)
+          )
+        )
+          return false;
         const stillOpen = composeDockLayout(latest.state).views.find((item) => item.id === id);
         if (!stillOpen || !sameDockResource(view, stillOpen)) return false;
         setLayout((layout) => closeDockView(layout, id));
@@ -216,7 +275,14 @@ export function useDockLayout({
       const captured = current.current;
       if (captured.key !== scopeKey) return false;
       const request = ++navigation.current;
-      const next = { ...captured.state, activeConversationId: id, focusedViewId: null };
+      const next = navigateDockConversation(captured.state, id);
+      if (next === captured.state) return true;
+      const snapshot = navigationSnapshot(captured.state);
+      const isCurrent = () =>
+        alive.current &&
+        request === navigation.current &&
+        current.current.generation === captured.generation &&
+        (current.current === captured || navigationSnapshot(current.current.state) === snapshot);
       const restored = composeDockLayout(next);
       for (const view of composeDockLayout(captured.state).views) {
         if (
@@ -227,10 +293,10 @@ export function useDockLayout({
           !(await guard.current(view))
         )
           return false;
-        if (!alive.current || request !== navigation.current || current.current !== captured)
-          return false;
+        if (!isCurrent()) return false;
       }
-      commit(() => next);
+      if (!isCurrent()) return false;
+      commit((state) => navigateDockConversation(state, id));
       return true;
     },
     [commit, scopeKey],
@@ -261,6 +327,7 @@ export function useDockLayout({
     setLayout,
     addView,
     focusView,
+    restoreConversationViews,
     closeView,
     updateView,
     navigateConversation,

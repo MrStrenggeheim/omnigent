@@ -45,7 +45,7 @@ interface UseSessionResult {
  * Read the cached single-session snapshot for a conversation, falling
  * back to ``GET /v1/sessions/{id}`` when nothing is cached yet.
  *
- * Pass ``null`` to disable. The query is otherwise long-lived
+ * Pass an empty, null or undefined ID to disable. The query is otherwise long-lived
  * (``staleTime: Infinity``) because chatStore is the source of truth
  * for refresh — it refetches on every bind, which writes back into
  * this same cache key.
@@ -60,11 +60,8 @@ interface UseSessionResult {
  * for the refresh to thrash those caches.
  */
 export function useSession(conversationId: string | null | undefined): UseSessionResult {
-  // A `temp:*` id is a client-only routing token with no server session behind
-  // it (navigate-first new-chat window). Disable the fetch by construction so no
-  // caller can leak a `GET /v1/sessions/temp:*` — cheaper than gating every
-  // call site.
-  const serverId = isTempConvId(conversationId) ? null : (conversationId ?? null);
+  // Empty IDs have no session owner; `temp:*` IDs only identify client-side drafts.
+  const serverId = !conversationId || isTempConvId(conversationId) ? null : conversationId;
   const { data, isLoading, error } = useQuery({
     queryKey: serverId ? ["session", serverId] : ["session", null],
     queryFn: () => getSessionSlim(serverId as string, { refreshState: true }),

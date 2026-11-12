@@ -20,6 +20,7 @@ Keep each customization in a focused commit. Never edit installed package files.
 
 Read `design-system/omnigent/MASTER.md` before changing workspace UI.
 
+- Before changing UI, compare existing equivalents and reuse the complete shared component, tokens and interaction; verify sibling typography, tooltip shape, colors and focus/hover states against `design-system/omnigent/MASTER.md`.
 - Search for and reuse existing helpers before adding code. Refactor an existing
   implementation if that avoids duplication.
 - Treat local extensions as part of the whole product: reuse existing UI components, styles and interaction patterns, extend shared primitives when necessary, and preserve navigation and selection during background refreshes.
@@ -147,6 +148,7 @@ verify the result themselves. Prefer verification that is best performed by a
 human, such as concrete manual behavior checks, rather than only listing unit
 test commands. Don't leave the user guessing how to confirm the work — tell
 them exactly what to do.
+Every implementation report must include a short owner-facing acceptance checklist with concrete actions and expected visible outcomes, affected desktop/mobile or appearance variants, activation state and outstanding limitations.
 
 To drive the app yourself and prove a user-facing change on every entry point a
 user can reach, start with `feature-map/README.md`, then read the relevant maps and linked skills.

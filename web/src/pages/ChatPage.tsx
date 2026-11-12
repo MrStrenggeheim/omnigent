@@ -4373,6 +4373,30 @@ function ComposerImpl(
                     : undefined
                 }
               />
+              <ComposerMicButton
+                className="size-8 md:size-7"
+                enableHotkey
+                disabled={disabled || isReadOnly || hasPendingElicitation || composerLockedByBtw}
+                onVoiceStart={() => {
+                  voiceSnapshotRef.current = value;
+                }}
+                onVoiceDiscard={() => {
+                  setValue(voiceSnapshotRef.current);
+                }}
+                onTranscript={(text) => {
+                  dictation.appendFinal(text);
+                  dirtyRef.current = true;
+                  // Dictation is a user-driven edit — exit prompt-recall mode
+                  // so ArrowUp/ArrowDown don't clobber the dictated text.
+                  resetCursor();
+                  if (commandError !== null) setCommandError(null);
+                }}
+                onInterim={(text) => {
+                  dictation.replaceInterim(text);
+                  dirtyRef.current = true;
+                  resetCursor();
+                }}
+              />
               {!subAgentLabel &&
                 composerSessionId &&
                 !(
@@ -4485,30 +4509,6 @@ function ComposerImpl(
                   openNonce={pickerOpenNonce}
                 />
               </div>
-              <ComposerMicButton
-                className="size-8 md:size-7"
-                enableHotkey
-                disabled={disabled || isReadOnly || hasPendingElicitation || composerLockedByBtw}
-                onVoiceStart={() => {
-                  voiceSnapshotRef.current = value;
-                }}
-                onVoiceDiscard={() => {
-                  setValue(voiceSnapshotRef.current);
-                }}
-                onTranscript={(text) => {
-                  dictation.appendFinal(text);
-                  dirtyRef.current = true;
-                  // Dictation is a user-driven edit — exit prompt-recall mode
-                  // so ArrowUp/ArrowDown don't clobber the dictated text.
-                  resetCursor();
-                  if (commandError !== null) setCommandError(null);
-                }}
-                onInterim={(text) => {
-                  dictation.replaceInterim(text);
-                  dirtyRef.current = true;
-                  resetCursor();
-                }}
-              />
               <ComposerContextRing
                 contextWindow={composerContextWindow}
                 tokensUsed={composerTokensUsed}

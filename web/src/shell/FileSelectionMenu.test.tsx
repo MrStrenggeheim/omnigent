@@ -124,7 +124,7 @@ it("supports Tab entry, arrow wrapping, Home/End and keyboard activation", async
   const { comment } = renderMenu();
   const add = screen.getByRole("menuitem", { name: "Add comment" });
   const ask = screen.getByRole("menuitem", { name: "Ask in chat" });
-  const quote = screen.getByRole("menuitem", { name: "Use in chat…" });
+  const quote = screen.getByRole("menuitem", { name: "Send to…" });
   await user.tab();
   expect(document.activeElement).toBe(add);
   await user.keyboard("{ArrowDown}");
@@ -226,7 +226,7 @@ it("offers an explicit chat choice instead of a no-op comment for an unowned pre
   );
   expect(screen.queryByRole("menuitem", { name: "Add comment" })).not.toBeInTheDocument();
   expect(screen.queryByRole("menuitem", { name: "Ask in chat" })).not.toBeInTheDocument();
-  expect(screen.getByRole("menuitem", { name: "Use in chat…" })).toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: "Send to…" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("menuitem", { name: "Choose chat" }));
   expect(choose).toHaveBeenCalledOnce();
   expect(comment).not.toHaveBeenCalled();

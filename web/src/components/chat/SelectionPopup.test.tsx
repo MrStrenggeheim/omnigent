@@ -1,15 +1,30 @@
 import { createRef } from "react";
-import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { setEmbedRoot } from "@/lib/host";
 import { SelectionPopup } from "./SelectionPopup";
+import { ConversationScopeContext } from "./conversationScope";
+import { ContextReferenceNavigationContext } from "@/lib/contextReferenceNavigation";
+import * as references from "@/lib/contextReferences";
+import { clearSessionDrafts, getSessionDraft, setSessionDraft } from "@/lib/sessionDrafts";
+import { useChatStore } from "@/store/chatStore";
+
+vi.mock("@/lib/contextReferences", async (original) => ({
+  ...(await original<typeof references>()),
+  captureReference: vi.fn(),
+  searchReferenceChats: vi.fn(),
+  referenceRequest: vi.fn(),
+}));
 
 afterEach(() => {
   cleanup();
   setEmbedRoot(null);
   window.getSelection()?.removeAllRanges();
   vi.restoreAllMocks();
+  vi.clearAllMocks();
+  clearSessionDrafts();
+  useChatStore.setState({ sideChatComposers: {}, sideChatDrafts: {} });
 });
 
 it.each([true, false])("portals outside the transcript (embedded: %s)", (embedded) => {
@@ -30,13 +45,16 @@ it.each([true, false])("portals outside the transcript (embedded: %s)", (embedde
   window.getSelection()!.addRange(range);
   fireEvent(document, new Event("selectionchange"));
 
-  const reply = screen.getByRole("menuitem", { name: "Reply ↵" });
+  const reply = screen.getByRole("menuitem", { name: "Reply" });
+  expect(reply.querySelectorAll("svg")).toHaveLength(1);
+  expect(reply.firstElementChild?.tagName).toBe("svg");
+  expect(reply.textContent).toBe("Reply");
   expect(reply.parentElement?.parentElement).toBe(embedded ? container : document.body);
   expect(reply.parentElement).toHaveClass("fixed");
   expect(reply.parentElement).toHaveStyle({ left: "10px", top: "24px" });
   fireEvent.click(reply);
   expect(onReply).toHaveBeenCalledExactlyOnceWith("Selected message");
-  expect(screen.queryByRole("menuitem", { name: "Reply ↵" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Reply" })).toBeNull();
 });
 
 function selectMessage(onAskInSideChat?: (text: string) => void) {
@@ -67,7 +85,7 @@ it.each(["mouse", "touch"])(
   (pointerType) => {
     const onAsk = vi.fn();
     const { onReply } = selectMessage(onAsk);
-    const ask = screen.getByRole("menuitem", { name: "Ask in side chat" });
+    const ask = screen.getByRole("menuitem", { name: "Ask subchat…" });
     const menu = screen.getByRole("menu", { name: "Selected text" });
     expect(menu.className).toContain("shadow-menu");
     expect(menu.style.left).toBe("30px");
@@ -91,17 +109,17 @@ it("uses keyboard menu navigation and keeps the selected quote after focus moves
   const onAsk = vi.fn();
   selectMessage(onAsk);
   await user.tab();
-  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Reply ↵" }));
+  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Reply" }));
   await user.keyboard("{ArrowRight}");
   fireEvent(document, new Event("selectionchange"));
-  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Ask in side chat" }));
+  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Ask subchat…" }));
   await user.keyboard("{Enter}");
   expect(onAsk).toHaveBeenCalledExactlyOnceWith("Selected message");
 });
 
 it("dismisses on Escape or an outside press and hides unsupported side chat", () => {
   const { onReply } = selectMessage();
-  expect(screen.queryByRole("menuitem", { name: "Ask in side chat" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Ask subchat…" })).toBeNull();
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(screen.queryByRole("menu")).toBeNull();
   fireEvent.mouseUp(document);
@@ -124,4 +142,152 @@ it("ignores selections in or extending into the composer", () => {
   selection.addRange(range);
   fireEvent(document, new Event("selectionchange"));
   expect(screen.queryByRole("menu")).toBeNull();
+});
+
+const capturedQuote: references.ContextReference = {
+  version: 1,
+  snapshot_id: "selected-snapshot",
+  source_id: "scoped-child",
+  source_title: "Child conversation",
+  destination_id: null,
+  scope: "quote",
+  boundary_id: "selected-item",
+  captured_at: 100,
+  items: [{ id: "selected-item", response_id: "response", created_at: 99 }],
+  quote: "Selected message",
+  audience: "Visible to everyone with access to the destination",
+  representation: "Exact stored items as JSON",
+};
+
+const quoteNavigation = { openConversation: vi.fn(), createSubchat: vi.fn() };
+
+function selectScopedMessage() {
+  const containerRef = createRef<HTMLDivElement>();
+  quoteNavigation.openConversation.mockClear();
+  quoteNavigation.createSubchat.mockReset().mockResolvedValue("child");
+  const legacyAsk = vi.fn();
+  vi.mocked(references.captureReference).mockResolvedValue(capturedQuote);
+  vi.mocked(references.referenceRequest).mockResolvedValue({ ok: true });
+  vi.mocked(references.searchReferenceChats).mockResolvedValue({
+    data: [{ id: "target", title: "Destination", parent_id: null }],
+    has_more: false,
+    next_cursor: null,
+  });
+  useChatStore.setState({ conversationId: "unrelated-root" });
+  render(
+    <ContextReferenceNavigationContext.Provider value={quoteNavigation}>
+      <ConversationScopeContext.Provider value="scoped-child">
+        <div ref={containerRef}>
+          <p data-message-id="selected-item">Selected message</p>
+          <p data-message-id="later-item">Later answer</p>
+        </div>
+        <SelectionPopup containerRef={containerRef} onReply={vi.fn()} onAskInSideChat={legacyAsk} />
+      </ConversationScopeContext.Provider>
+    </ContextReferenceNavigationContext.Provider>,
+  );
+  const range = document.createRange();
+  range.selectNodeContents(screen.getByText("Selected message"));
+  range.getBoundingClientRect = () => new DOMRect(10, 200, 80, 20);
+  range.getClientRects = () => [] as unknown as DOMRectList;
+  window.getSelection()!.addRange(range);
+  fireEvent(document, new Event("selectionchange"));
+  return { navigation: quoteNavigation, legacyAsk };
+}
+
+it("asks a durable subchat from the scoped selected item with an attributed unsent quote", async () => {
+  const { navigation, legacyAsk } = selectScopedMessage();
+  const send = vi.spyOn(useChatStore.getState(), "send");
+  expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+    "Reply",
+    "Ask subchat…",
+    "Send to…",
+  ]);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Ask subchat…" }));
+  await waitFor(() =>
+    expect(navigation.openConversation).toHaveBeenCalledWith("child", { beside: true }),
+  );
+  expect(references.captureReference).toHaveBeenCalledExactlyOnceWith(
+    "scoped-child",
+    null,
+    "quote",
+    {
+      boundary_id: "selected-item",
+      message_ids: ["selected-item"],
+      quote: "Selected message",
+    },
+  );
+  expect(navigation.createSubchat).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      conversationId: "scoped-child",
+      boundaryId: "selected-item",
+      text: "Selected message",
+    }),
+  );
+  expect(references.referenceRequest).toHaveBeenCalledWith(
+    "/v1/sessions/scoped-child/context-reference/check",
+    { destination_id: "child", scope: "quote" },
+  );
+  expect(getSessionDraft("child")?.text).toBe(
+    "> Selected message\n\n[Open source](/c/scoped-child?message=selected-item)\n\n",
+  );
+  expect(getSessionDraft("scoped-child")).toBeUndefined();
+  expect(legacyAsk).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});
+
+it("retains the selection and source draft after child creation fails and retries explicitly", async () => {
+  const { navigation } = selectScopedMessage();
+  navigation.createSubchat.mockRejectedValueOnce(new Error("Cannot create child"));
+  setSessionDraft("scoped-child", { text: "Keep parent draft", files: [] });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Ask subchat…" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Cannot create child");
+  expect(navigation.createSubchat).toHaveBeenCalledTimes(1);
+  expect(navigation.openConversation).not.toHaveBeenCalled();
+  expect(getSessionDraft("child")).toBeUndefined();
+  expect(getSessionDraft("scoped-child")?.text).toBe("Keep parent draft");
+  expect(window.getSelection()?.toString()).toBe("Selected message");
+  fireEvent.click(screen.getByRole("button", { name: "Ask subchat…" }));
+  await waitFor(() =>
+    expect(navigation.openConversation).toHaveBeenCalledWith("child", { beside: true }),
+  );
+  expect(navigation.createSubchat).toHaveBeenCalledTimes(2);
+  expect(references.captureReference).toHaveBeenCalledTimes(1);
+  expect(getSessionDraft("child")?.text.match(/> Selected message/g)).toHaveLength(1);
+});
+
+it("opens Send to's existing chat picker and waits for explicit insertion without sending", async () => {
+  const { navigation } = selectScopedMessage();
+  setSessionDraft("target", { text: "Destination draft", files: [] });
+  const send = vi.spyOn(useChatStore.getState(), "send");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Send to…" }));
+  expect(screen.getByRole("dialog", { name: "Send to" })).toHaveClass(
+    "selectionmenu",
+    "slim-scrollbar",
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Destination" }));
+  expect(getSessionDraft("target")?.text).toBe("Destination draft");
+  expect(navigation.openConversation).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Insert quote" }));
+  await waitFor(() =>
+    expect(navigation.openConversation).toHaveBeenCalledWith("target", { beside: true }),
+  );
+  expect(getSessionDraft("target")?.text).toContain("Destination draft\n\n> Selected message");
+  expect(navigation.createSubchat).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});
+
+it("keeps the created child for retry when destination authorization fails without inserting a draft", async () => {
+  const { navigation } = selectScopedMessage();
+  vi.mocked(references.referenceRequest).mockRejectedValueOnce(new Error("Source access revoked"));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Ask subchat…" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Source access revoked");
+  expect(navigation.createSubchat).toHaveBeenCalledTimes(1);
+  expect(navigation.openConversation).not.toHaveBeenCalled();
+  expect(getSessionDraft("child")).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "Ask subchat…" }));
+  await waitFor(() =>
+    expect(navigation.openConversation).toHaveBeenCalledWith("child", { beside: true }),
+  );
+  expect(navigation.createSubchat).toHaveBeenCalledTimes(1);
+  expect(getSessionDraft("child")?.text).toContain("scoped-child?message=selected-item");
 });

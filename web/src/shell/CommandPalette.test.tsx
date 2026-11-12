@@ -470,6 +470,23 @@ describe("CommandPalette — mobile full-screen sheet", () => {
     expect(screen.queryByLabelText("Close search")).toBeNull();
   });
 
+  it("anchors workbench search below its trigger without a blocking backdrop", () => {
+    setMobile(false);
+    const anchor = document.createElement("button");
+    anchor.dataset.workbenchSearch = "";
+    anchor.getBoundingClientRect = () => new DOMRect(180, 0, 300, 48);
+    document.body.appendChild(anchor);
+    try {
+      renderPalette({ anchorSelector: "[data-workbench-search]" });
+      expect(screen.getByRole("dialog")).toHaveStyle({ top: "56px", left: "180px" });
+      expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+      expect(screen.getByTestId("command-palette-input")).toHaveFocus();
+      fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Escape" });
+    } finally {
+      anchor.remove();
+    }
+  });
+
   it("closes the palette when the mobile close button is tapped", () => {
     setMobile(true);
     const onOpenChange = vi.fn();

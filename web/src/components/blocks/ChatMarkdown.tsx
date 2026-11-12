@@ -7,7 +7,7 @@ import { useScopedConversationId } from "@/components/chat/conversationScope";
 // Markdown rendering for chat text: assistant bubbles, user bubbles, and any
 // other surface that shows agent-authored markdown.
 //
-// Two affordances beyond plain markdown, both routing to the FileViewer so a
+// Two affordances beyond plain markdown, both routing to the workspace preview so a
 // file the agent names is one click away:
 //
 //   1. Inline-code paths (`` `src/App.tsx` ``): see `WorkspacePathInlineCode`.
@@ -273,6 +273,7 @@ function WorkspaceFileLink({
         <ChatAttachment
           compact
           sessionId={attachmentScope.sessionId}
+          itemId={attachmentScope.itemId}
           attachment={{
             file_id: decodeURIComponent(stored[2]),
             filename: typeof children === "string" ? children : undefined,

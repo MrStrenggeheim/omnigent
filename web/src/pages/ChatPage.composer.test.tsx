@@ -2468,6 +2468,28 @@ describe("Composer model/effort label", () => {
 });
 
 describe("Composer shared visible controls", () => {
+  it("places dictation immediately after Add while preserving the action row geometry", () => {
+    vi.stubGlobal(
+      "SpeechRecognition",
+      class {
+        start = vi.fn();
+        stop = vi.fn();
+        addEventListener = vi.fn();
+        removeEventListener = vi.fn();
+      },
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    renderWithTooltips(<Composer {...composerProps()} />);
+    const leading = screen.getByTestId("composer-action-row").children[1];
+    const controls = within(leading as HTMLElement).getAllByRole("button");
+    expect(controls[0]).toHaveAccessibleName("Add");
+    expect(controls[1]).toHaveAccessibleName("Voice dictation");
+    expect(controls[1]).toHaveClass("size-8", "md:size-7");
+    expect(leading).toHaveClass("gap-1");
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -2745,7 +2767,7 @@ describe("Composer shared visible controls", () => {
       }),
     );
     expect(screen.getByTestId("composer-workspace-dir")).toHaveAccessibleName(
-      "Change workspace: /home/alice/worktrees/feature-x",
+      "Change workspace: host-worktree:/home/alice/worktrees/feature-x",
     );
     expect(screen.getByTestId("composer-git-branch")).toHaveTextContent("feature-x");
   });
@@ -7821,7 +7843,7 @@ describe("full composer in independent conversation panes", () => {
       );
       expect(
         within(screen.getByTestId(id)).getByTestId("composer-workspace-dir"),
-      ).toHaveAccessibleName(`Change workspace: /${id}`);
+      ).toHaveAccessibleName(`Change workspace: host-${id}:/${id}`);
     }
     fireEvent.change(input("pane-first"), { target: { value: "Keep this first draft" } });
     fireEvent.change(input("pane-second"), { target: { value: "Send only to second" } });

@@ -1,10 +1,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ChatAttachment } from "./ChatAttachment";
+import {
+  AttachmentPreviewContext,
+  AttachmentPreviewView,
+  ChatAttachment,
+  type AttachmentPreviewRequest,
+} from "./ChatAttachment";
 import { ImageLightboxProvider } from "./ImageLightbox";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn() }));
@@ -34,6 +39,7 @@ function mount(
   mime: string,
   content: string,
   props: Partial<ComponentProps<typeof ChatAttachment>> = {},
+  previewContext: ComponentProps<typeof AttachmentPreviewContext.Provider>["value"] = {},
 ) {
   mocks.fetch.mockImplementation(async (url: string) =>
     url.endsWith("/content") || url.includes("/attachments/references/")
@@ -41,20 +47,32 @@ function mount(
       : new Response(JSON.stringify({ metadata: { bytes: content.length, content_type: mime } })),
   );
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(
+  const wrap = (children: ReactNode) => (
     <QueryClientProvider client={client}>
       <TooltipProvider delayDuration={0}>
         <ImageLightboxProvider>
-          <ChatAttachment
-            sessionId="original-chat"
-            attachment={{ file_id: "file-id", filename }}
-            {...props}
-          />
+          <AttachmentPreviewContext.Provider value={previewContext}>
+            {children}
+          </AttachmentPreviewContext.Provider>
         </ImageLightboxProvider>
       </TooltipProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { client, ...view };
+  const view = render(
+    wrap(
+      <ChatAttachment
+        sessionId="original-chat"
+        attachment={{ file_id: "file-id", filename }}
+        {...props}
+      />,
+    ),
+  );
+  return {
+    client,
+    ...view,
+    showPreview: (request: AttachmentPreviewRequest) =>
+      view.rerender(wrap(<AttachmentPreviewView request={request} />)),
+  };
 }
 it("loads images through authenticated storage URLs and downloads the original", async () => {
   mount("chart ü.png", "image/png", "original-bytes");
@@ -94,6 +112,164 @@ it("keeps local references filename-only and fetches their captured message only
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
   expect(screen.getByRole("dialog")).toHaveTextContent("Download original");
+  expect(screen.getByRole("dialog")).toHaveClass(
+    "w-[calc(100vw-1rem)]",
+    "max-h-[90dvh]",
+    "sm:max-w-4xl",
+  );
+  expect(screen.getByRole("dialog")).not.toHaveClass("sm:max-w-sm");
+});
+
+it.each([true, false])(
+  "routes file activation to the dock with immutable identity (compact=%s)",
+  async (compact) => {
+    const openAttachment = vi.fn();
+    const { showPreview } = mount(
+      "report.txt",
+      "text/plain",
+      "Captured original",
+      { compact },
+      { openAttachment },
+    );
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "report.txt" }));
+    expect(openAttachment).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mocks.fetch.mock.calls.every(([url]) => !url.endsWith("/content"))).toBe(true);
+    const request = openAttachment.mock.calls[0][0];
+    expect(request).toMatchObject({
+      sessionId: "original-chat",
+      attachment: { file_id: "file-id", filename: "report.txt" },
+    });
+    showPreview(request);
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Preview report.txt" })).toHaveTextContent(
+        "Captured original",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Download report.txt" }));
+    await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+    expect(await mocks.download.mock.calls[0][0].text()).toBe("Captured original");
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      "/v1/sessions/original-chat/resources/files/file-id/content",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  },
+);
+
+it("keeps captured reference bytes and the origin message when moving from chat to a dock preview", async () => {
+  const openAttachment = vi.fn();
+  const reference = "/original/workspace/notes.txt";
+  const { showPreview } = mount(
+    "notes.txt",
+    "text/plain",
+    "Historical bytes",
+    {
+      attachment: undefined,
+      compact: true,
+      reference,
+      itemId: "source/item",
+      unresolvedFallback: <code>{reference}</code>,
+    },
+    { openAttachment },
+  );
+  const chip = await screen.findByRole("button", { name: "notes.txt" });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  fireEvent.click(chip);
+  const request = JSON.parse(JSON.stringify(openAttachment.mock.calls[0][0]));
+  expect(request).toMatchObject({ sessionId: "original-chat", itemId: "source/item", reference });
+  mocks.fetch.mockResolvedValue(new Response("Source removed", { status: 404 }));
+  showPreview(request);
+  await waitFor(() => expect(screen.getByRole("region")).toHaveTextContent("Historical bytes"));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Download notes.txt" }));
+  await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+  expect(await mocks.download.mock.calls[0][0].text()).toBe("Historical bytes");
+});
+
+it.each([true, false])(
+  "offers Reveal only for a successfully authorized captured origin (allowed=%s)",
+  async (allowed) => {
+    const canRevealAttachment = vi.fn(() => allowed);
+    const revealAttachment = vi.fn();
+    const request = {
+      sessionId: "original-chat",
+      itemId: "original-item",
+      reference: "/original/workspace/notes.txt",
+    };
+    const { showPreview } = mount(
+      "notes.txt",
+      "text/plain",
+      "Historical bytes",
+      { attachment: undefined, compact: true },
+      { canRevealAttachment, revealAttachment },
+    );
+    showPreview(request);
+    await waitFor(() => expect(screen.getByRole("region")).toHaveTextContent("Historical bytes"));
+    const reveal = screen.queryByRole("button", { name: "Reveal in Explorer" });
+    if (allowed) {
+      expect(reveal).toBeInTheDocument();
+      fireEvent.click(reveal!);
+      expect(revealAttachment).toHaveBeenCalledWith(request);
+      canRevealAttachment.mockReturnValue(false);
+      fireEvent.click(reveal!);
+      expect(revealAttachment).toHaveBeenCalledOnce();
+    } else expect(reveal).toBeNull();
+  },
+);
+
+it("delegates Reveal to the async origin lookup without requiring a synchronous availability check", async () => {
+  const revealAttachment = vi.fn(async () => {});
+  const request = {
+    sessionId: "original-chat",
+    itemId: "source/item",
+    reference: "/original/workspace/notes.txt",
+  };
+  const { showPreview } = mount(
+    "notes.txt",
+    "text/plain",
+    "Historical bytes",
+    {
+      attachment: undefined,
+      compact: true,
+    },
+    { revealAttachment },
+  );
+  showPreview(request);
+  fireEvent.click(await screen.findByRole("button", { name: "Reveal in Explorer" }));
+  expect(revealAttachment).toHaveBeenCalledWith(request);
+});
+
+it("keeps denied captured previews actionable without exposing Reveal or a live-file fallback", async () => {
+  const { showPreview } = mount(
+    "notes.txt",
+    "text/plain",
+    "",
+    { attachment: undefined, compact: true },
+    { canRevealAttachment: () => true, revealAttachment: vi.fn() },
+  );
+  mocks.fetch.mockResolvedValue(
+    new Response(JSON.stringify({ detail: "Owner access required" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  showPreview({
+    sessionId: "original-chat",
+    itemId: "original-item",
+    reference: "/original/workspace/notes.txt",
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Owner access required");
+  expect(screen.queryByRole("button", { name: "Reveal in Explorer" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  expect(mocks.fetch.mock.calls[0][0]).toContain(
+    "/sessions/original-chat/attachments/references/original-item?",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+  expect(mocks.fetch.mock.calls[1][0]).toBe(mocks.fetch.mock.calls[0][0]);
 });
 
 it("shows a compact metadata row with working overflow preview and original download", async () => {

@@ -12,11 +12,34 @@ import type { BranchConversation } from "@/lib/conversationBranches";
 import { authenticatedFetch } from "@/lib/identity";
 import { useConversations } from "@/hooks/useConversations";
 import { Sidebar } from "./Sidebar";
+import { SIDEBAR_CONVERSATION_DRAG_MIME } from "./sidebarConversationDrag";
+import { clearSessionDrafts, setSessionDraft } from "@/lib/sessionDrafts";
+import { markConversationUnread, resetReadStateForTests } from "@/hooks/useUnseenConversations";
+import { resourceViewStorageScope, writeResourceViewState } from "@/lib/resourceViewStorage";
+
+const actions = vi.hoisted(() => ({
+  open: vi.fn(),
+  move: vi.fn(),
+  reorder: vi.fn(),
+  pin: vi.fn(() => Promise.resolve({})),
+  projects: [] as { id: string; name: string }[],
+  pinned: [] as ReturnType<typeof conversation>[],
+}));
 
 vi.mock("@/hooks/useScopeCache", () => import("@/test/mockScopeCache"));
 vi.mock("@/hooks/useConversations", async () => {
   const { conversationHooksMock } = await import("@/test/sidebarMockHelpers");
-  return conversationHooksMock();
+  return {
+    ...conversationHooksMock(),
+    useProjects: () => ({ data: actions.projects }),
+    useMoveToProject: () => ({ mutate: actions.move }),
+    useReorderPinnedConversations: () => ({ mutate: actions.reorder }),
+    useTogglePinnedConversation: () => ({ mutateAsync: actions.pin }),
+    usePinnedConversations: () => ({
+      data: { conversations: actions.pinned, filterHonored: true },
+      isSuccess: true,
+    }),
+  };
 });
 vi.mock("@/components/PermissionsModal", () => ({ PermissionsModal: () => null }));
 vi.mock("@/lib/identity", async (original) => ({
@@ -38,6 +61,14 @@ const rows = [
 ];
 beforeEach(() => {
   localStorage.clear();
+  writeResourceViewState(
+    `state:${JSON.stringify([resourceViewStorageScope(), "conversation-tree", "sidebar", "expanded"])}`,
+    undefined,
+  );
+  clearSessionDrafts();
+  resetReadStateForTests();
+  actions.projects = [];
+  actions.pinned = [];
   vi.mocked(useConversations).mockReturnValue(conversationPage([rows[0]]));
   vi.mocked(authenticatedFetch).mockImplementation(async (url) => {
     const parsed = new URL(String(url), "http://test");
@@ -52,6 +83,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   cleanup();
   vi.clearAllMocks();
 });
@@ -59,14 +91,17 @@ function renderTree(initial = "root") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() {
     const [focusedConversationId, setFocused] = useState(initial);
-    const actions = {
+    const navigation = {
       focusedConversationId,
       openConversationIds: ["root", "two"],
-      openConversation: setFocused,
+      openConversation: (id: string, options?: { beside?: boolean }) => {
+        actions.open(id, options);
+        if (!options?.beside) setFocused(id);
+      },
       openView: vi.fn(),
     };
     return (
-      <WorkbenchProvider value={actions}>
+      <WorkbenchProvider value={navigation}>
         <Sidebar workbench open onClose={vi.fn()} />
       </WorkbenchProvider>
     );
@@ -95,6 +130,144 @@ it("preserves the running spinner on a chat open elsewhere", async () => {
     "true",
   );
   expect(screen.queryByLabelText("Open elsewhere")).toBeNull();
+});
+
+it("uses trailing parent-only count/disclosure without reserving a leading root gutter", async () => {
+  renderTree();
+  const expand = await screen.findByRole("button", { name: "Expand subchats of root" });
+  const root = screen.getByRole("link", { name: "root" }).closest("li")!;
+  expect(expand).toHaveTextContent("1");
+  expect(root.lastElementChild).toBe(expand);
+  expect(root.style.paddingInlineStart).toContain("0 * var(--sidebar-tree-indent, 10px)");
+  expect(screen.queryByText("Conversations")).toBeNull();
+  expect(screen.getByRole("button", { name: "Projects" })).toBeInTheDocument();
+  fireEvent.click(expand);
+  const child = await screen.findByRole("link", { name: "one" });
+  expect(child.closest("li")!.style.paddingInlineStart).toContain(
+    "1 * var(--sidebar-tree-indent, 10px)",
+  );
+  for (const id of ["one", "two", "three"]) {
+    // oxlint-disable-next-line no-await-in-loop
+    fireEvent.click(await screen.findByRole("button", { name: `Expand subchats of ${id}` }));
+  }
+  const leaf = await screen.findByRole("link", { name: "four" });
+  expect(within(leaf.closest("li")!).queryByRole("button", { name: /subchats/ })).toBeNull();
+});
+
+it.each([
+  { status: "idle" as const, pending: 0, marker: "New messages" },
+  { status: "running" as const, pending: 0, marker: "Session running" },
+  { status: "idle" as const, pending: 2, marker: "2 approval prompts waiting" },
+])(
+  "retains the draft and $marker markers alongside open row actions",
+  async ({ status, pending, marker }) => {
+    vi.mocked(useConversations).mockReturnValue(
+      conversationPage([{ ...rows[0], status, pending_elicitations_count: pending }]),
+    );
+    setSessionDraft("root", { text: "unfinished", files: [] });
+    markConversationUnread("root", rows[0].updated_at);
+    renderTree("two");
+    const row = (await screen.findByRole("link", { name: /root/ })).closest("li")!;
+    const indicators = within(row).getByTestId("conversation-indicators");
+    expect(
+      within(indicators).getByRole("img", { name: "Draft" }).querySelector(".lucide-pencil"),
+    ).not.toBeNull();
+    expect(within(indicators).getByRole("img", { name: marker })).toBeInTheDocument();
+    expect(within(indicators).getByRole("img", { name: "New messages" })).toBeInTheDocument();
+    fireEvent.pointerDown(within(row).getByRole("button", { name: "Conversation actions" }), {
+      button: 0,
+    });
+    expect(screen.getByRole("menuitem", { name: "Open to side" })).toBeInTheDocument();
+    expect(
+      within(indicators).getByRole("img", { name: "Draft", hidden: true }),
+    ).toBeInTheDocument();
+    expect(indicators.className).not.toMatch(/opacity-0|absolute/);
+  },
+);
+
+it.each(["menu", "context"])(
+  "opens beside exactly once through the %s without ordinary navigation",
+  async (entry) => {
+    renderTree();
+    const link = await screen.findByRole("link", { name: "root" });
+    if (entry === "menu") {
+      fireEvent.keyDown(
+        within(link.closest("li")!).getByRole("button", { name: "Conversation actions" }),
+        { key: "Enter" },
+      );
+    } else {
+      fireEvent.contextMenu(link);
+    }
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open to side" }));
+    expect(actions.open).toHaveBeenCalledExactlyOnceWith("root", { beside: true });
+  },
+);
+
+function nativeTransfer() {
+  const data = new Map<string, string>();
+  return {
+    types: [SIDEBAR_CONVERSATION_DRAG_MIME],
+    setData: (type: string, value: string) => data.set(type, value),
+    getData: (type: string) => data.get(type) ?? "",
+    effectAllowed: "uninitialized",
+    dropEffect: "none",
+  };
+}
+
+it("exports the native docking payload and suppresses the drag's trailing click", async () => {
+  renderTree();
+  const link = await screen.findByRole("link", { name: "root" });
+  const transfer = nativeTransfer();
+  fireEvent.mouseDown(link, { button: 0, clientX: 10, clientY: 10 });
+  fireEvent.mouseMove(document, { clientX: 30, clientY: 40 });
+  expect(document.body.querySelector('[class*="max-w-[16rem]"]')).toBeNull();
+  expect(fireEvent.dragStart(link, { dataTransfer: transfer })).toBe(true);
+  expect(JSON.parse(transfer.getData(SIDEBAR_CONVERSATION_DRAG_MIME))).toEqual({
+    id: "root",
+    title: "root",
+  });
+  expect(transfer.effectAllowed).toBe("copyMove");
+  fireEvent.dragEnd(link, { dataTransfer: transfer });
+  fireEvent.click(link);
+  expect(actions.open).not.toHaveBeenCalled();
+  fireEvent.pointerDown(link);
+  fireEvent.click(link);
+  expect(actions.open).toHaveBeenCalledExactlyOnceWith("root", undefined);
+});
+
+it("keeps native project drops on the existing move path and clears canceled drags", async () => {
+  actions.projects = [{ id: "alpha", name: "Alpha" }];
+  renderTree();
+  const link = await screen.findByRole("link", { name: "root" });
+  const transfer = nativeTransfer();
+  const folder = screen.getByRole("button", { name: "Alpha" });
+  fireEvent.dragStart(link, { dataTransfer: transfer });
+  expect(fireEvent.dragOver(folder, { dataTransfer: transfer })).toBe(false);
+  fireEvent.drop(folder, { dataTransfer: transfer });
+  expect(actions.move).toHaveBeenCalledExactlyOnceWith({ id: "root", project: "Alpha" });
+  expect(actions.open).not.toHaveBeenCalled();
+  actions.move.mockClear();
+  fireEvent.dragStart(link, { dataTransfer: transfer });
+  fireEvent.dragEnd(link, { dataTransfer: transfer });
+  fireEvent.drop(folder, { dataTransfer: transfer });
+  expect(actions.move).not.toHaveBeenCalled();
+});
+
+it("keeps native pinned-row reordering on the existing pin mutation path", async () => {
+  actions.pinned = [
+    conversation("pin-a", { labels: { "omnigent.pinned": "1000" } }),
+    conversation("pin-b", { labels: { "omnigent.pinned": "2000" } }),
+  ];
+  renderTree();
+  const source = await screen.findByRole("link", { name: "pin-a" });
+  const target = await screen.findByRole("link", { name: "pin-b" });
+  const transfer = nativeTransfer();
+  fireEvent.dragStart(source, { dataTransfer: transfer });
+  fireEvent.dragOver(target, { dataTransfer: transfer });
+  expect(screen.getByTestId("pin-order-insertion")).toBeInTheDocument();
+  fireEvent.drop(target, { dataTransfer: transfer });
+  expect(actions.reorder).toHaveBeenCalledOnce();
+  expect(actions.open).not.toHaveBeenCalled();
 });
 it("preloads hierarchy, expands four levels, and retains navigation, menus and expansion on remount", async () => {
   const mounted = renderTree();

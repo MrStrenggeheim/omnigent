@@ -1,11 +1,4 @@
-import {
-  Columns2Icon,
-  LayoutTemplateIcon,
-  PlusIcon,
-  SearchIcon,
-  SettingsIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { PlusIcon, SearchIcon, SettingsIcon, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderActionButton } from "@/components/HeaderActionButton";
 import { MOD_KEY } from "@/components/KeyboardShortcut";
@@ -15,7 +8,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { OmnigentLogo } from "@/components/OmnigentLogo";
@@ -35,18 +27,12 @@ export function WorkbenchAppBar({
   onSearch,
   onSettings,
   openActions,
-  onSaveLayout,
-  onSharedLayout,
-  layoutOwner,
 }: {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   onSearch: () => void;
   onSettings: () => void;
   openActions: WorkbenchOpenAction[];
-  onSaveLayout?: () => void;
-  onSharedLayout: () => void;
-  layoutOwner?: string;
 }) {
   return (
     <header
@@ -69,6 +55,7 @@ export function WorkbenchAppBar({
         onClick={onSearch}
         className="h-6 min-w-0 gap-2 text-muted-foreground max-md:size-11 max-md:p-0 md:w-[min(34vw,30rem)] md:justify-start"
         aria-label="Search or run a command"
+        data-workbench-search
       >
         <SearchIcon className="size-3.5" />
         <span className="hidden truncate md:block">Search or run a command…</span>
@@ -94,27 +81,6 @@ export function WorkbenchAppBar({
               {action.label}
             </DropdownMenuItem>
           ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <HeaderActionButton aria-label="Layout">
-            <Columns2Icon className="size-4" />
-          </HeaderActionButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>
-            {layoutOwner ? `Layout for ${layoutOwner}` : "Shared layout"}
-          </DropdownMenuLabel>
-          <DropdownMenuItem disabled={!onSaveLayout} onSelect={onSaveLayout}>
-            <LayoutTemplateIcon className="size-4" />
-            Save layout for this chat
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onSharedLayout}>
-            <Columns2Icon className="size-4" />
-            Use shared layout
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <NotificationBell />

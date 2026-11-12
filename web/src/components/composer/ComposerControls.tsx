@@ -35,6 +35,8 @@ import {
   useCollapsedWorkspaceLabels,
 } from "./ChatComposer";
 
+export const COMPOSER_CONTROL_TEXT_CLASS = "text-ui font-normal text-foreground";
+
 /**
  * The workspace tray docked above the composer card. A tray nests inside the
  * card's outer edges by the shared inset rather than sharing its border box
@@ -88,7 +90,8 @@ export const ComposerWorkspaceTrigger = forwardRef<
       // Icon-only while the bar is collapsed, so the label is the name.
       aria-label={label}
       className={cn(
-        "relative inline-flex h-8 min-w-7 max-w-40 cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 text-xs leading-4 font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50 md:h-7",
+        "relative inline-flex h-8 min-w-7 max-w-40 cursor-pointer items-center gap-1 rounded-md border border-transparent bg-transparent px-1 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50 md:h-7",
+        COMPOSER_CONTROL_TEXT_CLASS,
         className,
       )}
       {...props}
@@ -126,7 +129,8 @@ export const ComposerHostTrigger = forwardRef<
       type="button"
       aria-label={label}
       className={cn(
-        "flex h-8 w-11 shrink-0 cursor-pointer items-center justify-center gap-0.5 rounded-lg bg-transparent pl-1 pr-2 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground dark:hover:bg-muted/50 disabled:cursor-default md:h-7 group-data-[labels=collapsed]/composer-actions:w-8 group-data-[labels=collapsed]/composer-actions:px-0",
+        "flex h-8 w-11 shrink-0 cursor-pointer items-center justify-center gap-0.5 rounded-lg bg-transparent pl-1 pr-2 transition-colors hover:bg-muted/70 hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground dark:hover:bg-muted/50 disabled:cursor-default md:h-7 group-data-[labels=collapsed]/composer-actions:w-8 group-data-[labels=collapsed]/composer-actions:px-0",
+        COMPOSER_CONTROL_TEXT_CLASS,
         className,
       )}
       {...props}
@@ -191,7 +195,8 @@ export function ComposerPermissionPicker({
             disabled={disabled || (loading && !interactiveWhileLoading)}
             aria-busy={loading || undefined}
             className={cn(
-              "flex h-8 min-w-0 w-auto cursor-pointer items-center justify-center gap-1 rounded-lg bg-transparent px-2 text-foreground transition-colors hover:bg-muted/70 dark:hover:bg-muted/50 disabled:cursor-default disabled:opacity-50 md:h-7",
+              "flex h-8 min-w-0 w-auto cursor-pointer items-center justify-center gap-1 rounded-lg bg-transparent px-2 transition-colors hover:bg-muted/70 dark:hover:bg-muted/50 disabled:cursor-default disabled:opacity-50 md:h-7",
+              COMPOSER_CONTROL_TEXT_CLASS,
               loading && "disabled:opacity-100",
             )}
             aria-label={`${label}: ${value}`}
@@ -344,7 +349,8 @@ export const ComposerHarnessTrigger = forwardRef<
       aria-label={label}
       aria-busy={loading || undefined}
       className={cn(
-        "h-auto min-h-8 min-w-0 w-auto max-w-full gap-1 rounded-lg border-0 px-2 py-0 text-[13px] leading-5 font-normal text-muted-foreground hover:text-foreground md:min-h-7",
+        COMPOSER_CONTROL_TEXT_CLASS,
+        "h-auto min-h-8 min-w-0 w-auto max-w-full gap-1 rounded-lg border-0 px-2 py-0 leading-5 hover:text-foreground md:min-h-7",
         className,
       )}
       {...props}
@@ -377,7 +383,7 @@ export const ComposerHarnessTrigger = forwardRef<
       >
         {model && (
           <span
-            className="min-w-0 truncate text-left text-[13px] leading-5 font-medium text-foreground"
+            className={cn(COMPOSER_CONTROL_TEXT_CLASS, "min-w-0 truncate text-left leading-5")}
             data-testid={`${testIdPrefix}-agent-model-value`}
           >
             {model}
@@ -385,7 +391,7 @@ export const ComposerHarnessTrigger = forwardRef<
         )}
         {effort && (
           <span
-            className="shrink-0 text-[13px] leading-5 font-normal text-muted-foreground"
+            className="shrink-0 text-ui leading-5 font-normal text-muted-foreground"
             data-testid={`${testIdPrefix}-agent-effort-value`}
           >
             {effort}

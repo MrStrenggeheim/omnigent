@@ -103,10 +103,9 @@ describe("mobile sidebar drawer", () => {
   it("floats Settings at the bottom and omits the duplicate header toggle", () => {
     renderSidebar();
 
-    // Search stays in the header row (top); Settings gets its own float at the
-    // bottom of the session list.
+    // Sidebar Search is paused; Settings retains its float below the list.
     const headerActions = screen.getByTestId("sidebar-header-actions");
-    expect(within(headerActions).getByTestId("sidebar-search-button")).toBeInTheDocument();
+    expect(within(headerActions).queryByTestId("sidebar-search-button")).toBeNull();
 
     const float = screen.getByTestId("sidebar-settings-float");
     expect(float).toHaveAttribute("href", "/settings");
@@ -117,13 +116,13 @@ describe("mobile sidebar drawer", () => {
     expect(within(headerActions).queryByRole("button", { name: "Close sidebar" })).toBeNull();
   });
 
-  it("keeps both floating actions icon-only on mobile", () => {
+  it("keeps the Settings float icon-only while sidebar Search is paused", () => {
     renderSidebar();
 
-    const search = screen.getByTestId("sidebar-search-button");
+    expect(screen.queryByTestId("sidebar-search-button")).toBeNull();
     const settings = screen.getByTestId("sidebar-settings-float").closest("a, button")!;
 
-    for (const button of [search, settings]) {
+    for (const button of [settings]) {
       expect(button).toHaveClass("max-md:size-11", "max-md:text-foreground");
       expect(button).not.toHaveClass("sidebar-glass-chip", "max-md:rounded-full");
     }

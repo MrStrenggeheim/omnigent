@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -26,15 +27,8 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
-import { MoreHorizontal, Pin, X } from "lucide-react";
+import { Pin, PinOff, X } from "lucide-react";
 import { TooltipButton } from "@/components/ui/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   clampSplitRatio,
   MAX_SPLIT_RATIO,
@@ -55,6 +49,7 @@ import {
   type DockLayout,
   type DockLayoutUpdate,
   type DockPane,
+  type DockPlacement,
   type DockView,
   type SplitEdge,
 } from "./dockLayout";
@@ -80,10 +75,17 @@ export interface DockWorkspaceProps {
   pinnedViewIds?: readonly string[];
   onPinView?: (id: string, edge?: SplitEdge) => void;
   onUnpinView?: (id: string) => void;
+  /** Explicit placement keeps the current layout owner and existing resources. */
+  onOpenConversationAt?: (
+    id: string,
+    placement: DockPlacement,
+  ) => void | boolean | Promise<void | boolean>;
   /** Override responsive measurement, e.g. for a native mobile wrapper. */
   compact?: boolean;
   className?: string;
 }
+
+export const CONVERSATION_DRAG_MIME = "application/x-omnigent-conversation";
 
 const edges: SplitEdge[] = ["left", "right", "top", "bottom"];
 const fullRect: TerminalRect = { left: 0, top: 0, width: 100, height: 100 };
@@ -132,6 +134,9 @@ function DockSurface(props: DockWorkspaceProps) {
     return () => observer.disconnect();
   }, []);
   const [dragging, setDragging] = useState(false);
+  const [externalDragging, setExternalDragging] = useState(false);
+  const externalDepth = useRef(0);
+  const [externalOver, setExternalOver] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState<string[]>([]);
   const pending = useRef(new Set<string>());
@@ -194,6 +199,53 @@ function DockSurface(props: DockWorkspaceProps) {
     );
   };
 
+  const acceptsConversation = (event: DragEvent) =>
+    !!latest.current.onOpenConversationAt &&
+    Array.from(event.dataTransfer.types).includes(CONVERSATION_DRAG_MIME);
+  const dropTarget = (event: DragEvent) =>
+    event.target instanceof Element
+      ? event.target.closest<HTMLElement>("[data-conversation-drop-pane]")
+      : null;
+  const openDroppedConversation = async (event: DragEvent) => {
+    if (!acceptsConversation(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    externalDepth.current = 0;
+    setExternalDragging(false);
+    setExternalOver(null);
+    const target = dropTarget(event);
+    const paneId = target?.dataset.conversationDropPane;
+    if (!paneId || !latest.current.layout.panes.some((pane) => pane.id === paneId)) return;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(event.dataTransfer.getData(CONVERSATION_DRAG_MIME));
+    } catch {
+      return;
+    }
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      !("id" in payload) ||
+      typeof payload.id !== "string" ||
+      !payload.id.trim() ||
+      !("title" in payload) ||
+      typeof payload.title !== "string"
+    )
+      return;
+    const edge = target.dataset.edge;
+    const index = target.dataset.conversationDropIndex;
+    setError(null);
+    try {
+      await latest.current.onOpenConversationAt?.(payload.id, {
+        paneId,
+        ...(edges.includes(edge as SplitEdge) ? { edge: edge as SplitEdge } : {}),
+        ...(index !== undefined ? { index: Number(index) } : {}),
+      });
+    } catch (cause) {
+      if (alive.current) setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
   const focus = (paneId: string) =>
     latest.current.onLayoutChange((current) => focusDockPane(current, paneId));
   const select = (id: string) => onLayoutChange((current) => selectDockView(current, id));
@@ -215,6 +267,37 @@ function DockSurface(props: DockWorkspaceProps) {
         ref={rootRef}
         className={`dock-workspace ${props.className ?? ""}`}
         data-compact={compact}
+        onDragEnterCapture={(event) => {
+          if (acceptsConversation(event)) {
+            externalDepth.current += 1;
+            setExternalDragging(true);
+          }
+        }}
+        onDragLeaveCapture={(event) => {
+          if (!acceptsConversation(event)) return;
+          externalDepth.current = Math.max(0, externalDepth.current - 1);
+          if (externalDepth.current) return;
+          setExternalDragging(false);
+          setExternalOver(null);
+        }}
+        onDragOverCapture={(event) => {
+          if (!acceptsConversation(event)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "copy";
+          const target = dropTarget(event);
+          setExternalOver(
+            target
+              ? `${target.dataset.conversationDropPane}:${target.dataset.edge ?? target.dataset.conversationDropIndex ?? "center"}`
+              : null,
+          );
+        }}
+        onDropCapture={(event) => void openDroppedConversation(event)}
+        onDragEndCapture={() => {
+          externalDepth.current = 0;
+          setExternalDragging(false);
+          setExternalOver(null);
+        }}
       >
         {error && (
           <div role="alert" className="dock-error">
@@ -239,7 +322,8 @@ function DockSurface(props: DockWorkspaceProps) {
                 hidden={compact && !focused}
                 compact={compact}
                 focused={focused}
-                dragging={dragging}
+                dragging={dragging || externalDragging}
+                externalOver={externalOver}
                 pinnedViewIds={pinnedViewIds}
                 closing={closing}
                 onSelect={select}
@@ -265,6 +349,8 @@ function DockSurface(props: DockWorkspaceProps) {
                   visible={visible}
                   focused={visible && focused}
                   style={rectStyle(compact ? fullRect : rect, true)}
+                  bottomEdge={compact || Math.abs(rect.top + rect.height - 100) < 0.001}
+                  rightEdge={compact || Math.abs(rect.left + rect.width - 100) < 0.001}
                   onFocus={() => {
                     if (pane) focus(pane.id);
                   }}
@@ -316,11 +402,15 @@ function DockViewSlot({
   style,
   onFocus,
   renderView,
+  bottomEdge,
+  rightEdge,
 }: {
   id: string;
   view: DockView;
   visible: boolean;
   focused: boolean;
+  bottomEdge: boolean;
+  rightEdge: boolean;
   style: CSSProperties;
   onFocus: () => void;
   renderView: DockWorkspaceProps["renderView"];
@@ -341,6 +431,8 @@ function DockViewSlot({
       hidden={!visible}
       className="dock-view-slot"
       data-dock-view={view.id}
+      data-dock-bottom-edge={bottomEdge}
+      data-dock-right-edge={rightEdge}
       data-focused={focused}
       style={style}
       onPointerDownCapture={onFocus}
@@ -360,6 +452,7 @@ function DockPaneChrome({
   compact,
   focused,
   dragging,
+  externalOver,
   pinnedViewIds,
   closing,
   onSelect,
@@ -377,6 +470,7 @@ function DockPaneChrome({
   compact: boolean;
   focused: boolean;
   dragging: boolean;
+  externalOver: string | null;
   pinnedViewIds: readonly string[];
   closing: string[];
   onSelect: (id: string) => void;
@@ -386,7 +480,6 @@ function DockPaneChrome({
   onPinView: DockWorkspaceProps["onPinView"];
   onUnpinView: DockWorkspaceProps["onUnpinView"];
 }) {
-  const selected = layout.views.find((view) => view.id === pane.selectedViewId)!;
   const tabs = (compact ? layout.panes : [pane]).flatMap((owner) =>
     owner.viewIds.map((id, index) => ({ id, index, owner })),
   );
@@ -401,7 +494,12 @@ function DockPaneChrome({
       onFocusCapture={onFocus}
     >
       <div className="dock-pane-header">
-        <div role="tablist" aria-label={`Views in ${pane.id}`} className="dock-tabs">
+        <div
+          role="tablist"
+          aria-label={`Views in ${pane.id}`}
+          className="dock-tabs"
+          data-conversation-drop-pane={pane.id}
+        >
           <SortableContext
             items={tabs.map(({ id }) => `view:${id}`)}
             strategy={horizontalListSortingStrategy}
@@ -417,6 +515,11 @@ function DockPaneChrome({
                 pinned={pinnedViewIds.includes(id)}
                 onSelect={() => onSelect(id)}
                 onClose={() => onClose(id)}
+                onPin={
+                  pinnedViewIds.includes(id)
+                    ? onUnpinView && (() => onUnpinView(id))
+                    : onPinView && (() => onPinView(id))
+                }
                 closing={closing.includes(id)}
                 onStep={(step, reorder) => {
                   if (reorder)
@@ -436,32 +539,12 @@ function DockPaneChrome({
             ))}
           </SortableContext>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <TooltipButton type="button" aria-label="Pane actions" className="dock-icon">
-              <MoreHorizontal size={16} />
-            </TooltipButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DockViewMenuItems
-              pane={pane}
-              layout={layout}
-              selected={selected}
-              closing={closing}
-              onClose={onClose}
-              onLayoutChange={onLayoutChange}
-              onPinView={onPinView}
-              onUnpinView={onUnpinView}
-              pinnedViewIds={pinnedViewIds}
-            />
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
       {dragging && (
         <div className="dock-drop-overlay">
-          <DockDropZone paneId={pane.id} />
+          <DockDropZone paneId={pane.id} externalOver={externalOver} />
           {edges.map((edge) => (
-            <DockDropZone key={edge} paneId={pane.id} edge={edge} />
+            <DockDropZone key={edge} paneId={pane.id} edge={edge} externalOver={externalOver} />
           ))}
         </div>
       )}
@@ -479,6 +562,7 @@ function DockTab({
   onSelect,
   onStep,
   onClose,
+  onPin,
   closing,
 }: {
   view: DockView;
@@ -491,6 +575,7 @@ function DockTab({
   onStep: (step: number, reorder: boolean) => void;
   onClose: () => void;
   closing: boolean;
+  onPin?: () => void;
 }) {
   const { active } = useDndContext();
   const { setNodeRef, attributes, listeners, isDragging } = useSortable({
@@ -502,7 +587,11 @@ function DockTab({
     if (selected) tabRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [selected]);
   return (
-    <div className="dock-tab-group">
+    <div
+      className="dock-tab-group"
+      data-conversation-drop-pane={pane.id}
+      data-conversation-drop-index={index}
+    >
       <button
         type="button"
         ref={(node) => {
@@ -527,9 +616,24 @@ function DockTab({
         }}
       >
         <WorkbenchViewIcon kind={view.kind} />
-        {pinned && <Pin size={12} aria-label="Kept open across chats" />}
         <span className="dock-tab-label">{view.title}</span>
       </button>
+      {onPin && (
+        <TooltipButton
+          type="button"
+          className="dock-tab-pin"
+          aria-label={`${pinned ? "Unpin" : "Pin"} ${view.title}`}
+          aria-pressed={pinned}
+          tooltip={pinned ? "Return to this chat’s layout" : "Keep open across chats"}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onPin();
+          }}
+        >
+          {pinned ? <PinOff size={14} /> : <Pin size={14} />}
+        </TooltipButton>
+      )}
       <button
         type="button"
         className="dock-tab-close"
@@ -547,19 +651,29 @@ function DockTab({
   );
 }
 
-function DockDropZone({ paneId, edge }: { paneId: string; edge?: SplitEdge }) {
+function DockDropZone({
+  paneId,
+  edge,
+  externalOver,
+}: {
+  paneId: string;
+  edge?: SplitEdge;
+  externalOver: string | null;
+}) {
   const { setNodeRef, isOver } = useDroppable({
     id: `drop:${paneId}:${edge ?? "center"}`,
     data: { type: "dock-drop", paneId, edge },
   });
+  const over = isOver || externalOver === `${paneId}:${edge ?? "center"}`;
   return (
     <div
       ref={setNodeRef}
       className="dock-drop-zone"
+      data-conversation-drop-pane={paneId}
       data-edge={edge ?? "center"}
-      data-over={isOver}
+      data-over={over}
     >
-      {isOver && (edge ? `Split ${edge}` : "Move here")}
+      {over && (edge ? `Split ${edge}` : "Add to tab group")}
     </div>
   );
 }
@@ -637,82 +751,5 @@ function DockDivider({
         }
       }}
     />
-  );
-}
-
-function DockViewMenuItems({
-  pane,
-  layout,
-  selected,
-  closing,
-  onClose,
-  onLayoutChange,
-  onPinView,
-  onUnpinView,
-  pinnedViewIds,
-}: Pick<
-  Parameters<typeof DockPaneChrome>[0],
-  | "pane"
-  | "layout"
-  | "closing"
-  | "onClose"
-  | "onLayoutChange"
-  | "onPinView"
-  | "onUnpinView"
-  | "pinnedViewIds"
-> & { selected: DockView }) {
-  const index = pane.viewIds.indexOf(selected.id);
-  const move = (paneId: string, edge?: SplitEdge, targetIndex?: number) =>
-    onLayoutChange((current) =>
-      moveDockView(current, selected.id, { paneId, edge, index: targetIndex }),
-    );
-  return (
-    <>
-      <DropdownMenuItem disabled={index === 0} onSelect={() => move(pane.id, undefined, index - 1)}>
-        Move tab left
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        disabled={index === pane.viewIds.length - 1}
-        onSelect={() => move(pane.id, undefined, index + 1)}
-      >
-        Move tab right
-      </DropdownMenuItem>
-      {edges.map((edge) => (
-        <DropdownMenuItem
-          key={edge}
-          disabled={pane.viewIds.length < 2}
-          onSelect={() => move(pane.id, edge)}
-        >
-          Split {edge}
-        </DropdownMenuItem>
-      ))}
-      {layout.panes
-        .filter((target) => target.id !== pane.id)
-        .map((target) => (
-          <DropdownMenuItem key={target.id} onSelect={() => move(target.id)}>
-            Move to{" "}
-            {layout.views.find((view) => view.id === target.selectedViewId)?.title ?? target.id}
-          </DropdownMenuItem>
-        ))}
-      {(onPinView || onUnpinView) && <DropdownMenuSeparator />}
-      {pinnedViewIds.includes(selected.id)
-        ? onUnpinView && (
-            <DropdownMenuItem onSelect={() => onUnpinView(selected.id)}>
-              Unpin from shared area
-            </DropdownMenuItem>
-          )
-        : onPinView && (
-            <DropdownMenuItem onSelect={() => onPinView(selected.id)}>
-              Keep open across chats
-            </DropdownMenuItem>
-          )}
-      <DropdownMenuSeparator />
-      <DropdownMenuItem
-        disabled={closing.includes(selected.id)}
-        onSelect={() => onClose(selected.id)}
-      >
-        Close view
-      </DropdownMenuItem>
-    </>
   );
 }

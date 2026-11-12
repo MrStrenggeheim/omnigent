@@ -15,15 +15,15 @@ The approved workspace specification governs behavior; later owner corrections g
 | Role                     | Canonical implementation                                                                    |
 | ------------------------ | ------------------------------------------------------------------------------------------- |
 | View headers and content | `--workspace-content`; white in light mode, neutral `#18181b` in dark mode                  |
-| Sidebar and tab bars     | `--workspace-chrome`; pale selected-accent wash                                             |
-| Application bar          | `--workspace-appbar`; same medium-light fill as the focused tab                             |
+| Sidebar     | `--workspace-chrome`; pale selected-accent wash                                             |
+| Application bar          | `--workspace-appbar`; medium-light accent wash, distinct from tabs                             |
 | Overlay                  | Existing popover/dialog tokens; opaque readable foreground                                  |
 | Normal text              | Existing system/Geist typography and `--foreground`                                         |
 | Secondary text           | `--muted-foreground`; never use disabled opacity for ordinary text                          |
-| Selected tab             | Unfocused selection uses the content surface; focused selection uses `--workspace-selected` |
-| Pane focus               | Focused-tab fill only; no perimeter or top accent line                                      |
+| Selected tab             | Content surface; primary bottom strip identifies the active tab |
+| Pane focus               | Active-tab primary bottom strip; no pane perimeter or top accent line                                      |
 | Keyboard focus           | Existing `--ring` treatment; preserve visible focus                                         |
-| Header geometry          | 36px per workspace header row; 32px in Compact appearance                                                                |
+| Header geometry          | 48px Comfortable; 36px Compact, from the shared Appearance density                                                                |
 | Header action            | `HeaderActionButton`, 24px glyph surface; header target is row height minus 4px                                |
 | Sidebar toggle           | `SidebarToggle` with `SidebarPanelIcon`, filled segment when open                           |
 | Search modes             | Existing `SegmentedControl`, consistent scope/category sizing                               |
@@ -43,10 +43,11 @@ Other selected palettes retain their primary and readable foreground preferences
 | State or role                   | Shared treatment                                                                    |
 | ------------------------------- | ----------------------------------------------------------------------------------- |
 | Chrome at rest                  | `--workspace-chrome`: 10% accent mixed into content                                 |
-| Focused tab and application bar | `--workspace-selected` / `--workspace-appbar`: 28% accent mixed into content        |
+| Application bar | `--workspace-appbar`: 28% accent mixed into content |
+| Tab bar and active tab | Content surface; focused active tab has a 3px primary bottom strip |
 | Hover on content                | `--workspace-hover-on-content`: 8% accent mixed into content                        |
 | Hover on chrome                 | `--workspace-hover-on-chrome`: 6% foreground mixed into chrome                      |
-| Focused tab hover               | Retain selected fill; close control may show its own hover surface                  |
+| Focused tab hover               | Retain active strip; shared content-hover fill for the hovered tab                  |
 | Primary action, including Send  | Shared primary fill and foreground; hover adds 5% black, press adds 10% black       |
 | Secondary action                | White with dark text and a neutral border; neutral dark counterpart with light text |
 | Secondary hover / press / open  | Add 6% / 10% / 10% foreground to the secondary surface                              |
@@ -56,7 +57,7 @@ Other selected palettes retain their primary and readable foreground preferences
 
 Primary hover and press keep text opaque rather than fading the entire control.
 Use the matching surface-hover token for icon actions and rows.
-Keep focused selection visible while hovering a tab; apply state feedback without tab or disclosure animation.
+Keep the active bottom strip visible while hovering a tab; apply state feedback without tab or disclosure animation.
 
 `index.css` publishes the workspace tokens independently of the workbench styles.
 Import `workbenchSurfaces.css` after the existing shell and dock CSS to give docked roots, headers and content opaque shared surfaces.
@@ -69,14 +70,17 @@ Desktop tab/container headers and view headers remain separate rows, including s
 Mobile reuses horizontally scrolling tabs, including views from other panes; only the selected view is shown.
 Narrow composer workspace controls collapse to an icon and chevron while retaining their accessible full location.
 The shell owns the device bottom safe area once; the mobile composer adds only an 8px content gutter.
-Do not merge or split their overflow controls; the owner explicitly deferred that redesign.
+Remove pane docking menus and the app-bar Layout control; pin belongs immediately before each tab close control.
+Keep the chat content action menu as three dots; place the existing Chat/Terminal switch immediately before it.
 Keep conversation breadcrumbs in the view header.
 Center empty guidance within the entire available content area.
 
 Navigation keeps rows, expansion, selection and scroll during background refresh.
 Load authorized hierarchy metadata ahead of expansion; leaves have neither chevrons nor empty-child rows.
 Actions appear on row hover, keyboard focus or an open action menu, with a reachable touch alternative.
-A working conversation keeps its existing spinner independently of hover controls.
+Running, approval, draft and unread indicators coexist in the trailing row group.
+Parents alone have a trailing child-count/chevron; children use shallow indentation.
+Hover actions truncate titles before controls instead of covering labels or status.
 
 The composer activity dock is disabled until the owner requests another design.
 Activity data and the dedicated Activity view remain available.
@@ -88,3 +92,26 @@ Extend the owning shared component when a missing state is broadly useful.
 Do not add runtime dependencies, replacement icon sets, fonts or page-specific palettes.
 
 Appearance density controls header height and sidebar entry padding through the shared density tokens.
+
+## Implementation guardrails
+
+The latest approved owner decisions above govern every implementation pass.
+Before adding or changing a control, inspect existing equivalents and reuse the complete shared component.
+Compare typography, colors, sizing, tooltip shape and hover/focus behavior with sibling controls before calling it complete.
+Do not introduce local hex colors, bespoke buttons, extra fonts or new dependencies to solve a missing shared state.
+Extend the shared owner when behavior is missing; record any necessary departure in the delivery report.
+
+Composer selectors use the same UI typography, normal weight and foreground; effort/thinking may be lighter within a selector.
+Preserve existing composer padding, gaps and hit targets; microphone relocation is the only approved reordering in that row.
+The workspace trigger reads computer icon, Host:/path and chevron; mobile labels remain compact.
+Tooltips are arrowless and canonical, and appear only for additional meaning, hidden details or shortcuts.
+All native scrolling uses the shared slim treatment; preserve specialized transcript and terminal scroll behavior.
+Background color changes mark full surface edges without an additional border; equal-colored panes retain necessary separators.
+The native bottom gesture area shares the chat surface and has no exterior pane divider.
+
+Each chat owns a remembered layout by default; explicit Open to side or sidebar drag adds it to the current layout.
+Do not replace another chat's saved arrangement during explicit embedded opening.
+Layout miniatures, Inbox consolidation and composer spacing redesign are deferred.
+
+Before delivery, compare integrated desktop/mobile screenshots with these rules and run affected shared-component checks.
+Every implementation report includes action/expected-result acceptance steps and names remaining limitations separately.

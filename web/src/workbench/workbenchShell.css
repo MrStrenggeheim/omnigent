@@ -1,10 +1,15 @@
 .unified-workbench {
-  --workbench-header-height: var(--density-header-height, 36px);
+  --workbench-header-height: var(--density-header-height, 48px);
+  --background: var(--workspace-content);
+  background: var(--workspace-content);
   padding-bottom: var(--omnigent-safe-bottom, 0px);
 }
 
 .unified-workbench .conversations-sidebar {
-  border-right: 1px solid var(--border);
+  border-right: 0;
+}
+.dark .unified-workbench .conversations-sidebar {
+  border-right: 0;
 }
 .unified-workbench .workbench-app-bar {
   z-index: 20;
@@ -14,6 +19,9 @@
 }
 .unified-workbench .workbench-conversation .chat-conversation-content {
   padding-top: 1rem;
+}
+.unified-workbench .workbench-conversation .main-terminal-view {
+  padding-top: 0;
 }
 
 /* Docked headers occupy their own row; only the composer edge needs fading. */
@@ -112,7 +120,7 @@ html[data-electron-mac] .unified-workbench .sidebar-header-row {
   --muted: var(--workspace-hover-on-chrome);
   background-image: none;
   box-shadow: none;
-  border-right: 1px solid var(--border);
+  border-right: 0;
 }
 .unified-workbench .dock-view-slot .workspace-control-header {
   background: var(--workspace-content);
@@ -136,4 +144,18 @@ html[data-electron-mac] .unified-workbench .sidebar-header-row {
   line-height: 1.35;
   text-align: left;
   white-space: normal;
+}
+
+/* Background changes already mark outer chrome boundaries. */
+.unified-workbench .workbench-app-bar {
+  border-bottom: 0;
+}
+.unified-workbench .conversations-sidebar {
+  --tree-indent: 10px;
+}
+.unified-workbench .dock-view-slot[data-dock-bottom-edge="true"]::after {
+  border-bottom: 0;
+}
+.unified-workbench .dock-view-slot[data-dock-right-edge="true"]::after {
+  border-right: 0;
 }

@@ -1,6 +1,8 @@
 import { useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { ChevronRightIcon, ShareIcon, InfoIcon, GitForkIcon, SquareIcon } from "lucide-react";
 import { ScopedConversationSurface } from "./ScopedConversationSurface";
+import { ScopedConversationTerminal } from "./ScopedConversationTerminal";
+import { ViewModeToggle } from "@/shell/ViewModeToggle";
 import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { AgentInfoContent } from "@/components/AgentInfo";
 import { PermissionsModal } from "@/components/PermissionsModal";
@@ -80,9 +82,11 @@ export function ConversationView({
       visible={visible}
       focused={visible && (focused ?? workbench?.focusedConversationId === conversationId)}
     >
-      <ConversationViewContent conversationId={conversationId} visible={visible}>
-        {children}
-      </ConversationViewContent>
+      <ScopedConversationTerminal key={conversationId} conversationId={conversationId}>
+        <ConversationViewContent conversationId={conversationId} visible={visible}>
+          {children}
+        </ConversationViewContent>
+      </ScopedConversationTerminal>
     </ScopedChatStoreProvider>
   );
 }
@@ -96,6 +100,7 @@ function ConversationViewContent({
   visible: boolean;
   children?: ReactNode;
 }) {
+  const workbench = useWorkbench();
   const useChatStore = useConversationChatStore();
   const { session, error } = useSession(conversationId);
   const { data: agent } = useSessionAgent(conversationId);
@@ -228,6 +233,10 @@ function ConversationViewContent({
           {session?.title || (error ? "Conversation unavailable" : "Conversation")}
         </span>
       </nav>
+      <ViewModeToggle
+        hotkeyEnabled={visible && workbench?.focusedConversationId === conversationId}
+        alwaysVisible
+      />
       {conversation && (
         <HeaderConversationMenu
           conversation={conversation}

@@ -4,7 +4,7 @@ import { TooltipButton } from "@/components/ui/tooltip";
 // cmdk filtering is off and the static actions are filtered here.
 
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FileIcon, SearchIcon, XIcon } from "lucide-react";
 import { useWorkspaceFileSearch } from "@/hooks/useWorkspaceChangedFiles";
 import { queryIdentity } from "@/lib/workbenchWorkspace";
@@ -43,6 +43,8 @@ import { conversationDisplayLabel, getConversationAgentType } from "./sidebarNav
 export type { CommandPaletteFileTarget } from "@/workbench/paletteCommands";
 
 export interface CommandPaletteProps {
+  /** Workbench search opens below its shared header trigger, without a backdrop. */
+  anchorSelector?: string;
   /** Captured resource scope; never inferred from active chat or surrounding context. */
   fileTarget?: CommandPaletteFileTarget;
   /** File paths are relative to target.folder, matching Explorer quick search. */
@@ -135,6 +137,7 @@ function paletteSessions(
 }
 
 export function CommandPalette({
+  anchorSelector,
   fileTarget,
   onOpenFile,
   onFileSearch,
@@ -154,6 +157,31 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [pageLimit, setPageLimit] = useState(SESSION_SEARCH_PAGE_BATCH);
+  const [anchor, setAnchor] = useState<{ top: number; left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !anchorSelector) {
+      setAnchor(null);
+      return;
+    }
+    const measure = () => {
+      const target = document.querySelector(anchorSelector);
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const width = Math.min(640, window.innerWidth - 16);
+      setAnchor({
+        top: rect.bottom + 8,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+        width,
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, [open, anchorSelector]);
 
   // Reset the query when the palette closes so it reopens clean.
   useEffect(() => {
@@ -463,8 +491,9 @@ export function CommandPalette({
     );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={!anchorSelector}>
       <DialogContent
+        overlay={!anchorSelector}
         aria-describedby={undefined}
         onEscapeKeyDown={dismissOnEscape}
         onKeyDownCapture={(event) => {
@@ -478,23 +507,33 @@ export function CommandPalette({
         // overrides DialogContent's sm:max-w-sm between 640px and md.
         className={cn(
           "overflow-hidden p-0",
-          isMobile
-            ? "inset-x-0 top-0 h-full max-h-full w-full max-w-full translate-x-0 translate-y-0 gap-0 rounded-none border-0 shadow-none sm:max-w-full"
-            : "top-1/4 translate-y-0 rounded-xl sm:max-w-2xl",
+          anchorSelector
+            ? "translate-x-0 translate-y-0 rounded-xl sm:max-w-none"
+            : isMobile
+              ? "inset-x-0 top-0 h-full max-h-full w-full max-w-full translate-x-0 translate-y-0 gap-0 rounded-none border-0 shadow-none sm:max-w-full"
+              : "top-1/4 translate-y-0 rounded-xl sm:max-w-2xl",
         )}
         style={
-          isMobile
+          anchorSelector
             ? {
-                top: 0,
-                height: "var(--omnigent-viewport-height, 100dvh)",
-                maxHeight: "var(--omnigent-viewport-height, 100dvh)",
-                // Pad both insets: the macOS title bar or safe-top clears the window
-                // controls or notch; safe-bottom keeps the last row above the home
-                // indicator when the keyboard is closed (the viewport then spans it).
-                paddingTop: "var(--mac-titlebar-height, var(--omnigent-safe-top, 0px))",
-                paddingBottom: "var(--omnigent-safe-bottom, 0px)",
+                top: anchor?.top ?? 56,
+                left: anchor?.left ?? 8,
+                width: anchor?.width ?? "calc(100vw - 1rem)",
+                maxWidth: "calc(100vw - 1rem)",
+                maxHeight: `calc(var(--omnigent-viewport-height, 100dvh) - ${anchor?.top ?? 56}px - 8px)`,
               }
-            : undefined
+            : isMobile
+              ? {
+                  top: 0,
+                  height: "var(--omnigent-viewport-height, 100dvh)",
+                  maxHeight: "var(--omnigent-viewport-height, 100dvh)",
+                  // Pad both insets: the macOS title bar or safe-top clears the window
+                  // controls or notch; safe-bottom keeps the last row above the home
+                  // indicator when the keyboard is closed (the viewport then spans it).
+                  paddingTop: "var(--mac-titlebar-height, var(--omnigent-safe-top, 0px))",
+                  paddingBottom: "var(--omnigent-safe-bottom, 0px)",
+                }
+              : undefined
         }
         showCloseButton={false}
       >

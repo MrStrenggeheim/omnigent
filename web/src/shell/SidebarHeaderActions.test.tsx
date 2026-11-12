@@ -71,6 +71,23 @@ it("keeps Search reachable without duplicating the application-bar toggle", () =
   expect(onOpenSearch).toHaveBeenCalledOnce();
 });
 
+it("omits the paused sidebar Search entry while retaining Settings", () => {
+  const onOpenSearch = vi.fn();
+  render(
+    <MemoryRouter>
+      <SidebarHeaderActions
+        showSearch={false}
+        expanded
+        onToggle={vi.fn()}
+        onOpenSearch={onOpenSearch}
+      />
+    </MemoryRouter>,
+  );
+  expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
+  expect(onOpenSearch).not.toHaveBeenCalled();
+});
+
 it.each([false, true])(
   "keeps the shared toggle background transparent when expanded=%s",
   (expanded) => {

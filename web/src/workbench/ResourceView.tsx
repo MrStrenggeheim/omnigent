@@ -51,6 +51,7 @@ export interface ResourceOpenFileOptions extends OpenFileOptions {
   comparison?: WorkspaceComparison;
 }
 export interface ResourceViewProps {
+  revealRequest?: { path: string; token: string };
   viewId: string;
   active?: boolean;
   annotationControl?: ReactNode;
@@ -96,6 +97,7 @@ export function ResourceView(props: ResourceViewProps) {
 }
 
 function ResourceViewBody({
+  revealRequest,
   viewId,
   active = true,
   annotationControl,
@@ -305,6 +307,7 @@ function ResourceViewBody({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {(kind === "files" || kind === "changes") && (
             <FilesPanel
+              revealRequest={revealRequest}
               locationControls={locationControls}
               viewId={viewId}
               active={active}

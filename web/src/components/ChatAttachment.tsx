@@ -10,12 +10,19 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { DownloadIcon, Loader2Icon, MoreHorizontalIcon, ScanEyeIcon } from "lucide-react";
+import {
+  DownloadIcon,
+  FolderOpenIcon,
+  Loader2Icon,
+  MoreHorizontalIcon,
+  ScanEyeIcon,
+} from "lucide-react";
 import { authenticatedFetch } from "@/lib/identity";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
 import { downloadBlob } from "@/lib/explorerOperations";
 import { toast } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
+import { HeaderActionButton } from "@/components/HeaderActionButton";
 import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -47,6 +54,23 @@ export const ChatAttachmentContext = createContext<{
   itemId: string | null;
 }>({ sessionId: null, itemId: null });
 export type AttachmentContent = ChatAttachmentContent;
+
+/** Persist this identity in the dock; never replace it with a live filesystem path. */
+export interface AttachmentPreviewRequest {
+  sessionId: string;
+  itemId?: string | null;
+  reference?: string;
+  attachment?: AttachmentContent;
+  filename?: string;
+}
+
+export const AttachmentPreviewContext = createContext<{
+  openAttachment?: (request: AttachmentPreviewRequest) => void;
+  /** Optional availability veto; the Reveal endpoint authorizes the captured origin. */
+  canRevealAttachment?: (request: AttachmentPreviewRequest) => boolean;
+  /** Resolve the captured location, guard Explorer reuse and report failures. */
+  revealAttachment?: (request: AttachmentPreviewRequest) => void | Promise<void>;
+}>({});
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const TEXT_BYTES = 512 * 1024;
@@ -94,27 +118,19 @@ function useObjectUrl(blob: Blob | undefined) {
   return value?.blob === blob ? value?.url : undefined;
 }
 
-/** One authenticated file surface for uploads, agent artifacts and captured Markdown references. */
-export function ChatAttachment({
-  sessionId,
-  attachment: rawAttachment,
-  reference,
-  itemId,
-  compact = false,
-  unresolvedFallback,
-}: {
-  sessionId: string | null;
-  attachment?: AttachmentContent;
-  reference?: string;
-  itemId?: string | null;
-  compact?: boolean;
-  /** Implicit prose stays unchanged until its captured reference resolves to a file. */
-  unresolvedFallback?: ReactNode;
-}) {
+function useAttachmentResource(
+  {
+    sessionId,
+    attachment: rawAttachment,
+    reference,
+    itemId,
+    filename: requestedFilename,
+  }: Omit<AttachmentPreviewRequest, "sessionId"> & { sessionId: string | null },
+  { preview = false, loadImages = false, eager = false } = {},
+) {
   const attachment = normalizeAttachmentContent(rawAttachment);
-  const [open, setOpen] = useState(false);
-  const [failedImage, setFailedImage] = useState<string>();
-  const filenameHint = attachment?.filename ?? reference?.split(/[\\/]/).at(-1) ?? "Attachment";
+  const filenameHint =
+    attachment?.filename ?? requestedFilename ?? reference?.split(/[\\/]/).at(-1) ?? "Attachment";
   const storedReference = reference?.match(
     /^\/v1\/sessions\/([^/]+)\/resources\/files\/([^/]+)\/content$/,
   );
@@ -153,9 +169,10 @@ export function ChatAttachment({
     queryKey: ["chat-attachment-bytes", sessionId, fileId ?? itemId, reference, inline],
     enabled:
       ((!!url && !!sessionId) || !!inline?.startsWith("data:")) &&
-      ((!compact && image) || open || unresolvedFallback !== undefined),
+      ((loadImages && image) || preview || eager),
     retry: false,
     gcTime: 30_000,
+    staleTime: Infinity,
     queryFn: async ({ signal }) => {
       let response: Response;
       if (url) response = await authenticatedFetch(url, { signal });
@@ -203,6 +220,75 @@ export function ChatAttachment({
     metadata.data || content.data
       ? formatBytes(content.data?.size ?? metadata.data!.metadata.bytes)
       : null;
+  return {
+    attachment,
+    filenameHint,
+    filename,
+    fileId,
+    storedReference,
+    available,
+    image,
+    metadata,
+    content,
+    blobUrl,
+    mime,
+    error,
+    download,
+    details,
+    size,
+  };
+}
+
+/** One authenticated file surface for uploads, agent artifacts and captured Markdown references. */
+export function ChatAttachment({
+  sessionId,
+  attachment: rawAttachment,
+  reference,
+  itemId,
+  compact = false,
+  unresolvedFallback,
+}: {
+  sessionId: string | null;
+  attachment?: AttachmentContent;
+  reference?: string;
+  itemId?: string | null;
+  compact?: boolean;
+  /** Implicit prose stays unchanged until its captured reference resolves to a file. */
+  unresolvedFallback?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [failedImage, setFailedImage] = useState<string>();
+  const previewContext = useContext(AttachmentPreviewContext);
+  const resource = useAttachmentResource(
+    { sessionId, attachment: rawAttachment, reference, itemId },
+    { preview: open, loadImages: !compact, eager: unresolvedFallback !== undefined },
+  );
+  const {
+    attachment,
+    filenameHint,
+    filename,
+    fileId,
+    available,
+    image,
+    metadata,
+    content,
+    blobUrl,
+    error,
+    download,
+    details,
+    size,
+  } = resource;
+  const request: AttachmentPreviewRequest = {
+    sessionId: sessionId ?? "",
+    attachment,
+    reference,
+    itemId,
+    filename,
+  };
+  const openPreview = () => {
+    if (sessionId && previewContext.openAttachment) previewContext.openAttachment(request);
+    else setOpen(true);
+  };
   if (unresolvedFallback !== undefined && (!content.data || error)) return unresolvedFallback;
   return (
     <span
@@ -226,7 +312,7 @@ export function ChatAttachment({
           path={reference ?? filenameHint}
           filename={filename}
           mimeType={metadata.data?.metadata.content_type}
-          onClick={() => setOpen(true)}
+          onClick={openPreview}
         />
       ) : (
         <span className="flex min-w-0 items-center gap-3">
@@ -243,7 +329,7 @@ export function ChatAttachment({
                 <TooltipButton
                   type="button"
                   className="block max-w-full truncate text-left text-sm font-semibold hover:text-link focus-visible:outline-ring @min-[30rem]/attachment:max-w-1/2"
-                  onClick={() => setOpen(true)}
+                  onClick={openPreview}
                 >
                   {filename}
                 </TooltipButton>
@@ -283,7 +369,7 @@ export function ChatAttachment({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setOpen(true)}>
+                <DropdownMenuItem onSelect={openPreview}>
                   <ScanEyeIcon /> Preview
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -316,7 +402,7 @@ export function ChatAttachment({
             className="underline"
             onClick={() => {
               void content.refetch();
-              void metadata.refetch();
+              if (fileId) void metadata.refetch();
             }}
           >
             Retry
@@ -331,37 +417,17 @@ export function ChatAttachment({
         </span>
       )}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[90dvh] w-[calc(100vw-1rem)] max-w-4xl flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[90dvh] w-[calc(100vw-1rem)] max-w-4xl flex-col overflow-hidden sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle className="break-all">{filename}</DialogTitle>
             <DialogDescription>
-              {mime}
-              {content.data && ` · ${formatBytes(content.data.size)}`} ·{" "}
-              <TooltipButton
-                type="button"
-                aria-label={`Download ${filename}`}
-                className="text-link underline"
-                onClick={() => void download()}
-              >
-                Download original
-              </TooltipButton>
+              {details}
+              {size && ` · ${size}`}
             </DialogDescription>
           </DialogHeader>
+          <AttachmentPreviewActions request={request} resource={resource} />
           <div className="min-h-0 overflow-auto">
-            {content.isFetching ? (
-              <p role="status">Loading file…</p>
-            ) : error ? (
-              <p role="alert">{error.message}</p>
-            ) : content.data && blobUrl ? (
-              <AttachmentPreview
-                blob={content.data}
-                url={blobUrl}
-                filename={filename}
-                sessionId={sessionId ?? ""}
-              />
-            ) : (
-              <p>Preview unavailable. Download the file to open it.</p>
-            )}
+            <AttachmentPreviewBody resource={resource} sessionId={sessionId ?? ""} />
           </div>
         </DialogContent>
       </Dialog>
@@ -369,7 +435,117 @@ export function ChatAttachment({
   );
 }
 
-function AttachmentPreview({
+/** Docked and fallback previews share the captured-byte loader and browser viewers. */
+export function AttachmentPreviewView({ request }: { request: AttachmentPreviewRequest }) {
+  const resource = useAttachmentResource(request, { preview: true });
+  return (
+    <section
+      className="flex h-full min-h-0 min-w-0 flex-col"
+      aria-label={`Preview ${resource.filename}`}
+    >
+      <header className="workspace-control-header flex min-w-0 shrink-0 items-center gap-2 border-b border-border px-3">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{resource.filename}</span>
+        <AttachmentPreviewActions request={request} resource={resource} header />
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        <AttachmentPreviewBody resource={resource} sessionId={request.sessionId} />
+      </div>
+    </section>
+  );
+}
+
+type AttachmentResource = ReturnType<typeof useAttachmentResource>;
+
+function AttachmentPreviewActions({
+  request,
+  resource,
+  header = false,
+}: {
+  request: AttachmentPreviewRequest;
+  resource: AttachmentResource;
+  header?: boolean;
+}) {
+  const context = useContext(AttachmentPreviewContext);
+  const canReveal =
+    !!request.itemId &&
+    !!request.reference &&
+    !resource.storedReference &&
+    !!resource.content.data &&
+    !resource.error &&
+    !!context.revealAttachment &&
+    context.canRevealAttachment?.(request) !== false;
+  const Action = header ? HeaderActionButton : Button;
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-1">
+      {canReveal && (
+        <Action
+          type="button"
+          variant="ghost"
+          size={header ? "icon-xs" : "sm"}
+          aria-label="Reveal in Explorer"
+          onClick={() => {
+            if (context.canRevealAttachment?.(request) !== false)
+              void context.revealAttachment?.(request);
+          }}
+        >
+          <FolderOpenIcon />
+          {!header && "Reveal in Explorer"}
+        </Action>
+      )}
+      <Action
+        type="button"
+        variant="ghost"
+        size={header ? "icon-xs" : "sm"}
+        disabled={!resource.available || resource.content.isFetching}
+        aria-label={`Download ${resource.filename}`}
+        onClick={() => void resource.download()}
+      >
+        <DownloadIcon />
+        {!header && "Download original"}
+      </Action>
+    </div>
+  );
+}
+
+function AttachmentPreviewBody({
+  resource,
+  sessionId,
+}: {
+  resource: AttachmentResource;
+  sessionId: string;
+}) {
+  const { content, error, blobUrl, filename } = resource;
+  if (content.isFetching) return <p role="status">Loading file…</p>;
+  if (error)
+    return (
+      <div role="alert">
+        <p>{error.message}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void content.refetch();
+            if (resource.fileId) void resource.metadata.refetch();
+          }}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  if (!content.data || !blobUrl) return <p>Preview unavailable. Download the file to open it.</p>;
+  return (
+    <AttachmentPreview
+      key={`${sessionId}:${filename}:${blobUrl}`}
+      blob={content.data}
+      url={blobUrl}
+      filename={filename}
+      sessionId={sessionId}
+    />
+  );
+}
+
+export function AttachmentPreview({
   blob,
   url,
   filename,

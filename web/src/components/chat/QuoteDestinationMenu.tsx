@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, useRef } from "react";
+import { useCallback, useContext, useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getEmbedRoot } from "@/lib/host";
 import { Button } from "@/components/ui/button";
@@ -13,20 +13,25 @@ import {
   type ReferenceChat,
 } from "@/lib/contextReferences";
 import { insertQuoteDraft, insertQuoteReference } from "@/lib/quoteDraftDestinations";
+import { textSelectionMenuClassName } from "./TextSelectionMenu";
 
 export function QuoteDestinationMenu({
   source,
   x,
   y,
   onClose,
+  intent = "pick",
 }: {
   source: QuoteSource;
   x: number;
   y: number;
   onClose: () => void;
+  intent?: "pick" | "subchat";
 }) {
   const navigation = useContext(ContextReferenceNavigationContext);
   const createdSubchat = useRef<string | null>(null);
+  const autoStarted = useRef(false);
+  const inserting = useRef(false);
   const [query, setQuery] = useState("");
   const [finding, setFinding] = useState(false);
   const [chats, setChats] = useState<ReferenceChat[]>([]);
@@ -52,19 +57,25 @@ export function QuoteDestinationMenu({
       alive = false;
     };
   }, [source]);
-  const [destination, setDestination] = useState<ReferenceChat | "new" | null>(null);
+  const [destination, setDestination] = useState<ReferenceChat | "new" | null>(
+    intent === "subchat" ? "new" : null,
+  );
   useEffect(() => {
+    if (intent === "subchat") return;
     const controller = new AbortController();
     searchReferenceChats(query, true, controller.signal).then(
-      (page) => setChats(page.data),
+      (page) => {
+        if (!controller.signal.aborted) setChats(page.data);
+      },
       (failure) => {
         if (!controller.signal.aborted) setError(failure.message);
       },
     );
     return () => controller.abort();
-  }, [query]);
-  const insert = async () => {
-    if (!destination) return;
+  }, [query, intent]);
+  const insert = useCallback(async () => {
+    if (!destination || inserting.current) return;
+    inserting.current = true;
     setBusy(true);
     setError("");
     try {
@@ -96,21 +107,26 @@ export function QuoteDestinationMenu({
     } catch (failure) {
       setError((failure as Error).message);
     } finally {
+      inserting.current = false;
       setBusy(false);
     }
-  };
+  }, [destination, navigation, source, reference, onClose]);
+  useEffect(() => {
+    if (intent !== "subchat" || !reference || autoStarted.current) return;
+    autoStarted.current = true;
+    void insert();
+  }, [intent, reference, insert]);
   return createPortal(
     <div
       data-text-selection-menu
       data-context-reference-picker
       role="dialog"
-      aria-label="Use in chat"
-      className="fixed z-50 w-80 max-w-[calc(100vw-1rem)] rounded-md border bg-popover p-2 shadow-menu"
+      aria-label={intent === "subchat" ? "Ask subchat" : "Send to"}
+      className={`${textSelectionMenuClassName} w-80 max-w-[calc(100vw-1rem)] p-2`}
       style={{
         left: Math.max(8, Math.min(x, window.innerWidth - 328)),
         top: Math.max(8, Math.min(y, window.innerHeight - 350)),
         maxHeight: "calc(100vh - 16px)",
-        overflow: "auto",
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -127,11 +143,13 @@ export function QuoteDestinationMenu({
             access, including future participants.
           </p>
           <Button disabled={busy || (!source.file && !reference)} onClick={() => void insert()}>
-            Insert quote
+            {intent === "subchat" ? "Ask subchat…" : "Insert quote"}
           </Button>
-          <Button variant="ghost" disabled={busy} onClick={() => setDestination(null)}>
-            Back
-          </Button>
+          {intent !== "subchat" && (
+            <Button variant="ghost" disabled={busy} onClick={() => setDestination(null)}>
+              Back
+            </Button>
+          )}
         </>
       ) : (
         <>
@@ -160,7 +178,7 @@ export function QuoteDestinationMenu({
               Find chat…
             </Button>
           )}
-          <div className="max-h-52 overflow-auto">
+          <div className="slim-scrollbar max-h-52 overflow-auto">
             {chats.map((chat) => (
               <Button
                 key={chat.id}

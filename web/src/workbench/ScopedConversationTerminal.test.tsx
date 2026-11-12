@@ -1,45 +1,49 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { useTerminalFirst } from "@/shell/TerminalFirstContext";
-import { WorkbenchProvider } from "./WorkbenchContext";
+import { ViewModeToggle } from "@/shell/ViewModeToggle";
 import { ScopedConversationTerminal } from "./ScopedConversationTerminal";
 
 vi.mock("@/hooks/useSession", () => ({
-  useSession: () => ({
-    session: {
-      harness: "codex-native",
-      labels: { "omnigent.ui": "terminal", "omnigent.wrapper": "codex-native-ui" },
-    },
+  useSession: (id: string) => ({
+    session: { id, labels: id === "native" ? { "omnigent.ui": "terminal" } : {} },
   }),
 }));
+vi.mock("@/hooks/useTerminals", () => ({
+  useTerminals: () => ({ terminals: [] }),
+  findAgentTerminal: () => null,
+}));
 
-afterEach(() => {
-  cleanup();
-  localStorage.clear();
-});
-
-it("keeps native behavior but opens the agent terminal as a separate dock view", () => {
-  localStorage.setItem("omnigent:default-transcript-view", "terminal");
-  const openView = vi.fn();
-  function Probe() {
-    const context = useTerminalFirst()!;
-    return (
-      <button
-        type="button"
-        onClick={() => context.setView("terminal")}
-      >{`${context.view}:${context.isTerminalFirst}:${context.isNativeWrapper}`}</button>
-    );
-  }
-  render(
-    <WorkbenchProvider value={{ openView, openConversation: vi.fn() }}>
-      <ScopedConversationTerminal conversationId="native-session">
-        <Probe />
-      </ScopedConversationTerminal>
-    </WorkbenchProvider>,
+function Surface() {
+  const context = useTerminalFirst();
+  return (
+    <>
+      <ViewModeToggle alwaysVisible />
+      <p>{context?.view} surface</p>
+    </>
   );
-  fireEvent.click(screen.getByRole("button", { name: "chat:false:true" }));
-  expect(openView).toHaveBeenCalledWith({
-    kind: "agent-terminal",
-    conversationId: "native-session",
+}
+
+describe("scoped chat view selection", () => {
+  it("lets the shared header control select Terminal and return to Chat even before a terminal exists", async () => {
+    const user = userEvent.setup();
+    render(
+      <ScopedConversationTerminal conversationId="native">
+        <Surface />
+      </ScopedConversationTerminal>,
+    );
+    await user.click(screen.getByTestId("view-mode-terminal"));
+    expect(screen.getByText("terminal surface")).toBeVisible();
+    await user.click(screen.getByTestId("view-mode-chat"));
+    expect(screen.getByText("chat surface")).toBeVisible();
+  });
+  it("keeps the existing terminal-capability gate for non-terminal chats", () => {
+    render(
+      <ScopedConversationTerminal conversationId="sdk">
+        <Surface />
+      </ScopedConversationTerminal>,
+    );
+    expect(screen.queryByTestId("view-mode-toggle")).not.toBeInTheDocument();
   });
 });

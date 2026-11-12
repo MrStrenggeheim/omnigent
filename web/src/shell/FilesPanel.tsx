@@ -70,6 +70,7 @@ import { setExplorerGitScope } from "@/lib/explorerGitScope";
 export { readBrowseLocation } from "@/lib/panelFolder";
 
 interface FilesPanelProps {
+  revealRequest?: { path: string; token: string };
   viewId?: string;
   active?: boolean;
   hideLocation?: boolean;
@@ -193,6 +194,7 @@ export function FilesPanel(props: FilesPanelProps) {
 }
 
 function FilesPanelContent({
+  revealRequest,
   conversationId: sessionId,
   workspaceId: explicitWorkspaceId,
   viewId: explicitViewId,
@@ -595,6 +597,27 @@ function FilesPanelContent({
     </Tooltip>
   );
 
+  const revealFileInTree = useCallback(
+    (path: string) => {
+      exitTreeSearch();
+      const absolute = path.startsWith("/") ? path : joinBrowseLocation(workspaceRoot ?? "", path);
+      if (workingDir && !absolute.startsWith(`${workingDir.replace(/\/$/, "")}/`)) {
+        navigateTo(absolute.slice(0, absolute.lastIndexOf("/")) || "/");
+      }
+      if (path.split("/").some((part) => part.startsWith("."))) onShowHiddenChange(true);
+      setRevealPath(relativizeToWorkspace(path, workspaceRoot));
+      setRevealToken((token) => token + 1);
+    },
+    [exitTreeSearch, workspaceRoot, workingDir, navigateTo, onShowHiddenChange],
+  );
+  const lastReveal = useRef<string | null>(null);
+  useEffect(() => {
+    if (!active || !workspaceRoot || !revealRequest || lastReveal.current === revealRequest.token)
+      return;
+    lastReveal.current = revealRequest.token;
+    revealFileInTree(revealRequest.path);
+  }, [active, workspaceRoot, revealRequest, revealFileInTree]);
+
   return (
     <ExplorerActionsProvider
       key={`${browseOwner}:${flatView}:${locationParam}`}
@@ -608,18 +631,7 @@ function FilesPanelContent({
         (!locationParam.startsWith("/") || isOwnerLevel(permissionLevel))
       }
       onRefresh={refreshFiles}
-      onRevealFile={(path) => {
-        exitTreeSearch();
-        const absolute = path.startsWith("/")
-          ? path
-          : joinBrowseLocation(workspaceRoot ?? "", path);
-        if (workingDir && !absolute.startsWith(`${workingDir.replace(/\/$/, "")}/`)) {
-          navigateTo(absolute.slice(0, absolute.lastIndexOf("/")) || "/");
-        }
-        if (path.split("/").some((part) => part.startsWith("."))) onShowHiddenChange(true);
-        setRevealPath(relativizeToWorkspace(path, workspaceRoot));
-        setRevealToken((token) => token + 1);
-      }}
+      onRevealFile={revealFileInTree}
     >
       <div
         data-context-search-region="explorer"
