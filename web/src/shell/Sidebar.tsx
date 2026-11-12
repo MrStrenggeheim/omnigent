@@ -296,6 +296,8 @@ import {
   SIDEBAR_GRID_SELECTED_RING,
   SIDEBAR_OPEN_MENU_HIGHLIGHT,
   SIDEBAR_TREE_INDENT,
+  SIDEBAR_TREE_GUIDE,
+  SIDEBAR_DISCLOSURE_HOVER,
 } from "./sidebarStyles";
 import { MAIN_CANVAS_ID } from "@/canvas/canvasLayout";
 import { CANVAS_QUERY_PARAM, canvasLocation, isCanvasPathname } from "@/canvas/canvasNavigation";
@@ -1146,19 +1148,14 @@ function SidebarImpl({
             {/* h-14 below md matches the mobile chat header height so the
             Search bubble shares a centerline with the overflow bubble in the
             chat strip beside the open drawer. */}
-            <div
-              className={cn(
-                "sidebar-header-row flex h-12 shrink-0 items-center justify-between pr-3 pl-4",
-                !workbench && "max-md:h-14 max-md:pl-16",
-              )}
-            >
-              {/* Brand mark doubles as the "home" affordance: clicking it
+            {!workbench && (
+              <div className="sidebar-header-row flex h-12 shrink-0 items-center justify-between pr-3 pl-4 max-md:h-14 max-md:pl-16">
+                {/* Brand mark doubles as the "home" affordance: clicking it
             returns to `/`, the new-session composer. Without this there
             is no way back to the landing composer once you're inside a
             session. Reuses onNavClick so a plain primary click closes
             the sidebar on mobile (where it's a full-screen overlay) but
             modifier/middle clicks still open `/` in a new tab. */}
-              {!workbench && (
                 <Link
                   to="/"
                   onClick={onNavClick}
@@ -1179,22 +1176,21 @@ function SidebarImpl({
                     />
                   )}
                 </Link>
-              )}
-              {/* On the macOS shell this copy is hidden and an identical cluster
+                {/* On the macOS shell this copy is hidden and an identical cluster
             renders in the title-bar strip instead (see AppShell), so the icons
             keep their place when the sidebar collapses or peeks. Everywhere
             else this is the only copy. */}
-              <SidebarHeaderActions
-                compact={workbench}
-                showToggle={false}
-                showSearch={false}
-                expanded={!peek}
-                // onOpen is optional (the sidebar renders standalone in tests), so
-                // fall back to a no-op rather than widening the child's contract.
-                onToggle={peek ? () => onOpen?.() : onClose}
-                onOpenSearch={onOpenSearch}
-              />
-            </div>
+                <SidebarHeaderActions
+                  showToggle={false}
+                  showSearch={false}
+                  expanded={!peek}
+                  // onOpen is optional (the sidebar renders standalone in tests), so
+                  // fall back to a no-op rather than widening the child's contract.
+                  onToggle={peek ? () => onOpen?.() : onClose}
+                  onOpenSearch={onOpenSearch}
+                />
+              </div>
+            )}
 
             <ContextSearchSidebar />
             <div
@@ -4055,12 +4051,16 @@ function ConversationSection({
       )}
       {afterHeader}
       {!isCollapsed && (
-        <div className="pt-1">
+        <div
+          className="relative pt-1"
+          style={indentRows ? { paddingInlineStart: SIDEBAR_TREE_INDENT } : undefined}
+        >
+          {indentRows && <SidebarTreeGuides depth={1} />}
           {conversations.length === 0 && emptyMessage ? (
             // Expanded but empty — a project with no loaded chats (indented, in a
             // dashed well) or a top-level list whose filter matched nothing.
             indentRows ? (
-              <div className="pl-6">
+              <div>
                 <div
                   className={cn(
                     SIDEBAR_ROW,
@@ -4083,9 +4083,7 @@ function ConversationSection({
             )
           ) : (
             // Indent project chats a step under the project-folder name above.
-            <ul
-              className={cn("density-list flex flex-col", indentRows && "pl-[var(--tree-indent)]")}
-            >
+            <ul className="density-list flex flex-col">
               {roots.map((conv) => (
                 <ConversationBranchRow
                   selectedIds={selectedIds}
@@ -4651,6 +4649,19 @@ const DOUBLE_CLICK_PAIR_WINDOW_MS = 750;
 
 const NO_BRANCH_ANCESTORS: readonly string[] = [];
 
+/** Match Explorer's guide strokes with the sidebar's existing shallow indentation. */
+function SidebarTreeGuides({ depth }: { depth: number }) {
+  return Array.from({ length: depth }, (_, level) => (
+    <span
+      key={level}
+      aria-hidden
+      data-sidebar-tree-guide
+      className={cn(SIDEBAR_TREE_GUIDE, "group-hover/conversation:opacity-0")}
+      style={{ insetInlineStart: `calc((${level} + 0.5) * ${SIDEBAR_TREE_INDENT})` }}
+    />
+  ));
+}
+
 /** Reuse the complete row so branch views retain pin, archive, menus and selection. */
 function ConversationBranchRow({
   ancestors = NO_BRANCH_ANCESTORS,
@@ -4690,7 +4701,10 @@ function ConversationBranchRow({
               aria-label={`${expanded ? "Collapse" : "Expand"} subchats of ${label}`}
               aria-expanded={expanded}
               aria-controls={groupId}
-              className="flex h-6 shrink-0 items-center justify-center gap-1 rounded px-1 text-muted-foreground transition-none hover:bg-muted"
+              className={cn(
+                "flex h-6 shrink-0 items-center justify-center gap-1 rounded px-1 text-muted-foreground transition-none",
+                SIDEBAR_DISCLOSURE_HOVER,
+              )}
               onMouseDown={(event) => event.stopPropagation()}
               onTouchStart={(event) => event.stopPropagation()}
               onClick={(event) => {
@@ -4699,9 +4713,11 @@ function ConversationBranchRow({
                 branches.toggle(id);
               }}
             >
-              <span aria-hidden className="text-xs tabular-nums">
-                {children.length}
-              </span>
+              {branches.descendantCounts && (
+                <span aria-hidden className="text-xs tabular-nums">
+                  {branches.descendantCounts.get(id) ?? 0}
+                </span>
+              )}
               <ChevronRightIcon aria-hidden className={cn("size-3.5", expanded && "rotate-90")} />
             </TooltipButton>
           )
@@ -5298,6 +5314,7 @@ function ConversationRowImpl({
         isDragging && "opacity-40",
       )}
     >
+      <SidebarTreeGuides depth={treeDepth} />
       {pinInsertion && pinOrder?.draggingId !== conversation.id && (
         <span
           data-testid="pin-order-insertion"

@@ -167,17 +167,24 @@ export function CommandPalette({
       const target = document.querySelector(anchorSelector);
       if (!target) return;
       const rect = target.getBoundingClientRect();
-      const width = Math.min(640, window.innerWidth - 16);
+      const header = target.closest(".workbench-app-bar")?.getBoundingClientRect();
+      const app = target.closest(".unified-workbench")?.getBoundingClientRect();
+      const width = Math.min(640, (app?.width ?? window.innerWidth) - 16);
+      const center = app ? app.left + app.width / 2 : window.innerWidth / 2;
       setAnchor({
-        top: rect.bottom + 8,
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+        top: Math.max(rect.bottom, header?.bottom ?? 0) + 8,
+        left: Math.max(8, Math.min(center - width / 2, window.innerWidth - width - 8)),
         width,
       });
     };
     measure();
+    const observer = new ResizeObserver(measure);
+    const target = document.querySelector(anchorSelector);
+    if (target) observer.observe(target);
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
     return () => {
+      observer.disconnect();
       window.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("resize", measure);
     };

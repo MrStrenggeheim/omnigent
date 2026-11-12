@@ -103,7 +103,7 @@ Extend the shared owner when behavior is missing; record any necessary departure
 
 Composer selectors use the same UI typography, normal weight and foreground; effort/thinking may be lighter within a selector.
 Preserve existing composer padding, gaps and hit targets; microphone relocation is the only approved reordering in that row.
-The workspace trigger reads computer icon, Host:/path and chevron; mobile labels remain compact.
+The workspace trigger uses approved B: computer icon, lighter Host, middle dot, foreground path and chevron on one line; mobile labels remain compact.
 Tooltips are arrowless and canonical, and appear only for additional meaning, hidden details or shortcuts.
 All native scrolling uses the shared slim treatment; preserve specialized transcript and terminal scroll behavior.
 Background color changes mark full surface edges without an additional border; equal-colored panes retain necessary separators.
@@ -115,3 +115,20 @@ Layout miniatures, Inbox consolidation and composer spacing redesign are deferre
 
 Before delivery, compare integrated desktop/mobile screenshots with these rules and run affected shared-component checks.
 Every implementation report includes action/expected-result acceptance steps and names remaining limitations separately.
+
+## Current cycle refinements
+
+- Pin changes persistence only: retain pane geometry, support resizing and interpolate other chat layouts into the free areas.
+- Pinned tabs show a filled primary pin permanently; active state remains the primary bottom strip.
+- Dock resize indicators reuse the sidebar handle's thin paint and hover/active tones while retaining practical hit areas.
+- Tab insertion uses a vertical primary marker; split preview uses the actual resulting half-pane footprint and shared file-drop surfaces.
+- Detection zones stay invisible; context-clicking a tab opens the shared view controls menu.
+- Overflowing surfaces reuse the transcript-style overlay scrollbar; content that fits has no track.
+- Composer and tab strips show no scrollbars; overflowing tabs scroll behind a right-side fade.
+- Sidebar counts represent all unique descendants; guides and expander hover/cursor follow shared tree styles.
+- Add host is directly reachable in every workspace picker and reuses the existing server-specific CLI instructions.
+- Inline chip clicks open beside the originating chat; context menus expose other valid destinations and file actions.
+- Rendered in-chat previews keep their large modal/lightbox behavior and supported zoom/pan/close controls.
+- Shared buttons do not move vertically when pressed; modal close glyphs do not get redundant Close tooltips.
+- Search trigger and popup center on the full application width independently of adjacent controls.
+- Comfortable/Compact use the existing visual preference-card pattern, illustrating 48px and 36px header/list density.

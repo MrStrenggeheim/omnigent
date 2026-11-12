@@ -2,6 +2,7 @@ import {
   ChatAttachmentContext,
   ChatAttachment,
   InlineFileReference,
+  FilePreviewMenu,
 } from "@/components/ChatAttachment";
 import { useScopedConversationId } from "@/components/chat/conversationScope";
 // Markdown rendering for chat text: assistant bubbles, user bubbles, and any
@@ -18,8 +19,7 @@ import { useScopedConversationId } from "@/components/chat/conversationScope";
 
 import type React from "react";
 import { useMemo, useContext } from "react";
-import { CopyIcon, GitPullRequestIcon } from "lucide-react";
-import { toast } from "@/lib/notifications";
+import { GitPullRequestIcon } from "lucide-react";
 import { defaultRemarkPlugins } from "streamdown";
 import remarkBreaks from "remark-breaks";
 import { normalizeExplicitMathDelimiters } from "@/components/ai-elements/mathMarkdown";
@@ -30,17 +30,10 @@ import {
   WORKSPACE_IMAGE_ATTR,
 } from "@/components/ai-elements/streamdown-security";
 import { ZoomableImage } from "@/components/ImageLightbox";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { isRemoteVideoUrl, isVideoFile } from "@/lib/video";
 import { useThrottledValue } from "@/hooks/useThrottledValue";
 import { withBasePath } from "@/lib/basePath";
-import { copyText } from "@/lib/clipboard";
 import { absoluteWorkspacePath } from "@/lib/composerContext";
 import { followLinkWithPopupFallback } from "@/lib/openLinkInApp";
 import { cn } from "@/lib/utils";
@@ -422,22 +415,7 @@ function WorkspaceFileLink({
 
 /** Right-click menu that copies the path a file link names. */
 function FileLinkContextMenu({ path, children }: { path: string; children: React.ReactElement }) {
-  const copyPath = () =>
-    void copyText(path).then(
-      () => toast.success("Copied path"),
-      () => toast.error("Couldn't copy the path"),
-    );
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={copyPath}>
-          <CopyIcon />
-          Copy path
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
+  return <FilePreviewMenu actions={{ path }}>{children}</FilePreviewMenu>;
 }
 
 // Markdown images open in the shared lightbox on click, matching uploaded and

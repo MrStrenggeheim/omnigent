@@ -1,5 +1,6 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Dialog, DialogContent, DialogTitle } from "./dialog";
 
@@ -56,4 +57,25 @@ describe("DialogContent column sizing", () => {
     renderDialog();
     expect(screen.getByRole("dialog")).toHaveClass("grid-cols-[minmax(0,1fr)]");
   });
+});
+
+it("keeps Close accessible and functional without redundant hover or keyboard guidance", async () => {
+  const onOpenChange = vi.fn();
+  render(
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent aria-describedby={undefined}>
+        <DialogTitle>Tools</DialogTitle>
+      </DialogContent>
+    </Dialog>,
+  );
+  const close = screen.getByRole("button", { name: "Close" });
+  await userEvent.hover(close);
+  expect(close).not.toHaveAttribute("data-slot", "tooltip-trigger");
+  expect(close).not.toHaveAttribute("title");
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  fireEvent.keyDown(document, { key: "Tab" });
+  fireEvent.focus(close);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  fireEvent.click(close);
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });

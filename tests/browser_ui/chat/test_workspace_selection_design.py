@@ -246,6 +246,16 @@ def test_combined_workspace_picker_changes_explorer_requests_and_cancel_retains_
         dialog = _assert_picker(page, host_id, root)
         _capture(page, output_path, f"{name}-workspace-picker")
         dialog.get_by_role("textbox", name="Current folder path").fill("/cancelled")
+        dialog.get_by_role("button", name="Add host…", exact=True).click()
+        setup = page.get_by_role("dialog", name="Connect a host", exact=True)
+        expect(setup).to_be_visible()
+        expect(setup).to_contain_text("omni host --server")
+        expect(setup).to_contain_text(journey.chats[0].contract.base_url)
+        _capture(page, output_path, f"{name}-add-host-instructions")
+        setup.get_by_role("button", name="Close", exact=True).click()
+        expect(dialog.get_by_role("textbox", name="Current folder path")).to_have_value(
+            "/cancelled"
+        )
         dialog.get_by_role("button", name="Cancel", exact=True).click()
         expect(dialog).to_have_count(0)
         expect(selector).to_be_visible()

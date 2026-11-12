@@ -11,7 +11,7 @@
 // on a single wheel tick.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
+import { ScrollbarThumb, scrollbarGeometry } from "@/components/ui/overlay-scrollbar";
 
 /** The scroll container plus the bottom-lock release, as lifted by ChatPage. */
 interface Scroller {
@@ -21,8 +21,6 @@ interface Scroller {
 
 /** Smallest thumb: enough to grab, however long the document. */
 const MIN_THUMB_PX = 56;
-/** Smallest travel a scrollable transcript keeps, so the thumb can always be dragged. */
-const MIN_TRAVEL_PX = 8;
 
 /**
  * Dispatched on the scroll container for each thumb-drag move, with the
@@ -72,11 +70,7 @@ export function TranscriptScrollbar({
   const geometryOf = useCallback(
     (node: HTMLElement) => {
       const track = node.clientHeight - topInset - TRACK_BOTTOM_PX;
-      const thumb = Math.min(
-        track - MIN_TRAVEL_PX,
-        Math.max(MIN_THUMB_PX, Math.round((track * node.clientHeight) / node.scrollHeight)),
-      );
-      return { thumb, travel: track - thumb };
+      return scrollbarGeometry(node.clientHeight, node.scrollHeight, track, MIN_THUMB_PX);
     },
     [topInset],
   );
@@ -171,22 +165,14 @@ export function TranscriptScrollbar({
       className="pointer-events-none absolute right-1 z-10 w-3"
       style={{ top: topInset, bottom: TRACK_BOTTOM_PX }}
     >
-      <div
+      <ScrollbarThumb
         data-testid="transcript-scrollbar-thumb"
         data-transcript-scrollbar=""
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className={cn(
-          // touch-none: the drag is pointer-event driven, so the browser's
-          // native touch-pan arbitration must not steal the gesture (it fires
-          // pointercancel right after pointerdown and the drag dies).
-          "pointer-events-auto absolute right-0.5 w-1.5 cursor-default touch-none rounded-full",
-          "bg-foreground/20 transition-[width,background-color] duration-150",
-          "hover:w-2.5 hover:bg-foreground/40",
-          dragging && "w-2.5 bg-foreground/50",
-        )}
+        dragging={dragging}
         style={{ height: thumbPx, transform: `translateY(${offset}px)` }}
       />
     </div>

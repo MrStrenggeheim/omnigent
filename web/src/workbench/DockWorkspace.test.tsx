@@ -16,6 +16,7 @@ import {
 } from "./dockLayout";
 import { dockStorageKey } from "./dockPersistence";
 import { useDockLayout, type DockStorage } from "./useDockLayout";
+import { terminalLayoutGeometry } from "@/lib/terminalSplitLayout";
 
 const view = (id: string, kind = "editor"): DockView => ({
   id,
@@ -225,8 +226,14 @@ describe("DockWorkspace resource mounts", () => {
     const bounds = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: HTMLElement) {
-        const left = this.getAttribute("role") === "tab" && this.textContent === "b" ? 100 : 0;
-        return new DOMRect(left, 0, this.getAttribute("role") === "tab" ? 100 : 800, 48);
+        const tab = this.matches('[role="tab"]') ? this : this.querySelector('[role="tab"]');
+        const left = tab?.textContent === "b" ? 100 : 0;
+        return new DOMRect(
+          left,
+          0,
+          this.classList.contains("dock-tab-group") || this.matches('[role="tab"]') ? 100 : 800,
+          48,
+        );
       });
     let current = createDockLayout([view("a"), view("b")]);
     function Workspace() {
@@ -243,19 +250,18 @@ describe("DockWorkspace resource mounts", () => {
     try {
       render(<Workspace />);
       const resource = screen.getByLabelText("Drag a");
-      fireEvent.pointerDown(screen.getByRole("tab", { name: "a" }), {
-        pointerId: 1,
-        isPrimary: true,
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "a" }), {
         button: 0,
         clientX: 20,
         clientY: 20,
       });
-      fireEvent.pointerMove(document, { pointerId: 1, isPrimary: true, clientX: 40, clientY: 20 });
+      fireEvent.mouseMove(document, { clientX: 40, clientY: 20 });
       await waitFor(() =>
         expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("data-dragging", "true"),
       );
-      fireEvent.pointerMove(document, { pointerId: 1, isPrimary: true, clientX: 150, clientY: 20 });
-      fireEvent.pointerUp(document, { pointerId: 1, isPrimary: true, clientX: 150, clientY: 20 });
+      fireEvent.mouseMove(document, { clientX: 150, clientY: 20 });
+      expect(document.querySelector('.dock-tab-end[data-insertion="true"]')).toBeInTheDocument();
+      fireEvent.mouseUp(document, { clientX: 150, clientY: 20 });
       expect(current.panes[0].viewIds).toEqual(["b", "a"]);
       expect(screen.getByLabelText("Drag a")).toBe(resource);
       // dnd-kit suppresses document clicks for 50ms after pointer release.
@@ -435,6 +441,242 @@ describe("sidebar conversation drops", () => {
   });
 });
 
+describe("dock tab controls", () => {
+  it("allows touch swipes and activates docking only after a hold", async () => {
+    render(
+      <DockWorkspace
+        layout={createDockLayout([view("a"), view("b")])}
+        onLayoutChange={vi.fn()}
+        renderView={() => null}
+        compact
+      />,
+    );
+    const tab = screen.getByRole("tab", { name: "a" });
+    const touch = (clientX: number) => ({ identifier: 1, target: tab, clientX, clientY: 20 });
+    fireEvent.touchStart(tab, { touches: [touch(20)] });
+    expect(fireEvent.touchMove(tab, { touches: [touch(60)] })).toBe(true);
+    expect(tab).toHaveAttribute("data-dragging", "false");
+    fireEvent.touchEnd(tab, { touches: [] });
+    fireEvent.touchStart(tab, { touches: [touch(20)] });
+    await waitFor(() => expect(tab).toHaveAttribute("data-dragging", "true"));
+    expect(tab.closest('[data-slot="context-menu-trigger"]')).toHaveAttribute("data-disabled");
+    fireEvent.touchCancel(tab, { touches: [] });
+    expect(tab).toHaveAttribute("data-dragging", "false");
+  });
+
+  it.each(["before", "after", "end", "empty"] as const)(
+    "moves a tab into another tab bar at %s while retaining its resource",
+    async (position) => {
+      let initial = addDockView(createDockLayout([view("a"), view("b")]), view("c"), {
+        edge: "right",
+      });
+      const targetPaneId = dockPaneForView(initial, "c")!.id;
+      initial = addDockView(initial, view("d"), { paneId: targetPaneId });
+      if (position === "empty")
+        initial = {
+          ...initial,
+          views: initial.views.filter((item) => item.id === "a" || item.id === "b"),
+          panes: initial.panes.map((pane) =>
+            pane.id === targetPaneId ? { ...pane, viewIds: [], selectedViewId: null } : pane,
+          ),
+        };
+      let current = initial;
+      function Workspace() {
+        const [layout, setLayout] = useState(initial);
+        current = layout;
+        return (
+          <DockWorkspace
+            layout={layout}
+            onLayoutChange={setLayout}
+            renderView={(item) => <input aria-label={`Cross ${item.id}`} />}
+          />
+        );
+      }
+      const bounds = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockImplementation(function (this: HTMLElement) {
+          if (this.classList.contains("dock-tab-group") || this.matches('[role="tab"]')) {
+            const title = this.querySelector('[role="tab"]')?.textContent ?? this.textContent;
+            return new DOMRect(
+              ({ a: 0, b: 100, c: 400, d: 500 } as Record<string, number>)[title ?? ""] ?? 0,
+              0,
+              100,
+              48,
+            );
+          }
+          if (this.classList.contains("dock-tab-end"))
+            return this.dataset.conversationDropPane === targetPaneId
+              ? new DOMRect(
+                  position === "empty" ? 400 : 600,
+                  0,
+                  position === "empty" ? 400 : 200,
+                  48,
+                )
+              : new DOMRect(200, 0, 200, 48);
+          if (this.classList.contains("dock-drop-zone")) return new DOMRect(0, 48, 800, 500);
+          return new DOMRect(0, 0, 800, 600);
+        });
+      try {
+        render(<Workspace />);
+        const resource = screen.getByLabelText("Cross a");
+        fireEvent.mouseDown(screen.getByRole("tab", { name: "a" }), {
+          button: 0,
+          clientX: 20,
+          clientY: 20,
+        });
+        fireEvent.mouseMove(document, { clientX: 40, clientY: 20 });
+        await waitFor(() =>
+          expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("data-dragging", "true"),
+        );
+        const x = position === "before" ? 420 : position === "after" ? 480 : 650;
+        fireEvent.mouseMove(document, { clientX: x, clientY: 20 });
+        const marker = document.querySelector('[data-insertion="true"]');
+        expect(marker).toHaveAttribute("data-conversation-drop-pane", targetPaneId);
+        expect(marker).toHaveAttribute(
+          "data-conversation-drop-index",
+          position === "after" ? "1" : position === "end" ? "2" : "0",
+        );
+        fireEvent.mouseUp(document, { clientX: x, clientY: 20 });
+        expect(current.panes.find((pane) => pane.id === targetPaneId)?.viewIds).toEqual(
+          position === "empty"
+            ? ["a"]
+            : position === "before"
+              ? ["a", "c", "d"]
+              : position === "after"
+                ? ["c", "a", "d"]
+                : ["c", "d", "a"],
+        );
+        expect(screen.getByLabelText("Cross a")).toBe(resource);
+        expect(document.querySelector(".dock-placement-preview")).not.toBeInTheDocument();
+        await act(async () => {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 60);
+          });
+        });
+      } finally {
+        bounds.mockRestore();
+      }
+    },
+  );
+
+  it("shows the right fade only with remaining overflow and reveals keyboard-selected tabs", () => {
+    const reveal = vi.spyOn(Element.prototype, "scrollIntoView");
+    function Workspace() {
+      const [layout, setLayout] = useState(createDockLayout([view("a"), view("b")]));
+      return (
+        <DockWorkspace layout={layout} onLayoutChange={setLayout} renderView={() => null} compact />
+      );
+    }
+    try {
+      render(<Workspace />);
+      const strip = screen.getByRole("tablist");
+      const header = strip.parentElement!;
+      expect(header).toHaveAttribute("data-overflow-right", "false");
+      Object.defineProperties(strip, {
+        clientWidth: { configurable: true, value: 200 },
+        scrollWidth: { configurable: true, value: 400 },
+        scrollLeft: { configurable: true, writable: true, value: 0 },
+      });
+      fireEvent.scroll(strip);
+      expect(header).toHaveAttribute("data-overflow-right", "true");
+      strip.scrollLeft = 200;
+      fireEvent.scroll(strip);
+      expect(header).toHaveAttribute("data-overflow-right", "false");
+      fireEvent.keyDown(screen.getByRole("tab", { name: "a" }), { key: "ArrowRight" });
+      expect(screen.getByRole("tab", { name: "b" })).toHaveFocus();
+      expect(reveal).toHaveBeenLastCalledWith({ block: "nearest", inline: "nearest" });
+    } finally {
+      reveal.mockRestore();
+    }
+  });
+
+  it("opens the shared context menu for the clicked tab and routes close through its guard", async () => {
+    const user = userEvent.setup();
+    const guard = vi.fn(async () => false);
+    const pin = vi.fn();
+    let current = createDockLayout([view("a"), view("b")]);
+    function Workspace() {
+      const [layout, setLayout] = useState(current);
+      current = layout;
+      return (
+        <DockWorkspace
+          layout={layout}
+          onLayoutChange={setLayout}
+          onBeforeClose={guard}
+          onPinView={pin}
+          renderView={(item) => <input aria-label={`Menu ${item.id}`} />}
+        />
+      );
+    }
+    render(<Workspace />);
+    const resource = screen.getByLabelText("Menu b");
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "b" }));
+    expect(screen.getByRole("menu")).toHaveAttribute("data-slot", "context-menu-content");
+    expect(screen.getByRole("menuitem", { name: "Move tab right" })).toHaveAttribute(
+      "data-disabled",
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Keep open across chats" }));
+    expect(pin).toHaveBeenCalledWith("b");
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "b" }));
+    await user.click(screen.getByRole("menuitem", { name: "Split right" }));
+    expect(dockPaneForView(current, "b")?.id).not.toBe("main");
+    expect(screen.getByLabelText("Menu b")).toBe(resource);
+    fireEvent.keyDown(screen.getByRole("tab", { name: "b" }), { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "Split right" })).toHaveAttribute("data-disabled");
+    await user.click(screen.getByRole("menuitem", { name: "Close view" }));
+    expect(guard).toHaveBeenCalledWith(view("b"));
+    expect(screen.getByLabelText("Menu b")).toBe(resource);
+    expect(current.views).toHaveLength(2);
+  });
+
+  it("keeps the resize hitbox while tracking the active drag", () => {
+    const layout = addDockView(createDockLayout([view("a")]), view("b"), { edge: "right" });
+    render(<DockWorkspace layout={layout} onLayoutChange={vi.fn()} renderView={() => null} />);
+    const divider = screen.getByRole("separator", { name: "Resize panes" });
+    expect(divider).toHaveStyle({ width: "7px" });
+    fireEvent.pointerDown(divider, { pointerId: 1 });
+    expect(divider).toHaveAttribute("data-resizing", "true");
+    fireEvent.pointerCancel(divider, { pointerId: 1 });
+    expect(divider).toHaveAttribute("data-resizing", "false");
+  });
+
+  it("renders an empty pane as a real header and sidebar drop destination", async () => {
+    const initial = addDockView(createDockLayout([view("a")]), view("b"), { edge: "right" });
+    const emptyPaneId = dockPaneForView(initial, "b")!.id;
+    const layout: DockLayout = {
+      ...initial,
+      views: initial.views.filter((item) => item.id !== "b"),
+      panes: initial.panes.map((pane) =>
+        pane.id === emptyPaneId ? { ...pane, viewIds: [], selectedViewId: null } : pane,
+      ),
+    };
+    const open = vi.fn();
+    render(
+      <DockWorkspace
+        layout={layout}
+        onLayoutChange={vi.fn()}
+        onOpenConversationAt={open}
+        renderView={() => null}
+      />,
+    );
+    const emptyHeader = screen.getByRole("tablist", { name: `Views in ${emptyPaneId}` });
+    expect(emptyHeader.querySelector('[role="tab"]')).toBeNull();
+    const transfer = chatTransfer({ id: "B", title: "B" });
+    fireEvent.dragEnter(emptyHeader, { dataTransfer: transfer });
+    const end = emptyHeader.querySelector(".dock-tab-end")!;
+    fireEvent.dragOver(end, { dataTransfer: transfer });
+    expect(end).toHaveAttribute("data-insertion", "true");
+    expect(document.querySelector(".dock-placement-preview")).toHaveStyle({
+      left: "50%",
+      width: "50%",
+      height: "100%",
+    });
+    fireEvent.drop(end, { dataTransfer: transfer });
+    await waitFor(() => expect(open).toHaveBeenCalledWith("B", { paneId: emptyPaneId, index: 0 }));
+    expect(screen.getAllByRole("separator")).toHaveLength(1);
+  });
+});
+
 describe("useDockLayout", () => {
   it("automatically restores A plus Explorer, keeps explicitly opened B in A, and reloads each owner", async () => {
     const storage = memoryStorage();
@@ -485,7 +727,11 @@ describe("useDockLayout", () => {
       dock = useDockLayout({
         scope,
         storage: null,
-        initialLayout: createDockLayout([conversationView("A"), view("Explorer", "explorer")]),
+        initialLayout: addDockView(
+          createDockLayout([conversationView("A")]),
+          view("Explorer", "explorer"),
+          { edge: "right" },
+        ),
       });
       return (
         <DockWorkspace
@@ -503,13 +749,16 @@ describe("useDockLayout", () => {
     const explorer = screen.getByLabelText("Pin resource Explorer");
     const pin = screen.getByRole("button", { name: "Pin Explorer" });
     expect(pin.nextElementSibling).toBe(screen.getByRole("button", { name: "Close Explorer" }));
-    pin.focus();
+    act(() => pin.focus());
     await user.keyboard("{Enter}");
     expect(dock.pinnedViewIds).toEqual(["Explorer"]);
     expect(screen.getByRole("button", { name: "Unpin Explorer" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
+    expect(
+      screen.getByRole("button", { name: "Unpin Explorer" }).querySelector("svg"),
+    ).toHaveAttribute("fill", "currentColor");
     await act(async () => {
       await dock.navigateConversation("B");
     });
@@ -536,8 +785,14 @@ describe("useDockLayout", () => {
     });
     expect(result.current.layout.views.map((item) => item.id)).toEqual(["conversation:B"]);
     expect(result.current.hasChatLayout).toBe(true);
-    act(() => result.current.addView(view("explorer")));
+    act(() => result.current.addView(view("explorer"), { edge: "right" }));
+    const beforePin = result.current.layout;
+    const pinnedPaneId = dockPaneForView(beforePin, "explorer")!.id;
+    const pinnedRectangle = terminalLayoutGeometry(beforePin.tree!).panes.find(
+      (rect) => rect.key === pinnedPaneId,
+    );
     act(() => result.current.pinView("explorer"));
+    expect(result.current.layout.tree).toEqual(beforePin.tree);
     await act(async () => {
       await result.current.navigateConversation("A");
     });
@@ -546,7 +801,12 @@ describe("useDockLayout", () => {
       "diff",
       "explorer",
     ]);
-    expect(result.current.layout.tree).toMatchObject({ children: [a.tree, expect.any(String)] });
+    expect(
+      terminalLayoutGeometry(result.current.layout.tree!).panes.find(
+        (rect) => rect.key === pinnedPaneId,
+      ),
+    ).toEqual(pinnedRectangle);
+    expect(a.tree).toMatchObject({ ratio: 0.65 });
     act(() => result.current.focusView("explorer"));
     const restored = result.current.layout;
     unmount();

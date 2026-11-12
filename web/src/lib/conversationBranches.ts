@@ -38,6 +38,44 @@ export function branchRoots(rows: readonly Conversation[]): Conversation[] {
 export function branchChildren(rows: readonly Conversation[], parentId: string): Conversation[] {
   return rows.filter((row) => branchSource(row) === parentId);
 }
+
+/** Count unique descendants in an authorized, filtered graph, excluding each parent. */
+export function branchDescendantCounts(rows: readonly Conversation[]): ReadonlyMap<string, number> {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const counts = new Map([...byId.keys()].map((id) => [id, 0]));
+  const remainingChildren = new Map(counts);
+  for (const row of byId.values()) {
+    const parent = branchSource(row);
+    if (parent && byId.has(parent))
+      remainingChildren.set(parent, remainingChildren.get(parent)! + 1);
+  }
+  // Fold leaves into parents without recursion, including arbitrarily deep chains.
+  const ready = [...byId.keys()].filter((id) => remainingChildren.get(id) === 0);
+  for (let index = 0; index < ready.length; index++) {
+    const id = ready[index];
+    const parent = branchSource(byId.get(id)!);
+    if (!parent || !byId.has(parent)) continue;
+    counts.set(parent, counts.get(parent)! + counts.get(id)! + 1);
+    const remaining = remainingChildren.get(parent)! - 1;
+    remainingChildren.set(parent, remaining);
+    if (remaining === 0) ready.push(parent);
+  }
+  // Every remaining component is a cycle with its attached trees already folded in.
+  const visited = new Set<string>();
+  for (const start of byId.keys()) {
+    if (!remainingChildren.get(start) || visited.has(start)) continue;
+    const cycle: string[] = [];
+    let id = start;
+    while (!visited.has(id)) {
+      visited.add(id);
+      cycle.push(id);
+      id = branchSource(byId.get(id)!)!;
+    }
+    const total = cycle.reduce((sum, member) => sum + counts.get(member)! + 1, 0);
+    for (const member of cycle) counts.set(member, total - 1);
+  }
+  return counts;
+}
 export function visibleBranchRows(
   roots: readonly Conversation[],
   rows: readonly Conversation[],

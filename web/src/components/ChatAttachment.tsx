@@ -7,20 +7,26 @@ import {
   useEffect,
   useState,
   type ComponentPropsWithoutRef,
+  type ContextType,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  CopyIcon,
   DownloadIcon,
   FolderOpenIcon,
   Loader2Icon,
   MoreHorizontalIcon,
+  PanelRightIcon,
+  PanelsTopLeftIcon,
   ScanEyeIcon,
 } from "lucide-react";
 import { authenticatedFetch } from "@/lib/identity";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
 import { downloadBlob } from "@/lib/explorerOperations";
 import { toast } from "@/lib/notifications";
+import { copyText } from "@/lib/clipboard";
 import { Button } from "@/components/ui/button";
 import { HeaderActionButton } from "@/components/HeaderActionButton";
 import { TooltipButton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -30,6 +36,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { WorkspaceFileIcon } from "@/shell/WorkspaceFileIcon";
 import { cn } from "@/lib/utils";
 import {
@@ -64,8 +76,18 @@ export interface AttachmentPreviewRequest {
   filename?: string;
 }
 
+export type AttachmentPreviewPlacement = "beside" | "tab";
+
 export const AttachmentPreviewContext = createContext<{
-  openAttachment?: (request: AttachmentPreviewRequest) => void;
+  /** Place relative to the originating chat (request.sessionId), defaulting to beside. */
+  openAttachment?: (
+    request: AttachmentPreviewRequest,
+    options?: { placement: AttachmentPreviewPlacement },
+  ) => void;
+  canOpenAttachment?: (
+    request: AttachmentPreviewRequest,
+    placement: AttachmentPreviewPlacement,
+  ) => boolean;
   /** Optional availability veto; the Reveal endpoint authorizes the captured origin. */
   canRevealAttachment?: (request: AttachmentPreviewRequest) => boolean;
   /** Resolve the captured location, guard Explorer reuse and report failures. */
@@ -74,6 +96,114 @@ export const AttachmentPreviewContext = createContext<{
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const TEXT_BYTES = 512 * 1024;
+
+interface FilePreviewActions {
+  openBeside?: () => void;
+  openTab?: () => void;
+  openModal?: () => void;
+  reveal?: () => void;
+  path?: string;
+  download?: () => void;
+  downloading?: boolean;
+}
+
+function hasFilePreviewActions(actions: FilePreviewActions) {
+  return !!(
+    actions.openBeside ||
+    actions.openTab ||
+    actions.openModal ||
+    actions.reveal ||
+    actions.path ||
+    actions.download
+  );
+}
+
+/** One action set for file chips, attachment cards and their touch overflow controls. */
+export function FilePreviewMenu({
+  children,
+  actions,
+  dropdown = false,
+  onOpenChange,
+}: {
+  children: ReactElement;
+  actions: FilePreviewActions;
+  dropdown?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  if (!hasFilePreviewActions(actions)) return children;
+  const Item = dropdown ? DropdownMenuItem : ContextMenuItem;
+  const items = (
+    <>
+      {actions.openBeside && (
+        <Item onSelect={actions.openBeside}>
+          <PanelRightIcon /> Open beside chat
+        </Item>
+      )}
+      {actions.openTab && (
+        <Item onSelect={actions.openTab}>
+          <PanelsTopLeftIcon /> Open as tab
+        </Item>
+      )}
+      {actions.openModal && (
+        <Item onSelect={actions.openModal}>
+          <ScanEyeIcon /> Open in modal
+        </Item>
+      )}
+      {actions.reveal && (
+        <Item onSelect={actions.reveal}>
+          <FolderOpenIcon /> Reveal in Explorer
+        </Item>
+      )}
+      {actions.path && (
+        <Item
+          onSelect={() =>
+            void copyText(actions.path!).then(
+              () => toast.success("Copied path"),
+              () => toast.error("Couldn't copy the path"),
+            )
+          }
+        >
+          <CopyIcon /> Copy path
+        </Item>
+      )}
+      {actions.download && (
+        <Item disabled={actions.downloading} onSelect={actions.download}>
+          <DownloadIcon /> Download original
+        </Item>
+      )}
+    </>
+  );
+  if (dropdown)
+    return (
+      <DropdownMenu onOpenChange={onOpenChange}>
+        <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+        <DropdownMenuContent align="end">{items}</DropdownMenuContent>
+      </DropdownMenu>
+    );
+  return (
+    <ContextMenu onOpenChange={onOpenChange}>
+      <ContextMenuTrigger
+        asChild
+        onKeyDown={(event) => {
+          if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+          event.preventDefault();
+          const bounds = event.currentTarget.getBoundingClientRect();
+          event.currentTarget.dispatchEvent(
+            new MouseEvent("contextmenu", {
+              bubbles: true,
+              cancelable: true,
+              clientX: bounds.left,
+              clientY: bounds.bottom,
+            }),
+          );
+        }}
+      >
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent>{items}</ContextMenuContent>
+    </ContextMenu>
+  );
+}
 
 /** Filename-only reference that shares the product's file icons and path tooltip. */
 export function InlineFileReference({
@@ -140,11 +270,13 @@ function useAttachmentResource(
       ? decodeURIComponent(storedReference[2])
       : undefined);
   const base = `/v1/sessions/${encodeURIComponent(sessionId ?? "")}`;
-  const url = fileId
-    ? `${base}/resources/files/${encodeURIComponent(fileId)}/content`
-    : reference && itemId
-      ? `${base}/attachments/references/${encodeURIComponent(itemId)}?${new URLSearchParams({ path: reference })}`
-      : undefined;
+  const url = fileId?.startsWith("pending:")
+    ? undefined
+    : fileId
+      ? `${base}/resources/files/${encodeURIComponent(fileId)}/content`
+      : reference && itemId
+        ? `${base}/attachments/references/${encodeURIComponent(itemId)}?${new URLSearchParams({ path: reference })}`
+        : undefined;
   const inline = attachment?.image_url ?? attachment?.file_data;
   const metadata = useQuery({
     queryKey: ["chat-attachment-metadata", sessionId, fileId],
@@ -257,11 +389,12 @@ export function ChatAttachment({
   unresolvedFallback?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [failedImage, setFailedImage] = useState<string>();
   const previewContext = useContext(AttachmentPreviewContext);
   const resource = useAttachmentResource(
     { sessionId, attachment: rawAttachment, reference, itemId },
-    { preview: open, loadImages: !compact, eager: unresolvedFallback !== undefined },
+    { preview: open || menuOpen, loadImages: !compact, eager: unresolvedFallback !== undefined },
   );
   const {
     attachment,
@@ -285,137 +418,154 @@ export function ChatAttachment({
     itemId,
     filename,
   };
+  const openModal = () => setOpen(true);
+  const canOpen = (placement: AttachmentPreviewPlacement) =>
+    !!sessionId &&
+    available &&
+    !attachment?.error &&
+    !!previewContext.openAttachment &&
+    previewContext.canOpenAttachment?.(request, placement) !== false;
+  const openDock = (placement: AttachmentPreviewPlacement) => {
+    if (canOpen(placement)) previewContext.openAttachment?.(request, { placement });
+  };
+  const menuActions: FilePreviewActions = {
+    openBeside: canOpen("beside") ? () => openDock("beside") : undefined,
+    openTab: canOpen("tab") ? () => openDock("tab") : undefined,
+    openModal: available && !attachment?.error ? openModal : undefined,
+    reveal: canRevealAttachment(request, resource, previewContext)
+      ? () => {
+          if (canRevealAttachment(request, resource, previewContext))
+            void previewContext.revealAttachment?.(request);
+        }
+      : undefined,
+    path: reference && !resource.storedReference ? reference : undefined,
+    download: available && !attachment?.error ? () => void download() : undefined,
+    downloading: content.isFetching,
+  };
   const openPreview = () => {
-    if (sessionId && previewContext.openAttachment) previewContext.openAttachment(request);
-    else setOpen(true);
+    if (compact && canOpen("beside")) openDock("beside");
+    else openModal();
   };
   if (unresolvedFallback !== undefined && (!content.data || error)) return unresolvedFallback;
   return (
-    <span
-      className={
-        compact
-          ? "not-prose inline"
-          : "not-prose @container/attachment my-2 flex w-[640px] min-w-0 max-w-full flex-col gap-2 rounded-lg border border-border bg-background p-3"
-      }
-      data-testid="chat-attachment"
-    >
-      {!compact && image && blobUrl && failedImage !== blobUrl && (
-        <ZoomableImage
-          src={blobUrl}
-          alt={filename}
-          className="max-h-64 max-w-full rounded object-contain"
-          onError={() => setFailedImage(blobUrl)}
-        />
-      )}
-      {compact ? (
-        <InlineFileReference
-          path={reference ?? filenameHint}
-          filename={filename}
-          mimeType={metadata.data?.metadata.content_type}
-          onClick={openPreview}
-        />
-      ) : (
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-            <WorkspaceFileIcon
-              path={filename}
-              mimeType={metadata.data?.metadata.content_type}
-              className="size-5"
+    <>
+      <FilePreviewMenu actions={menuActions} onOpenChange={setMenuOpen}>
+        <span
+          className={
+            compact
+              ? "not-prose inline"
+              : "not-prose @container/attachment my-2 flex w-[640px] min-w-0 max-w-full flex-col gap-2 rounded-lg border border-border bg-background p-3"
+          }
+          data-testid="chat-attachment"
+        >
+          {!compact && image && blobUrl && failedImage !== blobUrl && (
+            <ZoomableImage
+              src={blobUrl}
+              alt={filename}
+              className="max-h-64 max-w-full rounded object-contain"
+              onError={() => setFailedImage(blobUrl)}
             />
-          </span>
-          <span className="flex min-w-0 flex-1 flex-col gap-1 @min-[30rem]/attachment:flex-row @min-[30rem]/attachment:items-center @min-[30rem]/attachment:gap-3">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <TooltipButton
-                  type="button"
-                  className="block max-w-full truncate text-left text-sm font-semibold hover:text-link focus-visible:outline-ring @min-[30rem]/attachment:max-w-1/2"
-                  onClick={openPreview}
-                >
-                  {filename}
-                </TooltipButton>
-              </TooltipTrigger>
-              <TooltipContent className="break-all">{reference ?? filenameHint}</TooltipContent>
-            </Tooltip>
-            <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground @min-[30rem]/attachment:ml-auto @min-[30rem]/attachment:max-w-1/2">
-              <span className="truncate">{details}</span>
-              {size && <span className="shrink-0">{` · ${size}`}</span>}
+          )}
+          {compact ? (
+            <InlineFileReference
+              path={reference ?? filenameHint}
+              filename={filename}
+              mimeType={metadata.data?.metadata.content_type}
+              onClick={openPreview}
+            />
+          ) : (
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                <WorkspaceFileIcon
+                  path={filename}
+                  mimeType={metadata.data?.metadata.content_type}
+                  className="size-5"
+                />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-1 @min-[30rem]/attachment:flex-row @min-[30rem]/attachment:items-center @min-[30rem]/attachment:gap-3">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <TooltipButton
+                      type="button"
+                      className="block max-w-full truncate text-left text-sm font-semibold hover:text-link focus-visible:outline-ring @min-[30rem]/attachment:max-w-1/2"
+                      onClick={openPreview}
+                    >
+                      {filename}
+                    </TooltipButton>
+                  </TooltipTrigger>
+                  <TooltipContent className="break-all">{reference ?? filenameHint}</TooltipContent>
+                </Tooltip>
+                <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground @min-[30rem]/attachment:ml-auto @min-[30rem]/attachment:max-w-1/2">
+                  <span className="truncate">{details}</span>
+                  {size && <span className="shrink-0">{` · ${size}`}</span>}
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`Download ${filename}`}
+                      disabled={!available || content.isFetching}
+                      onClick={() => void download()}
+                    >
+                      <DownloadIcon />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Download original</TooltipContent>
+                </Tooltip>
+                {hasFilePreviewActions(menuActions) && (
+                  <FilePreviewMenu actions={menuActions} dropdown onOpenChange={setMenuOpen}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`More actions for ${filename}`}
+                    >
+                      <MoreHorizontalIcon />
+                    </Button>
+                  </FilePreviewMenu>
+                )}
+              </span>
             </span>
-          </span>
-          <span className="flex shrink-0 items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Download ${filename}`}
-                  disabled={!available || content.isFetching}
-                  onClick={() => void download()}
-                >
-                  <DownloadIcon />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Download original</TooltipContent>
-            </Tooltip>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`More actions for ${filename}`}
-                >
-                  <MoreHorizontalIcon />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={openPreview}>
-                  <ScanEyeIcon /> Preview
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={!available || content.isFetching}
-                  onSelect={() => void download()}
-                >
-                  <DownloadIcon /> Download original
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
+          )}
+          {content.isFetching && (
+            <span role="status" className={compact ? "sr-only" : "flex items-center gap-1 text-xs"}>
+              <Loader2Icon className="size-3 animate-spin" />
+              Loading file…
+            </span>
+          )}
+          {blobUrl && failedImage === blobUrl && (
+            <span role="alert" className="text-xs text-destructive">
+              This image could not be decoded. Download the original to open it.
+            </span>
+          )}
+          {error && (
+            <span role="alert" className="text-xs text-destructive">
+              {error.message}{" "}
+              <TooltipButton
+                type="button"
+                className="underline"
+                onClick={() => {
+                  void content.refetch();
+                  if (fileId) void metadata.refetch();
+                }}
+              >
+                Retry
+              </TooltipButton>
+            </span>
+          )}
+          {!available && !attachment?.error && (
+            <span className="text-xs text-muted-foreground">
+              {fileId?.startsWith("pending:")
+                ? "Uploading…"
+                : "File is not attached. Ask the agent to use omnigent attach-file."}
+            </span>
+          )}
         </span>
-      )}
-      {content.isFetching && (
-        <span role="status" className={compact ? "sr-only" : "flex items-center gap-1 text-xs"}>
-          <Loader2Icon className="size-3 animate-spin" />
-          Loading file…
-        </span>
-      )}
-      {blobUrl && failedImage === blobUrl && (
-        <span role="alert" className="text-xs text-destructive">
-          This image could not be decoded. Download the original to open it.
-        </span>
-      )}
-      {error && (
-        <span role="alert" className="text-xs text-destructive">
-          {error.message}{" "}
-          <TooltipButton
-            type="button"
-            className="underline"
-            onClick={() => {
-              void content.refetch();
-              if (fileId) void metadata.refetch();
-            }}
-          >
-            Retry
-          </TooltipButton>
-        </span>
-      )}
-      {!available && !attachment?.error && (
-        <span className="text-xs text-muted-foreground">
-          {fileId?.startsWith("pending:")
-            ? "Uploading…"
-            : "File is not attached. Ask the agent to use omnigent attach-file."}
-        </span>
-      )}
+      </FilePreviewMenu>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex max-h-[90dvh] w-[calc(100vw-1rem)] max-w-4xl flex-col overflow-hidden sm:max-w-4xl">
           <DialogHeader>
@@ -431,7 +581,7 @@ export function ChatAttachment({
           </div>
         </DialogContent>
       </Dialog>
-    </span>
+    </>
   );
 }
 
@@ -456,6 +606,22 @@ export function AttachmentPreviewView({ request }: { request: AttachmentPreviewR
 
 type AttachmentResource = ReturnType<typeof useAttachmentResource>;
 
+function canRevealAttachment(
+  request: AttachmentPreviewRequest,
+  resource: AttachmentResource,
+  context: ContextType<typeof AttachmentPreviewContext>,
+) {
+  return (
+    !!request.itemId &&
+    !!request.reference &&
+    !resource.storedReference &&
+    !!resource.content.data &&
+    !resource.error &&
+    !!context.revealAttachment &&
+    context.canRevealAttachment?.(request) !== false
+  );
+}
+
 function AttachmentPreviewActions({
   request,
   resource,
@@ -466,14 +632,7 @@ function AttachmentPreviewActions({
   header?: boolean;
 }) {
   const context = useContext(AttachmentPreviewContext);
-  const canReveal =
-    !!request.itemId &&
-    !!request.reference &&
-    !resource.storedReference &&
-    !!resource.content.data &&
-    !resource.error &&
-    !!context.revealAttachment &&
-    context.canRevealAttachment?.(request) !== false;
+  const canReveal = canRevealAttachment(request, resource, context);
   const Action = header ? HeaderActionButton : Button;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-1">

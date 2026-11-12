@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   branchRoots,
+  branchDescendantCounts,
   branchSource,
   visibleBranchRows,
   type BranchConversation,
@@ -48,4 +49,59 @@ it("uses explicit branch provenance, never delegation labels or titles, and boun
     "a",
     "b",
   ]);
+});
+
+it("counts all unique descendants, including collapsed grandchildren, and excludes each parent", () => {
+  const rows = [
+    branch("root"),
+    branch("a", "root"),
+    branch("b", "root"),
+    branch("c", "a"),
+    branch("d", "a"),
+    branch("e", "b"),
+    branch("e", "b"),
+  ];
+  expect(Object.fromEntries(branchDescendantCounts(rows))).toEqual({
+    root: 5,
+    a: 2,
+    b: 1,
+    c: 0,
+    d: 0,
+    e: 0,
+  });
+  // Filtering removes edges as well as rows; inaccessible ancestors are never reconstructed.
+  expect(Object.fromEntries(branchDescendantCounts(rows.filter((row) => row.id !== "a")))).toEqual({
+    root: 2,
+    b: 1,
+    c: 0,
+    d: 0,
+    e: 0,
+  });
+});
+
+it("bounds cycles, self-links and duplicates without dropping attached descendant trees", () => {
+  const rows = [
+    branch("a", "b"),
+    branch("b", "a"),
+    branch("c", "a"),
+    branch("d", "c"),
+    branch("self", "self"),
+    branch("a", "b"),
+  ];
+  expect(Object.fromEntries(branchDescendantCounts(rows))).toEqual({
+    a: 3,
+    b: 3,
+    c: 1,
+    d: 0,
+    self: 0,
+  });
+});
+
+it("counts deep graphs without recursive stack limits", () => {
+  const rows = Array.from({ length: 10000 }, (_, index) =>
+    branch(String(index), index ? String(index - 1) : undefined),
+  );
+  const counts = branchDescendantCounts(rows);
+  expect(counts.get("0")).toBe(9999);
+  expect(counts.get("9999")).toBe(0);
 });

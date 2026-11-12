@@ -837,13 +837,21 @@ describe("SettingsPage", () => {
   it("applies and restores list density without changing font preferences", () => {
     localStorage.setItem("omnigent:ui-font-size", "15");
     const page = renderPage("/settings/appearance");
-    expect(screen.getByRole("group", { name: "List density" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "List density" })).toBeInTheDocument();
+    const comfortable = screen.getByTestId("list-density-comfortable");
+    const compact = screen.getByTestId("list-density-compact");
+    expect(comfortable).toHaveAttribute("role", "radio");
+    expect(comfortable.querySelector("[aria-hidden] > div")).toHaveStyle({ height: "48px" });
+    expect(compact.querySelector("[aria-hidden] > div")).toHaveStyle({ height: "36px" });
+    fireEvent.keyDown(comfortable, { key: "ArrowRight" });
+    expect(compact).toHaveFocus();
+    expect(compact).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByTestId("list-density-compact"));
     expect(document.documentElement).toHaveAttribute("data-list-density", "compact");
     expect(localStorage.getItem("omnigent:ui-font-size")).toBe("15");
     page.unmount();
     renderPage("/settings/appearance");
-    expect(screen.getByTestId("list-density-compact")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("list-density-compact")).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByTestId("list-density-comfortable"));
     expect(document.documentElement).toHaveAttribute("data-list-density", "comfortable");
   });
@@ -1084,7 +1092,7 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByTestId("reset-appearance-confirm"));
 
     expect(localStorage.getItem("omnigent:list-density")).toBeNull();
-    expect(screen.getByTestId("list-density-comfortable")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("list-density-comfortable")).toHaveAttribute("aria-checked", "true");
     expect(document.documentElement).toHaveAttribute("data-list-density", "comfortable");
 
     // Mode is restored to "system".

@@ -12,9 +12,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ComponentProps, ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn(), copy: vi.fn() }));
 vi.mock("@/lib/identity", () => ({ authenticatedFetch: mocks.fetch }));
 vi.mock("@/lib/explorerOperations", () => ({ downloadBlob: mocks.download }));
+vi.mock("@/lib/clipboard", () => ({ copyText: mocks.copy }));
 vi.mock("@/shell/PdfViewer", () => ({ PdfViewer: () => <p>PDF document preview</p> }));
 vi.mock("@/shell/CodeViewer", () => ({
   MarkdownPreview: ({ content }: { content: string }) => <article>{content}</article>,
@@ -22,6 +23,7 @@ vi.mock("@/shell/CodeViewer", () => ({
 beforeEach(() => {
   mocks.fetch.mockReset();
   mocks.download.mockReset();
+  mocks.copy.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal(
     "URL",
     Object.assign(URL, {
@@ -120,42 +122,53 @@ it("keeps local references filename-only and fetches their captured message only
   expect(screen.getByRole("dialog")).not.toHaveClass("sm:max-w-sm");
 });
 
-it.each([true, false])(
-  "routes file activation to the dock with immutable identity (compact=%s)",
-  async (compact) => {
-    const openAttachment = vi.fn();
-    const { showPreview } = mount(
-      "report.txt",
-      "text/plain",
+it("routes compact file activation beside its chat with immutable identity", async () => {
+  const openAttachment = vi.fn();
+  const { showPreview } = mount(
+    "report.txt",
+    "text/plain",
+    "Captured original",
+    { compact: true },
+    { openAttachment },
+  );
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "report.txt" }));
+  expect(openAttachment).toHaveBeenCalledOnce();
+  expect(openAttachment.mock.calls[0][1]).toEqual({ placement: "beside" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(mocks.fetch.mock.calls.every(([url]) => !url.endsWith("/content"))).toBe(true);
+  const request = openAttachment.mock.calls[0][0];
+  expect(request).toMatchObject({
+    sessionId: "original-chat",
+    attachment: { file_id: "file-id", filename: "report.txt" },
+  });
+  showPreview(request);
+  await waitFor(() =>
+    expect(screen.getByRole("region", { name: "Preview report.txt" })).toHaveTextContent(
       "Captured original",
-      { compact },
-      { openAttachment },
-    );
-    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole("button", { name: "report.txt" }));
-    expect(openAttachment).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(mocks.fetch.mock.calls.every(([url]) => !url.endsWith("/content"))).toBe(true);
-    const request = openAttachment.mock.calls[0][0];
-    expect(request).toMatchObject({
-      sessionId: "original-chat",
-      attachment: { file_id: "file-id", filename: "report.txt" },
-    });
-    showPreview(request);
-    await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Preview report.txt" })).toHaveTextContent(
-        "Captured original",
-      ),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Download report.txt" }));
-    await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
-    expect(await mocks.download.mock.calls[0][0].text()).toBe("Captured original");
-    expect(mocks.fetch).toHaveBeenCalledWith(
-      "/v1/sessions/original-chat/resources/files/file-id/content",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-  },
-);
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Download report.txt" }));
+  await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+  expect(await mocks.download.mock.calls[0][0].text()).toBe("Captured original");
+  expect(mocks.fetch).toHaveBeenCalledWith(
+    "/v1/sessions/original-chat/resources/files/file-id/content",
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+});
+
+it("opens a full attachment in the large modal even when docking is available", async () => {
+  const openAttachment = vi.fn();
+  mount("report.txt", "text/plain", "Captured original", {}, { openAttachment });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "report.txt" }));
+  const modal = await screen.findByRole("dialog");
+  await waitFor(() => expect(modal).toHaveTextContent("Captured original"));
+  expect(modal).toHaveClass("sm:max-w-4xl", "w-[calc(100vw-1rem)]");
+  expect(openAttachment).not.toHaveBeenCalled();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
 
 it("keeps captured reference bytes and the origin message when moving from chat to a dock preview", async () => {
   const openAttachment = vi.fn();
@@ -186,6 +199,131 @@ it("keeps captured reference bytes and the origin message when moving from chat 
   fireEvent.click(screen.getByRole("button", { name: "Download notes.txt" }));
   await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
   expect(await mocks.download.mock.calls[0][0].text()).toBe("Historical bytes");
+});
+
+it.each(["context", "overflow"])(
+  "shares placement, modal, captured Reveal, copy and download actions in the %s menu",
+  async (menu) => {
+    const openAttachment = vi.fn();
+    const revealAttachment = vi.fn();
+    const reference = "/original/workspace/notes.txt";
+    mount(
+      "notes.txt",
+      "text/plain",
+      "Historical bytes",
+      { attachment: undefined, reference, itemId: "source/item" },
+      { openAttachment, revealAttachment },
+    );
+    const user = userEvent.setup();
+    const openMenu = async () => {
+      if (menu === "overflow")
+        await user.click(screen.getByRole("button", { name: "More actions for notes.txt" }));
+      else fireEvent.contextMenu(screen.getByRole("button", { name: "notes.txt" }));
+      await screen.findByRole("menuitem", { name: "Reveal in Explorer" });
+    };
+    await openMenu();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
+      "Open beside chat",
+      "Open as tab",
+      "Open in modal",
+      "Reveal in Explorer",
+      "Copy path",
+      "Download original",
+    ]);
+    const choosePlacement = async (label: string, placement: string) => {
+      await user.click(screen.getByRole("menuitem", { name: label }));
+      expect(openAttachment).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sessionId: "original-chat", itemId: "source/item", reference }),
+        { placement },
+      );
+      await openMenu();
+    };
+    await choosePlacement("Open beside chat", "beside");
+    await choosePlacement("Open as tab", "tab");
+    await user.click(screen.getByRole("menuitem", { name: "Copy path" }));
+    expect(mocks.copy).toHaveBeenCalledWith(reference);
+    await openMenu();
+    await user.click(screen.getByRole("menuitem", { name: "Reveal in Explorer" }));
+    expect(revealAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "original-chat", itemId: "source/item", reference }),
+    );
+    await openMenu();
+    await user.click(screen.getByRole("menuitem", { name: "Download original" }));
+    await waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+    expect(await mocks.download.mock.calls[0][0].text()).toBe("Historical bytes");
+    await openMenu();
+    await user.click(screen.getByRole("menuitem", { name: "Open in modal" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Historical bytes");
+    expect(openAttachment).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(["ContextMenu", "F10"])("opens the inline action menu with %s", async (key) => {
+  const openAttachment = vi.fn();
+  mount("report.txt", "text/plain", "Original", { compact: true }, { openAttachment });
+  const chip = screen.getByRole("button", { name: "report.txt" });
+  chip.focus();
+  fireEvent.keyDown(chip, { key, shiftKey: key === "F10" });
+  const user = userEvent.setup();
+  await waitFor(() =>
+    expect(screen.getByRole("menuitem", { name: "Open beside chat" })).toHaveFocus(),
+  );
+  await user.keyboard("{ArrowDown}{Enter}");
+  expect(openAttachment).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sessionId: "original-chat",
+      attachment: { file_id: "file-id", filename: "report.txt" },
+    }),
+    { placement: "tab" },
+  );
+});
+
+it("opens the same inline menu on touch long press without docking", async () => {
+  const openAttachment = vi.fn();
+  mount("report.txt", "text/plain", "Original", { compact: true }, { openAttachment });
+  const chip = screen.getByRole("button", { name: "report.txt" });
+  fireEvent.pointerDown(chip, { pointerType: "touch", pointerId: 1 });
+  expect(
+    await screen.findByRole("menuitem", { name: "Open as tab" }, { timeout: 1500 }),
+  ).toBeVisible();
+  fireEvent.pointerUp(chip, { pointerType: "touch", pointerId: 1 });
+  expect(openAttachment).not.toHaveBeenCalled();
+});
+
+it("hides unsupported placements and non-filesystem actions for stored attachments", async () => {
+  const openAttachment = vi.fn();
+  mount(
+    "report.pdf",
+    "application/pdf",
+    "Original",
+    { compact: true },
+    {
+      openAttachment,
+      canOpenAttachment: (_request, placement) => placement === "tab",
+      revealAttachment: vi.fn(),
+    },
+  );
+  fireEvent.contextMenu(screen.getByRole("button", { name: "report.pdf" }));
+  expect(await screen.findByRole("menuitem", { name: "Open as tab" })).toBeVisible();
+  expect(screen.queryByRole("menuitem", { name: "Open beside chat" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Copy path" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Reveal in Explorer" })).toBeNull();
+});
+
+it("keeps pending uploads from offering open or download capabilities", async () => {
+  const openAttachment = vi.fn();
+  mount(
+    "report.pdf",
+    "application/pdf",
+    "Original",
+    { attachment: { file_id: "pending:upload", filename: "report.pdf" } },
+    { openAttachment },
+  );
+  expect(screen.queryByRole("button", { name: "More actions for report.pdf" })).toBeNull();
+  fireEvent.contextMenu(screen.getByRole("button", { name: "report.pdf" }));
+  expect(screen.queryByRole("menuitem")).toBeNull();
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Download report.pdf", hidden: true })).toBeDisabled();
 });
 
 it.each([true, false])(
@@ -282,7 +420,7 @@ it("shows a compact metadata row with working overflow preview and original down
   expect(mocks.fetch.mock.calls.every(([url]) => !url.endsWith("/content"))).toBe(true);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "More actions for report.pdf" }));
-  await user.click(screen.getByRole("menuitem", { name: "Preview" }));
+  await user.click(screen.getByRole("menuitem", { name: "Open in modal" }));
   expect(await screen.findByText("PDF document preview")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Download report.pdf" }));
   await waitFor(() => expect(mocks.download).toHaveBeenCalledWith(expect.any(Blob), "report.pdf"));
@@ -347,12 +485,16 @@ it("renders SVG only in an image element rather than inserting active markup", a
 });
 
 it("closes an attachment lightbox with one Escape and retains its download name", async () => {
-  mount("chart ü.png", "image/png", "original-bytes");
+  const openAttachment = vi.fn();
+  mount("chart ü.png", "image/png", "original-bytes", {}, { openAttachment });
   await screen.findByRole("img", { name: "chart ü.png" });
   const download = screen.getByRole("button", { name: "Download chart ü.png" });
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Zoom image: chart ü.png" }));
   expect(screen.getByRole("dialog")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Zoom in" }));
+  expect(screen.getByRole("button", { name: "Reset zoom" })).toHaveTextContent("150%");
+  expect(openAttachment).not.toHaveBeenCalled();
   expect(download).toHaveAttribute("aria-label", "Download chart ü.png");
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).toBeNull();

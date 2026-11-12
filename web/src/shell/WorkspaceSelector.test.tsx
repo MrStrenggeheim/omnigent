@@ -9,7 +9,11 @@ it("keeps the full Host:path accessible with the existing trigger geometry", asy
   const onClick = vi.fn();
   render(<WorkspaceSelector hostLabel="Host" path="/work/repo" onClick={onClick} />);
   const trigger = screen.getByRole("button", { name: "Select workspace: Host:/work/repo" });
-  expect(trigger).toHaveTextContent("Host:/work/repo");
+  expect(trigger).toHaveTextContent("Host · /work/repo");
+  expect(screen.getByText("Host")).toHaveClass("text-muted-foreground");
+  expect(screen.getByText("/work/repo")).toHaveClass("text-foreground");
+  expect(trigger).toHaveClass("text-ui", "font-normal");
+  expect(trigger.querySelector(".lucide-monitor")).not.toBeNull();
   expect(trigger.querySelectorAll("svg")).toHaveLength(2);
   expect(trigger.querySelector(".lucide-folder")).toBeNull();
   expect(trigger).toHaveClass("min-h-11", "md:min-h-7", "gap-1.5", "px-1", "border-0");

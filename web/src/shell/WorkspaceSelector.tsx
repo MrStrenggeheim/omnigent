@@ -47,7 +47,9 @@ export function WorkspaceSelector({
         data-workspace-collapse-label=""
         className="workspace-selector-details min-w-0 truncate group-data-[labels=collapsed]/composer-actions:hidden group-data-[labels=collapsed]/composer-workspace:hidden"
       >
-        {location}
+        <span className="text-muted-foreground">{hostLabel}</span>
+        <span className="text-muted-foreground"> · </span>
+        <span className="text-foreground">{path || "Choose path"}</span>
       </span>
       <ChevronDownIcon className="size-3 shrink-0" aria-hidden />
     </button>

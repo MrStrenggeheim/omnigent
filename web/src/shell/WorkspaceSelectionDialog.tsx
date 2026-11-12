@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckIcon, ClockIcon, MonitorIcon, XIcon } from "lucide-react";
+import { CheckIcon, ClockIcon, MonitorIcon, PlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,6 +11,7 @@ import {
 import { useHosts, type Host } from "@/hooks/useHosts";
 import { useRecentWorkspaces } from "@/hooks/useRecentWorkspaces";
 import { cn } from "@/lib/utils";
+import { ConnectHostDialog } from "./ConnectHostInstructions";
 import { WorkspacePicker, isNavigablePath, type WorkspacePickerHandle } from "./WorkspacePicker";
 
 export interface WorkspaceSelection {
@@ -80,7 +81,8 @@ function WorkspaceSelectionContent({
   children,
   closeOnConfirm = true,
 }: WorkspaceSelectionDialogProps) {
-  const hostsQuery = useHosts();
+  const [connectOpen, setConnectOpen] = useState(false);
+  const hostsQuery = useHosts({ refetchOnFocus: connectOpen });
   const hosts = suppliedHosts ?? hostsQuery.data ?? [];
   const [selectedHostId, setSelectedHostId] = useState(hostId);
   const [drafts, setDrafts] = useState<Record<string, string>>({
@@ -219,6 +221,16 @@ function WorkspaceSelectionContent({
               {hostsQuery.error.message}
             </p>
           )}
+          <ConnectHostDialog open={connectOpen} onOpenChange={setConnectOpen}>
+            <Button
+              type="button"
+              variant="ghost"
+              className="mt-3 min-h-11 w-full justify-start text-sm text-muted-foreground"
+            >
+              <PlusIcon className="size-4" aria-hidden />
+              Add host…
+            </Button>
+          </ConnectHostDialog>
           {hostActions}
         </section>
         <section

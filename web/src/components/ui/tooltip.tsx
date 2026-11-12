@@ -48,6 +48,7 @@ const TooltipButton = React.forwardRef<
 ) {
   return (
     <ButtonTooltip
+      enabled={tooltip !== false}
       label={tooltip ?? props["aria-label"] ?? title ?? buttonLabel(children)}
       description={
         tooltipDescription ??
@@ -254,17 +255,19 @@ function ButtonTooltip({
   description,
   shortcut,
   expanded = false,
+  enabled = true,
 }: {
   children: React.ReactElement;
   label?: React.ReactNode;
   description?: React.ReactNode;
   shortcut?: TooltipShortcut;
   expanded?: boolean;
+  enabled?: boolean;
 }) {
   const hasTooltip = React.useContext(TooltipTriggerContext);
   const [renderedLabel, setRenderedLabel] = React.useState("");
   const guarded = useMenuGuardedTooltip(expanded);
-  if (hasTooltip) return children;
+  if (hasTooltip || !enabled) return children;
   const resolvedLabel = label || renderedLabel;
   const visibleLabel = buttonLabel((children.props as { children?: React.ReactNode }).children);
   if (

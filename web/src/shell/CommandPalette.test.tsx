@@ -478,7 +478,10 @@ describe("CommandPalette — mobile full-screen sheet", () => {
     document.body.appendChild(anchor);
     try {
       renderPalette({ anchorSelector: "[data-workbench-search]" });
-      expect(screen.getByRole("dialog")).toHaveStyle({ top: "56px", left: "180px" });
+      expect(screen.getByRole("dialog")).toHaveStyle({
+        top: "56px",
+        left: `${(window.innerWidth - Math.min(640, window.innerWidth - 16)) / 2}px`,
+      });
       expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
       expect(screen.getByTestId("command-palette-input")).toHaveFocus();
       fireEvent.keyDown(screen.getByTestId("command-palette-input"), { key: "Escape" });

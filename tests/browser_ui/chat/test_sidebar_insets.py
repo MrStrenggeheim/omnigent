@@ -26,6 +26,7 @@ def test_sidebar_keeps_balanced_content_insets(
     expect(sidebar).to_have_css("translate", "0px")
     nav = sidebar.locator("nav").first
     expect(nav).to_be_visible()
+    expect(sidebar.locator(".sidebar-header-row")).to_have_count(0)
     metrics = sidebar.evaluate(
         """el => {
             const metrics = node => {
@@ -44,7 +45,6 @@ def test_sidebar_keeps_balanced_content_insets(
             }
             return {windowScrollX:window.scrollX,ancestors,aside:metrics(el),
                 nav:metrics(el.querySelector('nav')),
-                header:metrics(el.querySelector('.sidebar-header-row')),
                 links:[...el.querySelectorAll('nav a')].slice(0,5).map(metrics)};
         }"""
     )

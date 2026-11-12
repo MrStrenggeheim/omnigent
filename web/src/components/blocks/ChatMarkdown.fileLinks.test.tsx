@@ -131,6 +131,44 @@ function renderMarkdown(
 }
 
 describe("implicit captured file references", () => {
+  it("keeps menu placement and copied paths scoped to the message's originating chat", async () => {
+    const openAttachment = vi.fn();
+    fetchMock.mockImplementation(
+      async () => new Response("Historical content", { headers: { "Content-Type": "text/plain" } }),
+    );
+    renderMarkdown(
+      "Read [the file](/original/workspace/guide.txt).",
+      [],
+      {
+        ...FILE_VIEWER_WITH_SESSION,
+        conversationId: "different-chat",
+        workspaceRoot: "/different/workspace",
+      },
+      "original-item",
+      { openAttachment },
+    );
+    const chip = screen.getByRole("button", { name: "guide.txt" });
+    fireEvent.contextMenu(chip);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy path" }));
+    await waitFor(() => expect(copyTextMock).toHaveBeenCalledWith("/original/workspace/guide.txt"));
+    fireEvent.contextMenu(chip);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open as tab" }));
+    expect(openAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "conv_1",
+        itemId: "original-item",
+        reference: "/original/workspace/guide.txt",
+      }),
+      { placement: "tab" },
+    );
+    expect(openFile).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.every(([url]) =>
+        url.includes("/sessions/conv_1/attachments/references/original-item?"),
+      ),
+    ).toBe(true);
+  });
+
   it.each([
     "Read [the file](/original/workspace/guide.txt).",
     "Read `/original/workspace/guide.txt:12`.",
@@ -159,6 +197,7 @@ describe("implicit captured file references", () => {
           itemId: "original-item",
           reference: "/original/workspace/guide.txt",
         }),
+        { placement: "beside" },
       );
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(openFile).not.toHaveBeenCalled();
@@ -309,6 +348,7 @@ describe("markdown links to workspace files", () => {
         filename: "stored.pdf",
         attachment: { file_id: "original-file", filename: "the report" },
       }),
+      { placement: "beside" },
     );
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/content"))).toBe(false);

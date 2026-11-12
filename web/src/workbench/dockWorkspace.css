@@ -54,7 +54,22 @@
   height: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.dock-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.dock-pane-header[data-overflow-right="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 28px;
+  background: linear-gradient(to right, transparent, var(--workspace-content));
+  pointer-events: none;
+  z-index: 3;
 }
 
 .dock-tab {
@@ -65,7 +80,9 @@
   max-width: 240px;
   padding: 0 12px;
   font-size: 13px;
-  touch-action: none;
+  touch-action: pan-x;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .dock-tab span {
@@ -115,29 +132,52 @@
   touch-action: none;
 }
 
-.dock-divider:hover,
+.dock-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.dock-divider[aria-orientation="vertical"]::after {
+  width: 4px;
+  left: calc(50% - 2px);
+}
+
+.dock-divider[aria-orientation="horizontal"]::after {
+  height: 4px;
+  top: calc(50% - 2px);
+}
+
+.dock-divider:hover::after {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.dock-divider:active::after,
+.dock-divider[data-resizing="true"]::after {
+  background: color-mix(in srgb, var(--primary) 50%, transparent);
+}
+
 .dock-divider:focus-visible {
-  background: var(--brand-accent, #8a73bd);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 .dock-drop-overlay {
   position: absolute;
   z-index: 5;
   inset: var(--dock-header-height) 0 0;
+  pointer-events: none;
 }
 
 .dock-drop-zone {
   position: absolute;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   pointer-events: auto;
-  font-size: 13px;
 }
 
-.dock-drop-zone[data-over="true"] {
-  background: var(--muted);
-  outline: 2px dashed var(--brand-accent, #8a73bd);
+.dock-placement-preview {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
 }
 
 .dock-drop-zone[data-edge="left"] {
@@ -163,10 +203,27 @@
 }
 
 .dock-tab-group {
+  position: relative;
   display: flex;
   flex-shrink: 0;
   align-items: center;
   padding-right: 4px;
+}
+.dock-tab-end {
+  position: relative;
+  flex: 1 0 24px;
+  align-self: stretch;
+  min-width: 24px;
+}
+.dock-tab-group[data-insertion="true"]::before,
+.dock-tab-end[data-insertion="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 4px auto 4px 0;
+  width: 3px;
+  background: var(--primary);
+  z-index: 3;
+  pointer-events: none;
 }
 .dock-tab-group:hover {
   background: var(--workspace-hover-on-content);
@@ -213,9 +270,17 @@
   opacity: 1;
   pointer-events: auto;
 }
+.dock-tab-pin[aria-pressed="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--primary);
+}
 .dock-tab-pin:hover {
   background: var(--workspace-hover-on-content);
   color: var(--foreground);
+}
+.dock-tab-pin[aria-pressed="true"]:hover {
+  color: var(--primary);
 }
 @media (hover: none), (pointer: coarse) {
   .dock-tab-pin {

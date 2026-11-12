@@ -25,6 +25,21 @@ function panel() {
 
 describe("canonical button tooltips", () => {
   it.each([Button, TooltipButton])(
+    "supports explicit tooltip suppression on %s",
+    async (Control) => {
+      render(
+        <Control tooltip={false} aria-label="Close">
+          <svg aria-hidden />
+        </Control>,
+      );
+      const close = screen.getByRole("button", { name: "Close" });
+      await userEvent.hover(close);
+      fireEvent.focus(close);
+      expect(close).not.toHaveAttribute("data-slot", "tooltip-trigger");
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    },
+  );
+  it.each([Button, TooltipButton])(
     "preserves implicit form submission through %s",
     async (Control) => {
       const submit = vi.fn((event: React.FormEvent) => event.preventDefault());
@@ -41,7 +56,7 @@ describe("canonical button tooltips", () => {
     },
   );
 
-  it("keeps lightbox autofocus out of tooltips so the first Escape closes the dialog", () => {
+  it("keeps lightbox Close guidance suppressed so the first Escape closes the dialog", async () => {
     render(
       <ImageLightboxProvider>
         <ZoomableImage src="/pic.png" alt="diagram" />
@@ -49,6 +64,11 @@ describe("canonical button tooltips", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Zoom image: diagram" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    const close = screen.getByRole("button", { name: "Close" });
+    await userEvent.hover(close);
+    expect(close).not.toHaveAttribute("data-slot", "tooltip-trigger");
+    expect(close).not.toHaveAttribute("title");
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

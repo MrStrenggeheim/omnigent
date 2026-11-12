@@ -7,12 +7,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { useOmnigentAnalytics } from "@/lib/analytics";
 import { buttonLabel, ButtonTooltip, type TooltipShortcut } from "@/components/ui/tooltip";
 
-// The pressed-state nudge uses the `transform` property (not translate-y-px)
-// so it composes with `translate`-based positioning: a caller centering the
-// button via -translate-y-1/2 would otherwise have its transform replaced on
-// :active, making the button jump out from under the cursor mid-click.
 const buttonVariants = cva(
-  "button-standard-icons group/button relative inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-transparent bg-clip-padding text-ui font-normal whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:[transform:translateY(1px)] disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "button-standard-icons group/button relative inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-transparent bg-clip-padding text-ui font-normal whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -140,6 +136,7 @@ const Button = React.forwardRef<
   );
   return (
     <ButtonTooltip
+      enabled={tooltip !== false}
       label={tooltip ?? props["aria-label"] ?? title ?? buttonLabel(children)}
       description={
         tooltipDescription ??

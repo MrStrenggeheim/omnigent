@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
 import { CapabilitiesProvider } from "@/lib/CapabilitiesContext";
 import { FALLBACK_SERVER_INFO } from "@/lib/capabilities";
-import { ConnectHostInstructions } from "./NewChatDialog";
+import { ConnectHostInstructions } from "./ConnectHostInstructions";
 
 const meta = {
   title: "Components/Hosts/ConnectHostInstructions",

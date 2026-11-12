@@ -3030,6 +3030,7 @@ describe("Run on this machine (desktop host enrollment)", () => {
   });
 
   async function openHostMenu() {
+    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
     const chip = await screen.findByTestId("new-chat-landing-host-chip");
     fireEvent.pointerDown(chip, { button: 0 });
     fireEvent.click(chip);
@@ -3548,6 +3549,7 @@ describe("Run on Arca (Databricks-internal, MDM-gated)", () => {
   });
 
   async function openHostMenu() {
+    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
     const chip = await screen.findByTestId("new-chat-landing-host-chip");
     fireEvent.pointerDown(chip, { button: 0 });
     fireEvent.click(chip);
@@ -3563,8 +3565,7 @@ describe("Run on Arca (Databricks-internal, MDM-gated)", () => {
     vi.mocked(getDesktopFeatures).mockResolvedValue(null);
     renderLanding();
     await openHostMenu();
-    // The menu is open (the escape hatch renders), but no Arca entry.
-    await screen.findByTestId("new-chat-landing-connect-host");
+    await screen.findByTestId("new-chat-landing-host-menu");
     expect(screen.queryByTestId("new-chat-landing-run-on-arca")).toBeNull();
   });
 
@@ -6432,9 +6433,8 @@ describe("NewChatLandingScreen", () => {
   it("quotes server URLs in host and Lakebox connect commands", () => {
     setOmnigentHostConfig({ cliServerUrlSuffix: "/api?profile=dev&glob=*" });
     renderLanding({ databricks_features: true });
-    // Radix dropdowns open on pointerdown (a bare click doesn't in jsdom).
-    fireEvent.pointerDown(screen.getByTestId("new-chat-landing-host-chip"), { button: 0 });
-    fireEvent.click(screen.getByTestId("new-chat-landing-connect-host"));
+    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
+    fireEvent.click(screen.getByRole("button", { name: "Add host…" }));
 
     expect(screen.getByTestId("connect-host-dialog")).toBeTruthy();
     expect(screen.getByTestId("connect-host-command")).toHaveTextContent(
@@ -6452,14 +6452,10 @@ describe("NewChatLandingScreen", () => {
   it("offers connect-host even when no hosts are online (no dead end)", () => {
     mockHosts([]);
     renderLanding();
-    // The chip reads the empty state…
-    const hostChip = screen.getByTestId("new-chat-landing-host-chip");
-    expect(hostChip).toHaveAccessibleName(expect.stringContaining("No host selected"));
-    expect(hostChip.querySelector(".bg-success")).toBeNull();
-    expect(hostChip.querySelector(".lucide-laptop")).not.toBeNull();
-    fireEvent.pointerDown(screen.getByTestId("new-chat-landing-host-chip"), { button: 0 });
-    // …and the connect item is still present, so a fresh user can unblock.
-    expect(screen.getByTestId("new-chat-landing-connect-host")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
+    expect(screen.getByRole("button", { name: "Use workspace" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add host…" }));
+    expect(screen.getByTestId("connect-host-command")).toBeVisible();
   });
 
   it("keeps model and effort in the primary picker and permissions in the hand menu", () => {
@@ -7726,10 +7722,10 @@ describe("NewChatLandingScreen", () => {
     // probe sentinel). The dropdown must not advertise a create path the
     // server would reject with "managed hosts are not configured".
     renderLanding();
+    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
     fireEvent.pointerDown(screen.getByTestId("new-chat-landing-host-chip"), { button: 0 });
-    // connect-host proves the menu actually opened — without it, a closed
-    // menu would make the absence assertion below pass vacuously.
-    expect(screen.getByTestId("new-chat-landing-connect-host")).toBeTruthy();
+    expect(screen.getByTestId("new-chat-landing-host-menu")).toBeVisible();
+    expect(screen.queryByText("Connect new host")).toBeNull();
     expect(screen.getByText("My machines")).toBeTruthy();
     expect(screen.queryByTestId("new-chat-landing-sandbox-option")).toBeNull();
   });
@@ -7739,6 +7735,7 @@ describe("NewChatLandingScreen", () => {
       docsLinks: { newSandbox: "Managed sandboxes are disabled in this workspace." },
     });
     renderLanding();
+    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
     fireEvent.pointerDown(screen.getByTestId("new-chat-landing-host-chip"), { button: 0 });
     const disabledRow = screen.getByTestId("new-chat-landing-sandbox-option-disabled");
     expect(disabledRow).toBeTruthy();
@@ -7771,16 +7768,14 @@ describe("NewChatLandingScreen", () => {
   });
 
   it("labels the sandbox option with the server's provider name", async () => {
-    // sandbox_provider drives the per-provider label. "modal" must read
-    // "Modal Sandbox" on both the chip and the dropdown option — if the
-    // label regressed to the generic "New Sandbox", the provider name
-    // never reached the UI.
     renderLanding({ managed_sandboxes_enabled: true, sandbox_provider: "modal" });
     await waitFor(() =>
-      expect(screen.getByTestId("new-chat-landing-host-chip").getAttribute("aria-label")).toContain(
-        "Modal Sandbox",
+      expect(screen.getByTestId("new-chat-landing-workspace-chip")).toHaveAccessibleName(
+        expect.stringContaining("Modal Sandbox"),
       ),
     );
+    fireEvent.click(screen.getByTestId("new-chat-landing-workspace-chip"));
+    expect(screen.getByRole("button", { name: "Add host…" })).toBeVisible();
     fireEvent.pointerDown(screen.getByTestId("new-chat-landing-host-chip"), { button: 0 });
     expect(screen.getByTestId("new-chat-landing-sandbox-option").textContent).toContain(
       "Modal Sandbox",

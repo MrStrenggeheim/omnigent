@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -12,7 +13,8 @@ import {
 import {
   DndContext,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   pointerWithin,
   useDndContext,
@@ -20,6 +22,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -27,8 +30,16 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
-import { Pin, PinOff, X } from "lucide-react";
+import { Pin, X } from "lucide-react";
 import { TooltipButton } from "@/components/ui/tooltip";
+import { FileDropSurface } from "@/components/FileDropOverlay";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
 import {
   clampSplitRatio,
   MAX_SPLIT_RATIO,
@@ -54,6 +65,7 @@ import {
   type SplitEdge,
 } from "./dockLayout";
 import { WorkbenchViewIcon } from "./viewIcons";
+import { projectedDockRect, tabDropTarget, type DockDropTarget } from "./dockDropPlacement";
 import "./dockWorkspace.css";
 
 export interface DockViewVisibility {
@@ -136,7 +148,41 @@ function DockSurface(props: DockWorkspaceProps) {
   const [dragging, setDragging] = useState(false);
   const [externalDragging, setExternalDragging] = useState(false);
   const externalDepth = useRef(0);
-  const [externalOver, setExternalOver] = useState<string | null>(null);
+  const [externalOver, setExternalOver] = useState<DockDropTarget | null>(null);
+  const [internalOver, setInternalOver] = useState<DockDropTarget | null>(null);
+  const externalViewId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const start = (event: globalThis.DragEvent) => {
+      externalViewId.current = undefined;
+      if (!event.dataTransfer?.types.includes(CONVERSATION_DRAG_MIME)) return;
+      try {
+        const payload: unknown = JSON.parse(event.dataTransfer.getData(CONVERSATION_DRAG_MIME));
+        if (
+          payload &&
+          typeof payload === "object" &&
+          "id" in payload &&
+          typeof payload.id === "string"
+        )
+          externalViewId.current = latest.current.layout.views.find(
+            (view) => view.kind === "conversation" && view.resource.conversationId === payload.id,
+          )?.id;
+      } catch {
+        // Only the validated drop payload can open a conversation.
+      }
+    };
+    const end = () => {
+      externalViewId.current = undefined;
+      externalDepth.current = 0;
+      setExternalDragging(false);
+      setExternalOver(null);
+    };
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragend", end);
+    return () => {
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragend", end);
+    };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState<string[]>([]);
   const pending = useRef(new Set<string>());
@@ -151,7 +197,8 @@ function DockSurface(props: DockWorkspaceProps) {
   const geometry =
     preview.tree === null ? { panes: [], dividers: [] } : terminalLayoutGeometry(preview.tree);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -180,16 +227,34 @@ function DockSurface(props: DockWorkspaceProps) {
     }
   };
 
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    setDragging(false);
+  const dragStartX = useRef<number | null>(null);
+  const dragDestination = ({
+    active,
+    over,
+    delta,
+  }: DragMoveEvent | DragEndEvent): DockDropTarget | null => {
     const source = active.data.current;
     const destination = over?.data.current;
-    if (
-      source?.type !== "dock-tab" ||
-      !destination ||
-      (destination.type !== "dock-tab" && destination.type !== "dock-drop")
-    )
-      return;
+    if (source?.type !== "dock-tab" || !over || !destination) return null;
+    if (destination.type === "dock-drop")
+      return { paneId: destination.paneId, edge: destination.edge };
+    if (destination.type !== "dock-tab" && destination.type !== "dock-tabbar") return null;
+    // Pointer and keyboard drags share the same displayed insertion boundaries.
+    const start = active.rect.current.translated;
+    const pointer = dragStartX.current;
+    const x = pointer !== null ? pointer + delta.x : start ? start.left + start.width / 2 : 0;
+    const after = destination.type === "dock-tab" && x >= over.rect.left + over.rect.width / 2;
+    return tabDropTarget(destination.paneId, destination.index + (after ? 1 : 0), {
+      paneId: source.paneId,
+      index: source.index,
+    });
+  };
+  const onDragEnd = (event: DragEndEvent) => {
+    setDragging(false);
+    setInternalOver(null);
+    const source = event.active.data.current;
+    const destination = dragDestination(event);
+    if (!destination || source?.type !== "dock-tab") return;
     onLayoutChange((current) =>
       moveDockView(current, source.viewId, {
         paneId: destination.paneId,
@@ -206,6 +271,29 @@ function DockSurface(props: DockWorkspaceProps) {
     event.target instanceof Element
       ? event.target.closest<HTMLElement>("[data-conversation-drop-pane]")
       : null;
+  const conversationDestination = (event: DragEvent): DockDropTarget | null => {
+    const target = dropTarget(event);
+    const paneId = target?.dataset.conversationDropPane;
+    if (!target || !paneId) return null;
+    const edge = target.dataset.edge;
+    if (edges.includes(edge as SplitEdge)) return { paneId, edge: edge as SplitEdge };
+    const index = target.dataset.conversationDropIndex;
+    if (index === undefined) return { paneId };
+    const bounds = target.getBoundingClientRect();
+    const after =
+      target.classList.contains("dock-tab-group") &&
+      bounds.width > 0 &&
+      event.clientX >= bounds.left + bounds.width / 2;
+    const source =
+      externalViewId.current && dockPaneForView(latest.current.layout, externalViewId.current);
+    return tabDropTarget(
+      paneId,
+      Number(index) + (after ? 1 : 0),
+      source
+        ? { paneId: source.id, index: source.viewIds.indexOf(externalViewId.current!) }
+        : undefined,
+    );
+  };
   const openDroppedConversation = async (event: DragEvent) => {
     if (!acceptsConversation(event)) return;
     event.preventDefault();
@@ -213,9 +301,9 @@ function DockSurface(props: DockWorkspaceProps) {
     externalDepth.current = 0;
     setExternalDragging(false);
     setExternalOver(null);
-    const target = dropTarget(event);
-    const paneId = target?.dataset.conversationDropPane;
-    if (!paneId || !latest.current.layout.panes.some((pane) => pane.id === paneId)) return;
+    const destination = conversationDestination(event);
+    if (!destination || !latest.current.layout.panes.some((pane) => pane.id === destination.paneId))
+      return;
     let payload: unknown;
     try {
       payload = JSON.parse(event.dataTransfer.getData(CONVERSATION_DRAG_MIME));
@@ -232,14 +320,12 @@ function DockSurface(props: DockWorkspaceProps) {
       typeof payload.title !== "string"
     )
       return;
-    const edge = target.dataset.edge;
-    const index = target.dataset.conversationDropIndex;
     setError(null);
     try {
       await latest.current.onOpenConversationAt?.(payload.id, {
-        paneId,
-        ...(edges.includes(edge as SplitEdge) ? { edge: edge as SplitEdge } : {}),
-        ...(index !== undefined ? { index: Number(index) } : {}),
+        paneId: destination.paneId,
+        ...(destination.edge ? { edge: destination.edge } : {}),
+        ...(destination.index !== undefined ? { index: destination.index } : {}),
       });
     } catch (cause) {
       if (alive.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -257,11 +343,25 @@ function DockSurface(props: DockWorkspaceProps) {
       sensors={sensors}
       collisionDetection={(args) => {
         const hits = pointerWithin(args);
-        return hits.length ? hits : closestCenter(args);
+        if (args.pointerCoordinates) return hits;
+        return closestCenter(args);
       }}
-      onDragStart={() => setDragging(true)}
+      onDragStart={({ activatorEvent }) => {
+        dragStartX.current =
+          "clientX" in activatorEvent
+            ? Number(activatorEvent.clientX)
+            : "touches" in activatorEvent
+              ? ((activatorEvent as TouchEvent).touches[0]?.clientX ?? null)
+              : null;
+        setDragging(true);
+      }}
+      onDragMove={(event) => setInternalOver(dragDestination(event))}
+      onDragOver={(event) => setInternalOver(dragDestination(event))}
       onDragEnd={onDragEnd}
-      onDragCancel={() => setDragging(false)}
+      onDragCancel={() => {
+        setDragging(false);
+        setInternalOver(null);
+      }}
     >
       <div
         ref={rootRef}
@@ -285,12 +385,7 @@ function DockSurface(props: DockWorkspaceProps) {
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "copy";
-          const target = dropTarget(event);
-          setExternalOver(
-            target
-              ? `${target.dataset.conversationDropPane}:${target.dataset.edge ?? target.dataset.conversationDropIndex ?? "center"}`
-              : null,
-          );
+          setExternalOver(conversationDestination(event));
         }}
         onDropCapture={(event) => void openDroppedConversation(event)}
         onDragEndCapture={() => {
@@ -323,7 +418,7 @@ function DockSurface(props: DockWorkspaceProps) {
                 compact={compact}
                 focused={focused}
                 dragging={dragging || externalDragging}
-                externalOver={externalOver}
+                dropTarget={externalOver ?? internalOver}
                 pinnedViewIds={pinnedViewIds}
                 closing={closing}
                 onSelect={select}
@@ -387,6 +482,13 @@ function DockSurface(props: DockWorkspaceProps) {
                 }}
               />
             ))}
+          <DockPlacementPreview
+            layout={layout}
+            target={externalOver ?? internalOver}
+            compact={compact}
+            external={externalDragging}
+            externalViewId={externalViewId.current}
+          />
         </div>
       </div>
     </DndContext>
@@ -452,7 +554,7 @@ function DockPaneChrome({
   compact,
   focused,
   dragging,
-  externalOver,
+  dropTarget,
   pinnedViewIds,
   closing,
   onSelect,
@@ -470,7 +572,7 @@ function DockPaneChrome({
   compact: boolean;
   focused: boolean;
   dragging: boolean;
-  externalOver: string | null;
+  dropTarget: DockDropTarget | null;
   pinnedViewIds: readonly string[];
   closing: string[];
   onSelect: (id: string) => void;
@@ -483,6 +585,22 @@ function DockPaneChrome({
   const tabs = (compact ? layout.panes : [pane]).flatMap((owner) =>
     owner.viewIds.map((id, index) => ({ id, index, owner })),
   );
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [overflowRight, setOverflowRight] = useState(false);
+  const measureOverflow = useCallback(() => {
+    const strip = stripRef.current;
+    if (strip) setOverflowRight(strip.scrollWidth - strip.clientWidth - strip.scrollLeft > 1);
+  }, []);
+  useEffect(() => {
+    measureOverflow();
+    const observer = new ResizeObserver(measureOverflow);
+    const strip = stripRef.current;
+    if (strip) {
+      observer.observe(strip);
+      for (const child of strip.children) observer.observe(child);
+    }
+    return () => observer.disconnect();
+  }, [layout, compact, measureOverflow]);
   return (
     <section
       className="dock-pane"
@@ -493,58 +611,99 @@ function DockPaneChrome({
       onPointerDownCapture={onFocus}
       onFocusCapture={onFocus}
     >
-      <div className="dock-pane-header">
+      <div className="dock-pane-header" data-overflow-right={overflowRight}>
         <div
+          ref={stripRef}
           role="tablist"
           aria-label={`Views in ${pane.id}`}
           className="dock-tabs"
           data-conversation-drop-pane={pane.id}
+          onScroll={measureOverflow}
         >
           <SortableContext
             items={tabs.map(({ id }) => `view:${id}`)}
             strategy={horizontalListSortingStrategy}
           >
             {tabs.map(({ id, index: tabIndex, owner }) => (
-              <DockTab
-                key={id}
-                view={layout.views.find((view) => view.id === id)!}
-                pane={owner}
-                selected={pane.selectedViewId === id}
-                index={tabIndex}
-                prefix={prefix}
-                pinned={pinnedViewIds.includes(id)}
-                onSelect={() => onSelect(id)}
-                onClose={() => onClose(id)}
-                onPin={
-                  pinnedViewIds.includes(id)
-                    ? onUnpinView && (() => onUnpinView(id))
-                    : onPinView && (() => onPinView(id))
-                }
-                closing={closing.includes(id)}
-                onStep={(step, reorder) => {
-                  if (reorder)
-                    onLayoutChange((current) =>
-                      moveDockView(current, id, { paneId: owner.id, index: tabIndex + step }),
-                    );
-                  else {
-                    const target =
-                      tabs[
-                        (tabs.findIndex((tab) => tab.id === id) + step + tabs.length) % tabs.length
-                      ].id;
-                    onSelect(target);
-                    document.getElementById(`${prefix}-tab-${target}`)?.focus();
+              <Fragment key={id}>
+                <DockTab
+                  view={layout.views.find((view) => view.id === id)!}
+                  pane={owner}
+                  selected={pane.selectedViewId === id}
+                  index={tabIndex}
+                  prefix={prefix}
+                  pinned={pinnedViewIds.includes(id)}
+                  onSelect={() => onSelect(id)}
+                  onClose={() => onClose(id)}
+                  onPin={
+                    pinnedViewIds.includes(id)
+                      ? onUnpinView && (() => onUnpinView(id))
+                      : onPinView && (() => onPinView(id))
                   }
-                }}
-              />
+                  closing={closing.includes(id)}
+                  insertion={dropTarget?.paneId === owner.id && dropTarget.tabIndex === tabIndex}
+                  menu={
+                    <DockViewMenuItems
+                      pane={owner}
+                      layout={layout}
+                      viewId={id}
+                      closing={closing.includes(id)}
+                      onClose={() => onClose(id)}
+                      onLayoutChange={onLayoutChange}
+                      pinned={pinnedViewIds.includes(id)}
+                      onPin={
+                        pinnedViewIds.includes(id)
+                          ? onUnpinView && (() => onUnpinView(id))
+                          : onPinView && (() => onPinView(id))
+                      }
+                    />
+                  }
+                  onStep={(step, reorder) => {
+                    if (reorder)
+                      onLayoutChange((current) =>
+                        moveDockView(current, id, { paneId: owner.id, index: tabIndex + step }),
+                      );
+                    else {
+                      const target =
+                        tabs[
+                          (tabs.findIndex((tab) => tab.id === id) + step + tabs.length) %
+                            tabs.length
+                        ].id;
+                      onSelect(target);
+                      document.getElementById(`${prefix}-tab-${target}`)?.focus();
+                    }
+                  }}
+                />
+                {tabIndex === owner.viewIds.length - 1 && (
+                  <DockTabEnd
+                    pane={owner}
+                    insertion={
+                      dropTarget?.paneId === owner.id &&
+                      dropTarget.tabIndex === owner.viewIds.length
+                    }
+                  />
+                )}
+              </Fragment>
             ))}
+            {(compact ? layout.panes : [pane])
+              .filter((owner) => owner.viewIds.length === 0)
+              .map((owner) => (
+                <DockTabEnd
+                  key={owner.id}
+                  pane={owner}
+                  insertion={
+                    dropTarget?.paneId === owner.id && dropTarget.tabIndex === owner.viewIds.length
+                  }
+                />
+              ))}
           </SortableContext>
         </div>
       </div>
       {dragging && (
         <div className="dock-drop-overlay">
-          <DockDropZone paneId={pane.id} externalOver={externalOver} />
+          <DockDropZone paneId={pane.id} dropTarget={dropTarget} />
           {edges.map((edge) => (
-            <DockDropZone key={edge} paneId={pane.id} edge={edge} externalOver={externalOver} />
+            <DockDropZone key={edge} paneId={pane.id} edge={edge} dropTarget={dropTarget} />
           ))}
         </div>
       )}
@@ -564,6 +723,8 @@ function DockTab({
   onClose,
   onPin,
   closing,
+  insertion,
+  menu,
 }: {
   view: DockView;
   pane: DockPane;
@@ -576,95 +737,234 @@ function DockTab({
   onClose: () => void;
   closing: boolean;
   onPin?: () => void;
+  insertion: boolean;
+  menu: ReactNode;
 }) {
   const { active } = useDndContext();
-  const { setNodeRef, attributes, listeners, isDragging } = useSortable({
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, isDragging } = useSortable({
     id: `view:${view.id}`,
     data: { type: "dock-tab", viewId: view.id, paneId: pane.id, index },
   });
-  const tabRef = useRef<HTMLButtonElement | null>(null);
+  const groupRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (selected) tabRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    if (selected) groupRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [selected]);
   return (
-    <div
-      className="dock-tab-group"
-      data-conversation-drop-pane={pane.id}
-      data-conversation-drop-index={index}
-    >
-      <button
-        type="button"
-        ref={(node) => {
-          tabRef.current = node;
-          setNodeRef(node);
-        }}
-        {...attributes}
-        {...listeners}
-        role="tab"
-        id={`${prefix}-tab-${view.id}`}
-        aria-controls={`${prefix}-view-${view.id}`}
-        aria-selected={selected}
-        tabIndex={selected ? 0 : -1}
-        className="dock-tab"
-        data-dragging={isDragging}
-        onClick={onSelect}
-        onKeyDown={(event) => {
-          if (!active && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-            event.preventDefault();
-            onStep(event.key === "ArrowLeft" ? -1 : 1, event.altKey);
-          } else listeners?.onKeyDown?.(event);
-        }}
-      >
-        <WorkbenchViewIcon kind={view.kind} />
-        <span className="dock-tab-label">{view.title}</span>
-      </button>
-      {onPin && (
-        <TooltipButton
-          type="button"
-          className="dock-tab-pin"
-          aria-label={`${pinned ? "Unpin" : "Pin"} ${view.title}`}
-          aria-pressed={pinned}
-          tooltip={pinned ? "Return to this chat’s layout" : "Keep open across chats"}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onPin();
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={!!active}>
+        <div
+          ref={(node) => {
+            groupRef.current = node;
+            setNodeRef(node);
           }}
+          className="dock-tab-group"
+          data-insertion={insertion}
+          data-conversation-drop-pane={pane.id}
+          data-conversation-drop-index={index}
         >
-          {pinned ? <PinOff size={14} /> : <Pin size={14} />}
-        </TooltipButton>
-      )}
-      <button
-        type="button"
-        className="dock-tab-close"
-        aria-label={`Close ${view.title}`}
-        disabled={closing}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onClose();
-        }}
-      >
-        <X size={14} />
-      </button>
-    </div>
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            role="tab"
+            id={`${prefix}-tab-${view.id}`}
+            aria-controls={`${prefix}-view-${view.id}`}
+            aria-selected={selected}
+            tabIndex={selected ? 0 : -1}
+            className="dock-tab"
+            data-dragging={isDragging}
+            onClick={onSelect}
+            onKeyDown={(event) => {
+              if (!active && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+                event.preventDefault();
+                onStep(event.key === "ArrowLeft" ? -1 : 1, event.altKey);
+              } else if (
+                !active &&
+                (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+              ) {
+                event.preventDefault();
+                const bounds = event.currentTarget.getBoundingClientRect();
+                event.currentTarget.dispatchEvent(
+                  new MouseEvent("contextmenu", {
+                    bubbles: true,
+                    clientX: bounds.left,
+                    clientY: bounds.bottom,
+                  }),
+                );
+              } else listeners?.onKeyDown?.(event);
+            }}
+          >
+            <WorkbenchViewIcon kind={view.kind} />
+            <span className="dock-tab-label">{view.title}</span>
+          </button>
+          {(onPin || pinned) && (
+            <TooltipButton
+              type="button"
+              className="dock-tab-pin"
+              aria-label={`${pinned ? "Unpin" : "Pin"} ${view.title}`}
+              aria-pressed={pinned}
+              disabled={!onPin}
+              tooltip={pinned ? "Return to this chat’s layout" : "Keep open across chats"}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPin?.();
+              }}
+            >
+              <Pin size={14} fill={pinned ? "currentColor" : "none"} />
+            </TooltipButton>
+          )}
+          <button
+            type="button"
+            className="dock-tab-close"
+            aria-label={`Close ${view.title}`}
+            disabled={closing}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>{menu}</ContextMenuContent>
+    </ContextMenu>
   );
+}
+
+function DockViewMenuItems({
+  pane,
+  layout,
+  viewId,
+  closing,
+  onClose,
+  onLayoutChange,
+  pinned,
+  onPin,
+}: {
+  pane: DockPane;
+  layout: DockLayout;
+  viewId: string;
+  closing: boolean;
+  onClose: () => void;
+  onLayoutChange: DockWorkspaceProps["onLayoutChange"];
+  pinned: boolean;
+  onPin?: () => void;
+}) {
+  const index = pane.viewIds.indexOf(viewId);
+  const move = (paneId: string, edge?: SplitEdge, targetIndex?: number) =>
+    onLayoutChange((current) =>
+      moveDockView(current, viewId, { paneId, edge, index: targetIndex }),
+    );
+  return (
+    <>
+      <ContextMenuItem disabled={index <= 0} onSelect={() => move(pane.id, undefined, index - 1)}>
+        Move tab left
+      </ContextMenuItem>
+      <ContextMenuItem
+        disabled={index === pane.viewIds.length - 1}
+        onSelect={() => move(pane.id, undefined, index + 1)}
+      >
+        Move tab right
+      </ContextMenuItem>
+      {edges.map((edge) => (
+        <ContextMenuItem
+          key={edge}
+          disabled={pane.viewIds.length < 2}
+          onSelect={() => move(pane.id, edge)}
+        >
+          Split {edge}
+        </ContextMenuItem>
+      ))}
+      {layout.panes
+        .filter((target) => target.id !== pane.id)
+        .map((target) => (
+          <ContextMenuItem key={target.id} onSelect={() => move(target.id)}>
+            Move to{" "}
+            {layout.views.find((view) => view.id === target.selectedViewId)?.title ?? target.id}
+          </ContextMenuItem>
+        ))}
+      {onPin && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={onPin}>
+            {pinned ? "Unpin from shared area" : "Keep open across chats"}
+          </ContextMenuItem>
+        </>
+      )}
+      <ContextMenuSeparator />
+      <ContextMenuItem disabled={closing} onSelect={onClose}>
+        Close view
+      </ContextMenuItem>
+    </>
+  );
+}
+
+function DockTabEnd({ pane, insertion }: { pane: DockPane; insertion: boolean }) {
+  const { setNodeRef } = useDroppable({
+    id: `tabbar:${pane.id}`,
+    data: { type: "dock-tabbar", paneId: pane.id, index: pane.viewIds.length },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className="dock-tab-end"
+      data-insertion={insertion}
+      data-conversation-drop-pane={pane.id}
+      data-conversation-drop-index={pane.viewIds.length}
+    />
+  );
+}
+
+function DockPlacementPreview({
+  layout,
+  target,
+  compact,
+  external,
+  externalViewId,
+}: {
+  layout: DockLayout;
+  target: DockDropTarget | null;
+  compact: boolean;
+  external: boolean;
+  externalViewId?: string;
+}) {
+  const { active } = useDndContext();
+  if (!target) return null;
+  const rect = compact
+    ? fullRect
+    : projectedDockRect(layout, target, external ? externalViewId : active?.data.current?.viewId);
+  return rect ? (
+    <FileDropSurface
+      appearance="placement"
+      className="dock-placement-preview"
+      data-pane-id={target.paneId}
+      data-edge={target.edge ?? "center"}
+      style={rectStyle(rect)}
+      aria-hidden="true"
+    />
+  ) : null;
 }
 
 function DockDropZone({
   paneId,
   edge,
-  externalOver,
+  dropTarget,
 }: {
   paneId: string;
   edge?: SplitEdge;
-  externalOver: string | null;
+  dropTarget: DockDropTarget | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `drop:${paneId}:${edge ?? "center"}`,
     data: { type: "dock-drop", paneId, edge },
   });
-  const over = isOver || externalOver === `${paneId}:${edge ?? "center"}`;
+  const over =
+    isOver ||
+    (dropTarget?.paneId === paneId && dropTarget.edge === edge && dropTarget.index === undefined);
   return (
     <div
       ref={setNodeRef}
@@ -672,9 +972,7 @@ function DockDropZone({
       data-conversation-drop-pane={paneId}
       data-edge={edge ?? "center"}
       data-over={over}
-    >
-      {over && (edge ? `Split ${edge}` : "Add to tab group")}
-    </div>
+    />
   );
 }
 
@@ -690,6 +988,11 @@ function DockDivider({
   onCommit: () => void;
 }) {
   const { axis, area, ratio } = divider;
+  const [resizing, setResizing] = useState(false);
+  const commit = () => {
+    setResizing(false);
+    onCommit();
+  };
   const columns = axis === "columns";
   const offset = columns ? area.left + area.width * ratio : area.top + area.height * ratio;
   return (
@@ -702,6 +1005,7 @@ function DockDivider({
       aria-valuenow={Math.round(ratio * 100)}
       tabIndex={0}
       className="dock-divider"
+      data-resizing={resizing}
       style={
         columns
           ? {
@@ -722,6 +1026,7 @@ function DockDivider({
       onPointerDown={(event) => {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
+        setResizing(true);
       }}
       onPointerMove={(event) => {
         if (!event.currentTarget.hasPointerCapture(event.pointerId) || !containerRef.current)
@@ -738,9 +1043,9 @@ function DockDivider({
           false,
         );
       }}
-      onPointerUp={onCommit}
-      onPointerCancel={onCommit}
-      onLostPointerCapture={onCommit}
+      onPointerUp={commit}
+      onPointerCancel={commit}
+      onLostPointerCapture={commit}
       onKeyDown={(event) => {
         const step = columns
           ? { ArrowLeft: -1, ArrowRight: 1 }[event.key]

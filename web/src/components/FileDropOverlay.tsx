@@ -2,7 +2,26 @@
 // the region that accepts the drop. pointer-events-none keeps it out of the way.
 
 import { createPortal } from "react-dom";
+import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
+
+/** One drop treatment for file targets and projected workspace placement. */
+export function FileDropSurface({
+  appearance = "outline",
+  className,
+  ...props
+}: ComponentProps<"div"> & { appearance?: "outline" | "placement" }) {
+  return (
+    <div
+      className={cn(
+        "pointer-events-none absolute border-2 border-ring",
+        appearance === "outline" ? "border-dashed" : "bg-ring/12",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
 export function FileDropOverlay({
   container,
@@ -24,7 +43,7 @@ export function FileDropOverlay({
       )}
       data-testid="file-drop-overlay"
     >
-      <div className="absolute inset-3 rounded-2xl border-2 border-dashed border-ring" />
+      <FileDropSurface className="inset-3 rounded-2xl" />
       <span className="max-w-[calc(100%-3rem)] truncate rounded-full border border-border bg-card px-4 py-2 text-ui font-medium text-ring shadow-composer">
         {label}
       </span>

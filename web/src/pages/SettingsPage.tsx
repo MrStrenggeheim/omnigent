@@ -6,7 +6,6 @@ import {
   useListDensity,
   writeListDensity,
 } from "@/lib/listDensityPreferences";
-import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import { TooltipButton } from "@/components/ui/tooltip";
 import { toast } from "@/lib/notifications";
 import { DefaultModelSettings } from "./settings/DefaultModelSettings";
@@ -977,27 +976,55 @@ function ListDensityControl() {
   const density = useListDensity();
   const labelId = useId();
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4">
-      <SettingsLabel
-        label="List density"
-        labelId={labelId}
-        description="Adjust navigation and list spacing without changing text size."
+    <ThemeSubsection
+      title="List density"
+      labelId={labelId}
+      helper="Adjust navigation and list spacing without changing text size."
+    >
+      <CardRadioGroup
+        labelledBy={labelId}
+        value={density}
+        onSelect={writeListDensity}
+        componentId="settings.appearance.list_density"
+        className="grid grid-cols-2 gap-3"
+        cardClassName="gap-3 p-3"
+        items={[...listDensities].reverse().map((value) => {
+          const rowHeight = value === "compact" ? 36 : 48;
+          return {
+            value,
+            testId: `list-density-${value}`,
+            body: (
+              <>
+                <div
+                  aria-hidden
+                  className="h-36 w-full overflow-hidden rounded-lg border border-border bg-background px-2"
+                >
+                  {[0, 1, 2].map((row) => (
+                    <div
+                      key={row}
+                      className="flex items-center gap-2"
+                      style={{ height: rowHeight }}
+                    >
+                      <span className="size-3 shrink-0 rounded bg-muted-foreground/20" />
+                      <span
+                        className={cn(
+                          "h-2 rounded bg-muted-foreground/20",
+                          row === 1 ? "w-1/2" : "w-2/3",
+                        )}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <span className="text-ui font-medium">
+                  {value === "compact" ? "Compact" : "Comfortable"}
+                </span>
+                <span className="text-sm text-muted-foreground">{rowHeight}px rows</span>
+              </>
+            ),
+          };
+        })}
       />
-      <SegmentedControl aria-labelledby={labelId} className="h-auto min-h-11">
-        {listDensities.map((value) => (
-          <SegmentedControlItem
-            key={value}
-            label={value === "compact" ? "Compact" : "Comfortable"}
-            active={density === value}
-            className="min-h-11"
-            onClick={() => writeListDensity(value)}
-            data-testid={`list-density-${value}`}
-          >
-            {value === "compact" ? "Compact" : "Comfortable"}
-          </SegmentedControlItem>
-        ))}
-      </SegmentedControl>
-    </div>
+    </ThemeSubsection>
   );
 }
 

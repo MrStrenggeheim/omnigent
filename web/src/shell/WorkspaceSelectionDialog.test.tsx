@@ -1,21 +1,25 @@
 import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { Host } from "@/hooks/useHosts";
 import {
   WorkspaceSelectionDialog,
   type WorkspaceSelectionHandler,
 } from "./WorkspaceSelectionDialog";
 import { WorkspaceSelector } from "./WorkspaceSelector";
 
-const state = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn() }));
+const state = vi.hoisted(() => ({
+  list: vi.fn(),
+  create: vi.fn(),
+  hosts: [] as Host[],
+  hostOptions: vi.fn(),
+}));
 vi.mock("@/hooks/useHosts", () => ({
-  useHosts: () => ({
-    data: [
-      { host_id: "a", name: "Host A", status: "online" },
-      { host_id: "b", name: "Host B", status: "online" },
-      { host_id: "c", name: "Offline host", status: "offline" },
-    ],
-  }),
+  useHosts: (options: unknown) => {
+    state.hostOptions(options);
+    return { data: state.hosts };
+  },
 }));
 vi.mock("@/hooks/useHostFilesystem", () => ({
   useHostFilesystem: (host: string, path: string) => state.list(host, path),
@@ -27,6 +31,12 @@ vi.mock("@/hooks/useHostWorktrees", () => ({
 }));
 beforeEach(() => {
   localStorage.clear();
+  state.hosts = [
+    { host_id: "a", name: "Host A", status: "online", owner: "owner" },
+    { host_id: "b", name: "Host B", status: "online", owner: "owner" },
+    { host_id: "c", name: "Offline host", status: "offline", owner: "owner" },
+  ];
+  state.hostOptions.mockClear();
   state.list.mockImplementation((host, path) => ({
     data: {
       entries: [{ name: "child", path: `${path || `/home/${host}`}/child`, type: "directory" }],
@@ -59,7 +69,8 @@ function mount(onConfirm: WorkspaceSelectionHandler = vi.fn(), extra = {}) {
       </>
     );
   }
-  return render(<Harness />);
+  const view = render(<Harness />);
+  return { ...view, refresh: () => view.rerender(<Harness />) };
 }
 
 it("preselects the current host, focuses the editable path, and limits the footer to two actions", async () => {
@@ -141,6 +152,50 @@ it("keeps typed drafts per host and confirms the selected host", async () => {
   await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ hostId: "b", path: "/home/b" }));
 });
 
+it("adds hosts directly below the list and preserves an invalid draft during setup and live refresh", async () => {
+  const onConfirm = vi.fn();
+  const view = mount(onConfirm);
+  const path = screen.getByRole("textbox", { name: "Current folder path" });
+  fireEvent.change(path, { target: { value: "unfinished draft" } });
+  const addHost = screen.getByRole("button", { name: "Add host…" });
+  const lastHost = screen.getByRole("button", { name: /Offline host/ });
+  expect(lastHost.compareDocumentPosition(addHost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await userEvent.click(addHost);
+  const setup = screen.getByRole("dialog", { name: "Connect a host" });
+  expect(within(setup).getByTestId("connect-host-command")).toBeVisible();
+  expect(state.hostOptions).toHaveBeenLastCalledWith({ refetchOnFocus: true });
+  state.hosts = [
+    { host_id: "new", name: "New host", status: "online", owner: "owner" },
+    ...state.hosts,
+  ];
+  view.refresh();
+  await userEvent.click(within(setup).getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("dialog", { name: "Select workspace" })).toBeVisible();
+  expect(screen.getByRole("button", { name: /New host/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Host A/ })).toHaveAttribute("aria-pressed", "true");
+  expect(path).toHaveValue("unfinished draft");
+  await waitFor(() => expect(addHost).toHaveFocus());
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
+it("offers Add host with no hosts and waits for an explicit selection after discovery", () => {
+  state.hosts = [];
+  const view = mount(vi.fn(), { hostId: null });
+  expect(screen.getByRole("button", { name: "Use workspace" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Add host…" }));
+  const setup = screen.getByRole("dialog", { name: "Connect a host" });
+  expect(within(setup).getByTestId("connect-host-command")).toBeVisible();
+  state.hosts = [{ host_id: "new", name: "New host", status: "online", owner: "owner" }];
+  view.refresh();
+  fireEvent.click(within(setup).getByRole("button", { name: "Close" }));
+  const host = screen.getByRole("button", { name: /New host/ });
+  expect(host).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", { name: "Use workspace" })).toBeDisabled();
+  fireEvent.click(host);
+  expect(host).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Use workspace" })).toBeEnabled();
+});
+
 it("never lets a cancelled opening close a later opening when its owner finishes", async () => {
   let finish!: () => void;
   mount(
@@ -159,6 +214,7 @@ it("never lets a cancelled opening close a later opening when its owner finishes
 it("supports a fixed execution host and a cloud target without forcing host selection", () => {
   const view = mount(vi.fn(), { allowHostChange: false });
   expect(screen.queryByRole("button", { name: /Host B/ })).toBeNull();
+  expect(screen.getByRole("button", { name: "Add host…" })).toBeVisible();
   view.unmount();
   mount(vi.fn(), {
     hostId: null,
@@ -167,6 +223,20 @@ it("supports a fixed execution host and a cloud target without forcing host sele
   });
   expect(screen.getByText("Created when the runner starts")).toBeVisible();
   expect(screen.getByText("Cloud runner")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Add host…" })).toBeVisible();
+});
+
+it("dismisses setup with Escape without dismissing the workspace picker or its path draft", async () => {
+  mount();
+  const path = screen.getByRole("textbox", { name: "Current folder path" });
+  fireEvent.change(path, { target: { value: "/draft" } });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Add host…" }));
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Connect a host" })).toBeNull();
+  expect(screen.getByRole("dialog", { name: "Select workspace" })).toBeVisible();
+  expect(path).toHaveValue("/draft");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add host…" })).toHaveFocus());
 });
 
 it("uses one borderless host/path trigger with a chevron", () => {
@@ -175,7 +245,7 @@ it("uses one borderless host/path trigger with a chevron", () => {
   const trigger = screen.getByRole("button", { name: "Select workspace: Host A:/work" });
   expect(trigger).toHaveClass("border-0");
   expect(trigger.querySelectorAll("svg")).toHaveLength(2);
-  expect(trigger).toHaveTextContent("Host A:/work");
+  expect(trigger).toHaveTextContent("Host A · /work");
   fireEvent.click(trigger);
   expect(onClick).toHaveBeenCalledOnce();
 });

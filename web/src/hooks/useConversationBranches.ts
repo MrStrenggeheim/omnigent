@@ -2,13 +2,18 @@ import { createContext, useCallback, useEffect, useMemo } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authenticatedFetch } from "@/lib/identity";
 import { apiErrorFromResponse } from "@/lib/sessionsApi";
-import { branchSource, type BranchConversation } from "@/lib/conversationBranches";
+import {
+  branchDescendantCounts,
+  branchSource,
+  type BranchConversation,
+} from "@/lib/conversationBranches";
 import { useResourceViewState } from "@/lib/panelFolder";
 import { resourceViewStorageScope } from "@/lib/resourceViewStorage";
 import type { Conversation, ConversationsPage } from "./useConversations";
 
 export interface SidebarBranchState {
   rows: readonly Conversation[];
+  descendantCounts: ReadonlyMap<string, number> | null;
   expanded: ReadonlySet<string>;
   toggle: (id: string) => void;
   loading: boolean;
@@ -118,7 +123,7 @@ export function useConversationBranches({
     },
     getNextPageParam: (page) => (page.has_more && page.last_id ? page.last_id : undefined),
   });
-  // Prefetch at most 2,000 authorized metadata rows without loading histories.
+  // Exhaust the authorized, filtered metadata graph without loading histories.
   const { data, hasNextPage, isFetching, isError, fetchNextPage } = query;
   useEffect(() => {
     const pages = data?.pages ?? [];
@@ -128,7 +133,6 @@ export function useConversationBranches({
       hasNextPage &&
       !isFetching &&
       !isError &&
-      pages.length < 20 &&
       cursor &&
       !data?.pageParams.includes(cursor)
     ) {
@@ -159,6 +163,12 @@ export function useConversationBranches({
     for (const row of rows) result.set(row.id, row);
     return [...result.values()];
   }, [query.data, lineage.data, rows]);
+  // Never present a loaded-page count as the total. Retained pages keep counts stable on refresh.
+  const descendantCounts = useMemo(
+    () =>
+      query.data?.pages.at(-1)?.has_more === false ? branchDescendantCounts(branchRows) : null,
+    [query.data, branchRows],
+  );
   const toggle = useCallback(
     (id: string) =>
       setExpanded((previous) => {
@@ -171,6 +181,7 @@ export function useConversationBranches({
   );
   return {
     rows: branchRows,
+    descendantCounts,
     ancestors: lineage.data ?? [],
     expanded,
     toggle,

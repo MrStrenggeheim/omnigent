@@ -17,22 +17,40 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Native scrollers share the product's slim, neutral treatment. Explicit
- * transcript/editor scrollbar rules keep their own presentation. */
-:where(*) {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--foreground) 24%, transparent) transparent;
+/* OverlayScrollbars owns native UI scroll surfaces. Editors and terminals
+ * retain their specialized scrollbars; composers and tab strips stay barless. */
+:is(
+  [data-overlay-scroll-surface],
+  [data-composer-card],
+  [data-composer-card] *,
+  .chat-composer-form,
+  .chat-composer-form *,
+  .composer-input-text,
+  .composer-input-text *,
+  [role="tablist"],
+  [role="tablist"] *,
+  [data-scrollbar="hidden"],
+  [data-scrollbar="hidden"] *
+) {
+  scrollbar-width: none !important;
+  scrollbar-gutter: auto !important;
 }
-:where(*)::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-:where(*)::-webkit-scrollbar-track {
-  background: transparent;
-}
-:where(*)::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--foreground) 24%, transparent);
-  border-radius: 999px;
+:is(
+  [data-overlay-scroll-surface],
+  [data-composer-card],
+  [data-composer-card] *,
+  .chat-composer-form,
+  .chat-composer-form *,
+  .composer-input-text,
+  .composer-input-text *,
+  [role="tablist"],
+  [role="tablist"] *,
+  [data-scrollbar="hidden"],
+  [data-scrollbar="hidden"] *
+)::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 @theme inline {
@@ -1410,7 +1428,7 @@ html[data-electron-mac] .breadcrumb-folder {
   --diffs-font-features: "liga" 0, "calt" 0;
 }
 
-/* The transcript draws its own constant-height scrollbar (TranscriptScrollbar);
+/* The transcript draws its own proportional scrollbar (TranscriptScrollbar);
  * hide the native one so both don't show. */
 .transcript-hide-native-scrollbar {
   scrollbar-width: none;

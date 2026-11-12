@@ -6,10 +6,12 @@ import { createWorkbenchResourceShortcuts } from "./resourceShortcuts";
 import { useAcceptedConversationRoute } from "./useAcceptedConversationRoute";
 import { focusedResourceTarget } from "./resourceTarget";
 import { CapturedFileActions } from "./CapturedFileActions";
+import { OverlayScrollbars } from "@/components/OverlayScrollbars";
 import {
   AttachmentPreviewContext,
   AttachmentPreviewView,
   type AttachmentPreviewRequest,
+  type AttachmentPreviewPlacement,
 } from "@/components/ChatAttachment";
 import { conversationPlacement } from "./viewPlacement";
 import { joinBrowseLocation } from "@/lib/workspacePaths";
@@ -86,6 +88,8 @@ import { DockWorkspace, type DockViewVisibility } from "./DockWorkspace";
 import { useDockLayout } from "./useDockLayout";
 import {
   sameDockResource,
+  dockPaneForView,
+  moveDockView,
   createDockLayout,
   type DockView,
   type DockPlacement,
@@ -1130,8 +1134,26 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
           });
         }
       },
-      openAttachment: (request: AttachmentPreviewRequest) => {
+      canOpenAttachment: (request: AttachmentPreviewRequest) =>
+        dockRef.current.layout.views.some(
+          (view) =>
+            view.kind === "conversation" && view.resource.conversationId === request.sessionId,
+        ),
+      openAttachment: (
+        request: AttachmentPreviewRequest,
+        options?: { placement: AttachmentPreviewPlacement },
+      ) => {
         const current = dockRef.current;
+        const origin = current.layout.views.find(
+          (view) =>
+            view.kind === "conversation" && view.resource.conversationId === request.sessionId,
+        );
+        const originPane = origin && dockPaneForView(current.layout, origin.id);
+        if (!originPane) {
+          toast.error("The originating chat is no longer open");
+          return;
+        }
+        const placement = options?.placement ?? "beside";
         const identity = JSON.stringify([
           request.sessionId,
           request.itemId,
@@ -1141,8 +1163,20 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
         const existing = current.layout.views.find(
           (view) => view.kind === "attachment-preview" && view.resource.identity === identity,
         );
-        if (existing) current.focusView(existing.id);
-        else
+        if (existing) {
+          const pane = dockPaneForView(current.layout, existing.id);
+          if (
+            (placement === "tab" && pane?.id !== originPane.id) ||
+            (placement === "beside" && pane?.id === originPane.id)
+          )
+            current.setLayout((layout) =>
+              moveDockView(layout, existing.id, {
+                paneId: originPane.id,
+                ...(placement === "beside" ? { edge: "right" as const } : {}),
+              }),
+            );
+          else current.focusView(existing.id);
+        } else
           current.addView(
             {
               id: randomUUID(),
@@ -1154,7 +1188,10 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
                 "Attachment",
               resource: { request: JSON.parse(JSON.stringify(request)), identity },
             },
-            { paneId: current.layout.focusedPaneId ?? undefined },
+            {
+              paneId: originPane.id,
+              ...(placement === "beside" ? { edge: "right" as const } : {}),
+            },
           );
         ensureVisible();
       },
@@ -1337,6 +1374,7 @@ function WorkbenchShellBody({ accountId, active }: { accountId: string; active: 
                 <ArcaShutdownToast />
               )}
               {active && <Toaster />}
+              {active && <OverlayScrollbars />}
             </NotificationLayoutProvider>
           </ContextSearchProvider>
         </ContextReferenceNavigationContext.Provider>

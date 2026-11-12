@@ -36,57 +36,59 @@ export function WorkbenchAppBar({
 }) {
   return (
     <header
-      className="workbench-app-bar flex h-9 min-h-9 shrink-0 items-center gap-2 border-b bg-sidebar px-2"
+      className="workbench-app-bar relative flex h-9 min-h-9 shrink-0 items-center gap-2 border-b bg-sidebar px-2"
       aria-label="Application"
     >
-      <SidebarToggle
-        side="left"
-        expanded={sidebarOpen}
-        aria-label={sidebarOpen ? "Close navigation" : "Open navigation"}
-        tooltipShortcut={[MOD_KEY, "B"]}
-        onClick={onToggleSidebar}
-      />
-      <OmnigentLogo className="size-7 shrink-0" />
-      <span className="hidden text-base font-bold sm:block">Omnigent</span>
-      <div className="flex-1" />
+      <div className="flex min-w-0 items-center gap-2">
+        <SidebarToggle
+          side="left"
+          expanded={sidebarOpen}
+          aria-label={sidebarOpen ? "Close navigation" : "Open navigation"}
+          tooltipShortcut={[MOD_KEY, "B"]}
+          onClick={onToggleSidebar}
+        />
+        <OmnigentLogo className="size-7 shrink-0" />
+        <span className="hidden text-base font-bold sm:block">Omnigent</span>
+      </div>
       <Button
         variant="outline"
         size="sm"
         onClick={onSearch}
-        className="h-6 min-w-0 gap-2 text-muted-foreground max-md:size-11 max-md:p-0 md:w-[min(34vw,30rem)] md:justify-start"
+        className="absolute left-1/2 h-6 min-w-0 -translate-x-1/2 gap-2 text-muted-foreground max-md:size-11 max-md:p-0 md:w-[min(34vw,30rem)] md:justify-start"
         aria-label="Search or run a command"
         data-workbench-search
       >
         <SearchIcon className="size-3.5" />
         <span className="hidden truncate md:block">Search or run a command…</span>
       </Button>
-      <div className="flex-1" />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="default"
-            size="sm"
-            className="h-8 gap-1.5 px-4 text-primary-foreground max-md:h-11"
-            aria-label="Open view"
-          >
-            <PlusIcon className="size-4" />
-            <span className="hidden md:inline">Open</span>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Open</DropdownMenuLabel>
-          {openActions.map((action) => (
-            <DropdownMenuItem key={action.id} disabled={action.disabled} onSelect={action.run}>
-              <action.icon className="size-4" />
-              {action.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <NotificationBell />
-      <HeaderActionButton aria-label="Settings" onClick={onSettings}>
-        <SettingsIcon className="size-4" />
-      </HeaderActionButton>
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="default"
+              size="sm"
+              className="h-8 gap-1.5 px-4 text-primary-foreground max-md:h-11"
+              aria-label="Open view"
+            >
+              <PlusIcon className="size-4" />
+              <span className="hidden md:inline">Open</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Open</DropdownMenuLabel>
+            {openActions.map((action) => (
+              <DropdownMenuItem key={action.id} disabled={action.disabled} onSelect={action.run}>
+                <action.icon className="size-4" />
+                {action.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <NotificationBell />
+        <HeaderActionButton aria-label="Settings" onClick={onSettings}>
+          <SettingsIcon className="size-4" />
+        </HeaderActionButton>
+      </div>
     </header>
   );
 }

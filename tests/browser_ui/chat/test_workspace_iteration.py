@@ -107,10 +107,26 @@ def test_inline_attachment_opens_captured_tab_downloads_and_reveals_original_wor
     reference.click()
     preview = _view(page, "guide.md")
     expect(preview.get_by_text("Original captured guide", exact=True)).to_be_visible()
+    expect(chat.get_by_label("Message the agent")).to_be_visible()
+    chat_bounds = chat.bounding_box()
+    preview_bounds = preview.bounding_box()
+    assert chat_bounds and preview_bounds
+    assert preview_bounds["x"] >= chat_bounds["x"] + chat_bounds["width"] - 1
     expect(page.get_by_role("dialog")).to_have_count(0)
     with page.expect_download() as download:
         preview.get_by_role("button", name="Download guide.md", exact=True).click()
     assert Path(download.value.path()).read_text() == content
+    reference.click(button="right")
+    page.get_by_role("menuitem", name="Open in modal", exact=True).click()
+    modal = page.get_by_role("dialog", name="guide.md", exact=True)
+    expect(modal).to_be_visible()
+    modal_bounds = modal.bounding_box()
+    assert modal_bounds and modal_bounds["width"] > 700
+    modal.get_by_role("button", name="Close", exact=True).click()
+    reference.click(button="right")
+    page.get_by_role("menuitem", name="Open as tab", exact=True).click()
+    expect(preview.get_by_text("Original captured guide", exact=True)).to_be_visible()
+    expect(chat).to_be_hidden()
     _navigate_chat(page, second)
     expect(preview).to_be_hidden()
     _navigate_chat(page, first)

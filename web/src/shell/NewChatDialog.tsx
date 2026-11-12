@@ -72,7 +72,6 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,7 +103,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MenuItem } from "@/components/ui/menu-item";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { authenticatedFetch, getCurrentUserId, resolveIdentity } from "@/lib/identity";
 import { backgroundSessionTitlesRequestHeaders } from "@/lib/backgroundSessionTitlesPreferences";
 import { fetchGithubBranches, fetchGithubRepos, type GithubRepo } from "@/lib/githubIntegration";
@@ -158,7 +156,7 @@ import { appendPromptHistoryEntry } from "@/hooks/usePromptHistory";
 import { useIsCoarsePointer } from "@/hooks/useIsCoarsePointer";
 import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { useModelPickerHotkey } from "@/hooks/useModelPickerHotkey";
-import { CliCommandBlock, renderTextWithInlineCode } from "./CliCommandBlock";
+import { renderTextWithInlineCode } from "./CliCommandBlock";
 import { isHostAbsolutePath, isNavigablePath } from "./WorkspacePicker";
 import { WorkspaceSelectionDialog } from "./WorkspaceSelectionDialog";
 import { WorkspaceSelector } from "./WorkspaceSelector";
@@ -175,8 +173,7 @@ import {
   type ProjectPrefillConfig,
   type ProjectPrefillState,
 } from "./projectPrefill";
-import { getCliServerUrl, getOmnigentHostConfig } from "@/lib/host";
-import { quoteShellArgument } from "@/lib/shell";
+import { getOmnigentHostConfig } from "@/lib/host";
 import { readLastAgentId, writeLastAgentId } from "@/lib/agentPreferences";
 import { readDefaultAgentId } from "@/lib/defaultAgentPreferences";
 import {
@@ -517,61 +514,6 @@ function ConnectingText({ className }: { className?: string }) {
     <span className={className}>
       Connecting<span className="animate-pulse">…</span>
     </span>
-  );
-}
-
-export function ConnectHostInstructions({
-  serverUrl,
-  label,
-}: {
-  serverUrl: string;
-  label?: string;
-}) {
-  // Databricks/internal deployments add the "Databricks Lakebox" connect
-  // path; OSS deployments (where the lakebox launcher is excluded) show
-  // only the plain `omni host` command. Driven by /v1/info.
-  const info = useServerInfo();
-  // "loading" before the boot probe resolves → treat as OSS (no Databricks
-  // hints) until known, so the clean UI shows first and lakebox never flashes.
-  const databricksFeatures = info !== "loading" && info.databricks_features;
-  const quotedServerUrl = quoteShellArgument(serverUrl);
-  return (
-    <div className="flex flex-col gap-4 rounded-lg border border-dashed border-border p-4">
-      {label && <p className="text-sm text-muted-foreground">{label}</p>}
-      {databricksFeatures ? (
-        <Tabs defaultValue="local" componentId="new_chat.host_tabs">
-          <TabsList className="w-full">
-            <TabsTrigger value="local" className="text-sm">
-              Local machine
-            </TabsTrigger>
-            <TabsTrigger value="lakebox" className="text-sm">
-              Databricks Lakebox
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="local">
-            <CliCommandBlock
-              command={`omni host --server ${quotedServerUrl}`}
-              testIdPrefix="connect-host"
-            />
-          </TabsContent>
-          <TabsContent value="lakebox" className="flex flex-col gap-1.5">
-            <CliCommandBlock
-              command="omni sandbox create --provider lakebox"
-              testIdPrefix="connect-lakebox-create"
-            />
-            <CliCommandBlock
-              command={`omni sandbox connect --provider lakebox --sandbox-id <id> --server ${quotedServerUrl}`}
-              testIdPrefix="connect-lakebox-connect"
-            />
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <CliCommandBlock
-          command={`omni host --server ${quotedServerUrl}`}
-          testIdPrefix="connect-host"
-        />
-      )}
-    </div>
   );
 }
 
@@ -2196,7 +2138,6 @@ export function NewChatLandingScreen() {
   const { trackClick } = useOmnigentAnalytics();
   const heading = useHeading();
   const poweredBy = usePoweredBy();
-  const serverUrl = getCliServerUrl();
 
   // Project driving this visit, when the sidebar's per-project "new session"
   // pencil landed here with a `?project=` query param. Empty otherwise.
@@ -2720,8 +2661,6 @@ export function NewChatLandingScreen() {
   const createAttemptRef = useRef<symbol | null>(null);
   const skipDbcertCheckRef = useRef<(() => void) | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
-  // "Connect a host" instructions modal, opened from the host dropdown.
-  const [connectOpen, setConnectOpen] = useState(false);
   const [offlineHostLimit, setOfflineHostLimit] = useState(0);
   // Harness "Set up" dialog target, opened from the composer notice or a picker
   // row; null when closed. One dialog serves every entry point.
@@ -6452,18 +6391,6 @@ export function NewChatLandingScreen() {
             )}
           </>
         )}
-        <DropdownMenuSeparator />
-        {/* Persistent escape hatch: open the connect-a-host
-                    instructions. Present even with zero hosts so a fresh user
-                    is never stuck. */}
-        <DropdownMenuItem
-          onSelect={() => setConnectOpen(true)}
-          data-testid="new-chat-landing-connect-host"
-          className="composer-host-connect text-muted-foreground"
-        >
-          <PlusIcon className="size-4" />
-          Connect new host
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -7569,20 +7496,6 @@ export function NewChatLandingScreen() {
           </div>
         </footer>
       ) : null}
-
-      {/* Connect-host instructions, reachable from the host dropdown even when
-          no hosts are online — the zero-host escape hatch. */}
-      <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
-        <DialogContent className="sm:max-w-lg" data-testid="connect-host-dialog">
-          <DialogHeader>
-            <DialogTitle>Connect a host</DialogTitle>
-          </DialogHeader>
-          <ConnectHostInstructions
-            serverUrl={serverUrl}
-            label="Run this on the machine you want to use, then pick it from the host menu:"
-          />
-        </DialogContent>
-      </Dialog>
 
       {/* Harness "Set up" dialog — the single home for install/login (and later
           API key / gateway) setup, opened from the composer notice or a picker

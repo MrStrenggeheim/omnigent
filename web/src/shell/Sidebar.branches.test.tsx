@@ -136,21 +136,32 @@ it("uses trailing parent-only count/disclosure without reserving a leading root 
   renderTree();
   const expand = await screen.findByRole("button", { name: "Expand subchats of root" });
   const root = screen.getByRole("link", { name: "root" }).closest("li")!;
-  expect(expand).toHaveTextContent("1");
+  expect(expand).toHaveTextContent("4");
+  expect(expand).toHaveClass(
+    "cursor-pointer",
+    "hover:bg-[color-mix(in_srgb,var(--foreground)_6%,var(--workspace-hover-on-chrome))]",
+  );
   expect(root.lastElementChild).toBe(expand);
   expect(root.style.paddingInlineStart).toContain("0 * var(--sidebar-tree-indent, 10px)");
   expect(screen.queryByText("Conversations")).toBeNull();
+  expect(document.querySelector(".sidebar-header-row")).toBeNull();
+  expect(screen.getByTestId("new-chat-button")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Projects" })).toBeInTheDocument();
   fireEvent.click(expand);
   const child = await screen.findByRole("link", { name: "one" });
   expect(child.closest("li")!.style.paddingInlineStart).toContain(
     "1 * var(--sidebar-tree-indent, 10px)",
   );
+  expect(screen.queryByRole("link", { name: "two" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Expand subchats of one" })).toHaveTextContent("3");
+  const guide = child.closest("li")!.querySelector("[data-sidebar-tree-guide]")!;
+  expect(guide).toHaveClass("w-px", "bg-border", "pointer-events-none");
   for (const id of ["one", "two", "three"]) {
     // oxlint-disable-next-line no-await-in-loop
     fireEvent.click(await screen.findByRole("button", { name: `Expand subchats of ${id}` }));
   }
   const leaf = await screen.findByRole("link", { name: "four" });
+  expect(leaf.closest("li")!.querySelectorAll("[data-sidebar-tree-guide]")).toHaveLength(4);
   expect(within(leaf.closest("li")!).queryByRole("button", { name: /subchats/ })).toBeNull();
 });
 

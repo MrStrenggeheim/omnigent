@@ -144,7 +144,9 @@ describe("project folder header icon/chevron", () => {
       .getAllByRole("link", { name: "new session" })
       .find((link) => link.getAttribute("href") === "/?project=My%20Project")!;
     const empty = action.closest(".sidebar-row")!;
-    expect(empty.parentElement).toHaveClass("pl-6");
+    const sectionBody = empty.parentElement!.parentElement!;
+    expect(sectionBody.style.paddingInlineStart).toBe("var(--sidebar-tree-indent, 10px)");
+    expect(sectionBody.querySelector("[data-sidebar-tree-guide]")).toHaveClass("w-px", "bg-border");
     expect(empty).toHaveClass(
       "sidebar-row",
       "sidebar-compact-text",

@@ -19,7 +19,7 @@ export interface DockView {
 export interface DockPane {
   id: string;
   viewIds: string[];
-  selectedViewId: string;
+  selectedViewId: string | null;
 }
 
 export interface DockLayout {
@@ -296,8 +296,9 @@ export function parseDockLayout(value: unknown): DockLayout | undefined {
       !pane.id ||
       paneIds.has(pane.id) ||
       !Array.isArray(pane.viewIds) ||
-      !pane.viewIds.length ||
-      !pane.viewIds.includes(pane.selectedViewId)
+      (pane.viewIds.length
+        ? !pane.viewIds.includes(pane.selectedViewId)
+        : pane.selectedViewId !== null)
     )
       return undefined;
     paneIds.add(pane.id);

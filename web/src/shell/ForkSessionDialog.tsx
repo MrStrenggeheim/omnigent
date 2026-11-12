@@ -84,8 +84,8 @@ import { sandboxHostChoice, sandboxHostChoiceProvider } from "@/lib/hostPreferen
 import { resolveWorkspacePath, useResolvedHostHome } from "./WorkspacePicker";
 import { WorkspacePickerDialog } from "./WorkspacePickerDialog";
 import { WorkspacePathField } from "./WorkspacePathField";
+import { ConnectHostInstructions } from "./ConnectHostInstructions";
 import {
-  ConnectHostInstructions,
   SANDBOX_REPO_LABEL_KEY,
   composeSandboxWorkspace,
   deriveRepoName,

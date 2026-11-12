@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addDockView,
   closeDockView,
@@ -56,6 +56,7 @@ function navigationSnapshot(state: DockPersistence): string {
     ...state,
     shared: withoutTitles(state.shared),
     pins: withoutTitles(state.pins),
+    pinFrame: state.pinFrame ? withoutTitles(state.pinFrame) : undefined,
     chats: state.chats.map((chat) => ({ ...chat, layout: withoutTitles(chat.layout) })),
   });
 }
@@ -100,6 +101,12 @@ export function useDockLayout({
   const scopeKey = dockStorageKey(scope);
   const [session, setSession] = useState(() => loadSession(scopeKey, initialLayout, storage));
   const current = useRef(session);
+  const layoutCache = useRef<{ state: DockPersistence; layout: DockLayout } | null>(null);
+  const layoutFor = useCallback((state: DockPersistence) => {
+    if (layoutCache.current?.state !== state)
+      layoutCache.current = { state, layout: composeDockLayout(state) };
+    return layoutCache.current.layout;
+  }, []);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -143,12 +150,12 @@ export function useDockLayout({
   const setLayout = useCallback(
     (update: DockLayoutUpdate) => {
       commit((state) => {
-        const layout = composeDockLayout(state);
+        const layout = layoutFor(state);
         const next = typeof update === "function" ? update(layout) : update;
         return next === layout ? state : applyDockLayout(state, next);
       });
     },
-    [commit],
+    [commit, layoutFor],
   );
 
   const addView = useCallback(
@@ -262,6 +269,7 @@ export function useDockLayout({
         ...state,
         shared: replace(state.shared),
         pins: replace(state.pins),
+        pinFrame: state.pinFrame ? replace(state.pinFrame) : undefined,
         chats: state.chats.map((chat) => ({ ...chat, layout: replace(chat.layout) })),
       }));
       return true;
@@ -316,10 +324,12 @@ export function useDockLayout({
     [commit],
   );
   const state = current.current.state;
+  const layout = layoutFor(state);
+  const retainedViews = useMemo(() => retainedDockViews(state), [state]);
   return {
     scopeKey,
-    layout: composeDockLayout(state),
-    retainedViews: retainedDockViews(state),
+    layout,
+    retainedViews,
     pinnedViewIds: state.pins.views.map((view) => view.id),
     activeConversationId: state.activeConversationId,
     hasChatLayout: state.chats.some((chat) => chat.conversationId === state.activeConversationId),

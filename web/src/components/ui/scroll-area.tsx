@@ -4,6 +4,7 @@ import * as React from "react";
 import * as ScrollAreaPrimitive from "radix-ui/scroll-area";
 
 import { cn } from "@/lib/utils";
+import { ScrollbarThumb } from "@/components/ui/overlay-scrollbar";
 
 function ScrollArea({
   className,
@@ -39,15 +40,18 @@ function ScrollBar({
       data-orientation={orientation}
       orientation={orientation}
       className={cn(
-        "flex touch-none p-px transition-colors select-none data-horizontal:h-2.5 data-horizontal:flex-col data-horizontal:border-t data-horizontal:border-t-transparent data-vertical:h-full data-vertical:w-2.5 data-vertical:border-l data-vertical:border-l-transparent",
+        "flex touch-none select-none data-horizontal:h-3 data-horizontal:items-end data-horizontal:pb-0.5 data-vertical:h-full data-vertical:w-3 data-vertical:flex-col data-vertical:items-end data-vertical:pr-0.5",
         className,
       )}
       {...props}
     >
-      <ScrollAreaPrimitive.ScrollAreaThumb
-        data-slot="scroll-area-thumb"
-        className="relative flex-1 rounded-full bg-border"
-      />
+      <ScrollAreaPrimitive.ScrollAreaThumb asChild>
+        <ScrollbarThumb
+          data-slot="scroll-area-thumb"
+          orientation={orientation}
+          className="relative right-auto bottom-auto shrink-0"
+        />
+      </ScrollAreaPrimitive.ScrollAreaThumb>
     </ScrollAreaPrimitive.ScrollAreaScrollbar>
   );
 }

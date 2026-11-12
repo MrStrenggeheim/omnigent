@@ -4,7 +4,6 @@ import {
   terminalLayoutGeometry,
 } from "@/lib/terminalSplitLayout";
 import {
-  addDockView,
   createDockLayout,
   dockPaneForView,
   filterDockLayout,
@@ -14,6 +13,8 @@ import {
   type DockView,
   type SplitEdge,
 } from "./dockLayout";
+
+import { composePinnedFrame, withoutEmptyPanes } from "./pinComposition";
 
 export interface DockScope {
   accountId: string;
@@ -28,6 +29,9 @@ export interface DockPersistence {
   shared: DockLayout;
   chats: { conversationId: string; layout: DockLayout }[];
   pins: DockLayout;
+  /** Last composed topology reserves exact pinned-pane positions and sizes. */
+  pinFrame?: DockLayout;
+  pinFrameOwner?: string | null;
   pinEdge: SplitEdge;
   /** Fraction reserved for global pins. */
   pinRatio: number;
@@ -153,7 +157,18 @@ export function retainedDockViews(state: DockPersistence): DockView[] {
 export function composeDockLayout(state: DockPersistence): DockLayout {
   retainedDockViews(state);
   const pinned = new Set(state.pins.views.map((view) => view.id));
-  const local = filterDockLayout(localDockLayout(state), (view) => !pinned.has(view.id));
+  const unpinned = filterDockLayout(localDockLayout(state), (view) => !pinned.has(view.id));
+  const local = pinned.size ? withoutEmptyPanes(unpinned) : unpinned;
+  if (state.pinFrame && pinned.size) {
+    const composed = composePinnedFrame(
+      state.pinFrame,
+      state.pins,
+      local,
+      state.pinFrameOwner === state.activeConversationId,
+    );
+    const focused = state.focusedViewId && dockPaneForView(composed, state.focusedViewId);
+    return focused ? { ...composed, focusedPaneId: focused.id } : composed;
+  }
   let pins = state.pins;
   const used = new Set([...local.panes, ...pins.panes].map((pane) => pane.id));
   for (const pane of pins.panes) {
@@ -193,8 +208,9 @@ export function composeDockLayout(state: DockPersistence): DockLayout {
 export function applyDockLayout(state: DockPersistence, layout: DockLayout): DockPersistence {
   if (!parseDockLayout(layout)) throw new Error("Invalid dock layout");
   const pinned = new Set(state.pins.views.map((view) => view.id));
-  const pins = filterDockLayout(layout, (view) => pinned.has(view.id));
-  const local = filterDockLayout(layout, (view) => !pinned.has(view.id));
+  const pins = withoutEmptyPanes(filterDockLayout(layout, (view) => pinned.has(view.id)));
+  const unpinned = filterDockLayout(layout, (view) => !pinned.has(view.id));
+  const local = pins.views.length ? withoutEmptyPanes(unpinned) : unpinned;
   let pinEdge = state.pinEdge;
   let pinRatio = state.pinRatio;
   // A mixed tab group stays in its respective area; an outer split moves the reservation.
@@ -235,6 +251,8 @@ export function applyDockLayout(state: DockPersistence, layout: DockLayout): Doc
     {
       ...state,
       pins,
+      pinFrame: pins.views.length ? layout : undefined,
+      pinFrameOwner: pins.views.length ? state.activeConversationId : undefined,
       pinEdge,
       pinRatio: clampSplitRatio(pinRatio),
       focusedViewId:
@@ -270,17 +288,25 @@ export function pinDockView(
   viewId: string,
   edge: SplitEdge = state.pinEdge,
 ): DockPersistence {
-  const view = composeDockLayout(state).views.find((item) => item.id === viewId);
-  if (!view) return state;
-  const pins = addDockView(state.pins, view);
-  return { ...state, pins, pinEdge: edge };
+  const layout = composeDockLayout(state);
+  const view = layout.views.find((item) => item.id === viewId);
+  if (!view || state.pins.views.some((item) => item.id === viewId)) return state;
+  const ids = new Set([...state.pins.views.map((item) => item.id), viewId]);
+  const pins = withoutEmptyPanes(filterDockLayout(layout, (item) => ids.has(item.id)));
+  return {
+    ...state,
+    pins,
+    pinEdge: edge,
+    pinFrame: layout,
+    pinFrameOwner: state.activeConversationId,
+  };
 }
 
 export function unpinDockView(state: DockPersistence, viewId: string): DockPersistence {
-  const view = state.pins.views.find((item) => item.id === viewId);
-  if (!view) return state;
-  const pins = filterDockLayout(state.pins, (item) => item.id !== viewId);
-  return withLocal({ ...state, pins }, addDockView(localDockLayout(state), view));
+  if (!state.pins.views.some((view) => view.id === viewId)) return state;
+  const layout = composeDockLayout(state);
+  const pins = withoutEmptyPanes(filterDockLayout(state.pins, (item) => item.id !== viewId));
+  return applyDockLayout({ ...state, pins }, layout);
 }
 
 export function parseDockPersistence(raw: string): DockPersistence | undefined {
@@ -292,6 +318,12 @@ export function parseDockPersistence(raw: string): DockPersistence | undefined {
       !(value.automaticChatLayouts === undefined || value.automaticChatLayouts === true) ||
       !parseDockLayout(value.shared) ||
       !parseDockLayout(value.pins) ||
+      (value.pinFrame !== undefined && !parseDockLayout(value.pinFrame)) ||
+      !(
+        value.pinFrameOwner === undefined ||
+        value.pinFrameOwner === null ||
+        typeof value.pinFrameOwner === "string"
+      ) ||
       !Array.isArray(value.chats) ||
       !["left", "right", "top", "bottom"].includes(value.pinEdge) ||
       !Number.isFinite(value.pinRatio) ||
@@ -312,7 +344,24 @@ export function parseDockPersistence(raw: string): DockPersistence | undefined {
         return undefined;
       ids.add(chat.conversationId);
     }
-    retainedDockViews(value);
+    const retained = new Map(retainedDockViews(value).map((view) => [view.id, view]));
+    if (value.pinFrame) {
+      if (
+        value.pinFrame.views.some(
+          (view) => !retained.has(view.id) || !sameDockResource(view, retained.get(view.id)!),
+        )
+      )
+        return undefined;
+      if (
+        value.pins.views.some(
+          (pin) =>
+            !value.pinFrame!.views.some(
+              (view) => view.id === pin.id && sameDockResource(view, pin),
+            ),
+        )
+      )
+        return undefined;
+    }
     return migrateDockChatLayouts(value);
   } catch {
     return undefined;

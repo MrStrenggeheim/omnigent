@@ -154,7 +154,7 @@ describe("dock layout operations", () => {
 });
 
 describe("shared, per-chat and global pin persistence", () => {
-  it("reserves pins across A/B/A without altering A's saved proportions or Explorer target", () => {
+  it("reserves pins across A/B/A without altering saved A or the Explorer target", () => {
     const shared = createDockLayout([view("b", "conversation"), view("explorer", "explorer")]);
     let state = createDockPersistence(shared);
     state = saveDockChatLayout(state, "A");
@@ -175,11 +175,7 @@ describe("shared, per-chat and global pin persistence", () => {
     expect(restored.views.map((item) => item.id)).toEqual(["a", "diff", "explorer"]);
     expect(
       terminalLayoutGeometry(restored.tree!).panes.map(({ left, width }) => [left, width]),
-    ).toEqual([
-      [0, 45],
-      [45, 30],
-      [75, 25],
-    ]);
+    ).toEqual([[0, 100]]);
     expect(restored.views.find((item) => item.id === "explorer")).toEqual(shared.views[1]);
     expect(parseDockPersistence(JSON.stringify(state))).toEqual(state);
     expect(composeDockLayout(parseDockPersistence(JSON.stringify(state))!)).toEqual(restored);
@@ -189,7 +185,7 @@ describe("shared, per-chat and global pin persistence", () => {
     const layout = createDockLayout([view("a"), view("explorer")], "main");
     let state = pinDockView(createDockPersistence(layout), "explorer");
     const composed = composeDockLayout(state);
-    expect(composed.panes.map((pane) => pane.id)).toEqual(["main", "pin:main"]);
+    expect(composed.panes.map((pane) => pane.id)).toEqual(["main"]);
     expect(composed.views.map((item) => item.id)).toEqual(["a", "explorer"]);
     expect(parseDockLayout(composed)).toBe(composed);
     state = applyDockLayout(state, composed);
@@ -209,7 +205,9 @@ describe("shared, per-chat and global pin persistence", () => {
 
   it("unpins into the current arrangement with the same ID, and persists global moves and resizing", () => {
     let state = pinDockView(
-      createDockPersistence(createDockLayout([view("a"), view("explorer")])),
+      createDockPersistence(
+        addDockView(createDockLayout([view("a")]), view("explorer"), { edge: "right" }),
+      ),
       "explorer",
       "right",
     );
@@ -228,14 +226,14 @@ describe("shared, per-chat and global pin persistence", () => {
     expect(dockPaneForView(composeDockLayout(state), "explorer")).toBeDefined();
   });
 
-  it("keeps pins separate when dropped into a local tab group; close does not resurrect the local duplicate", () => {
+  it("keeps a pinned tab in its local group; close does not resurrect the local duplicate", () => {
     let state = pinDockView(
       createDockPersistence(createDockLayout([view("a"), view("explorer")])),
       "explorer",
     );
     const moved = moveDockView(composeDockLayout(state), "explorer", { paneId: "main", index: 0 });
     state = applyDockLayout(state, moved);
-    expect(composeDockLayout(state).panes).toHaveLength(2);
+    expect(composeDockLayout(state).panes).toHaveLength(1);
     expect(state.pinEdge).toBe("right");
     state = applyDockLayout(state, closeDockView(composeDockLayout(state), "explorer"));
     expect(composeDockLayout(state).views.map((item) => item.id)).toEqual(["a"]);

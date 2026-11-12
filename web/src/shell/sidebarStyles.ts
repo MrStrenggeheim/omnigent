@@ -8,6 +8,13 @@ export const SIDEBAR_HEADING = "text-base font-bold";
 /** A root starts at the label edge; only descendants add an indentation step. */
 export const SIDEBAR_TREE_INDENT = "var(--sidebar-tree-indent, 10px)";
 
+/** Explorer's one-pixel hierarchy strokes, using its shared light/dark border token. */
+export const SIDEBAR_TREE_GUIDE = "pointer-events-none absolute top-0 bottom-0 w-px bg-border";
+
+/** A disclosure needs feedback above the row's chrome-hover surface. */
+export const SIDEBAR_DISCLOSURE_HOVER =
+  "cursor-pointer hover:bg-[color-mix(in_srgb,var(--foreground)_6%,var(--workspace-hover-on-chrome))] hover:text-foreground";
+
 // Match the Settings sidebar's ghost-button hover treatment across every home
 // sidebar row.
 export const SIDEBAR_HOVER_HIGHLIGHT =

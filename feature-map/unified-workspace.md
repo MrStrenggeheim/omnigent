@@ -67,7 +67,7 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 - Shell inventory is integrated into Activity; legacy saved inventory views restore there without stopping their processes.
 - Chat workspace changes retain execution confirmation/recovery; browsing-view root changes only retarget that view.
 - Conversation hover cards and per-row loading/empty-child labels are removed; hierarchy metadata preloads without transcript downloads.
-- Global pins preserve visibility and placement, never change the selected machine or follow another chat automatically.
+- Global pins retain their exact pane size and position across chats; resizing updates the global reservation, while other layouts fill the remaining regions.
 - Shared-chat file access can retain its session-authorized route; a chat grant does not grant general host access.
 - Unknown delivery or process state is not successful consumption or a confirmed exit.
 - Legacy branches with missing provenance stay unknown; unsupported native recovery fails visibly without deleting readable history.
@@ -88,3 +88,22 @@ Preconditions: follow the [verification skill](skills/verify-omnigent/SKILL.md),
 
 Verification: `tests/browser_ui/chat/test_workspace_iteration.py`, the existing workspace selection/design and unified workspace journeys, and the owning component suites.
 Layout miniatures and Inbox consolidation remain deferred.
+
+## Current cycle controls
+
+- Host/path follows approved B: computer icon, secondary Host, middle dot, primary path and chevron.
+- Add host is directly reachable in every workspace dialog; it reuses server-specific instructions without losing the path draft.
+- Inline chips open beside their originating chat; right-click or touch overflow exposes tab/modal/reveal/copy/download destinations.
+- Rendered previews retain the existing large modal/image lightbox with supported zoom and pan.
+- A pinned tab always has a filled pin; pinning and unpinning do not move or narrow its pane.
+- Nested pinned reservations can leave empty, usable drop regions when another chat has fewer panes.
+- Tab-bar drops show a primary insertion line; edge drops preview their final half-pane geometry using the shared file-drop surface.
+- Right-click a tab for view controls; tab overflow has a right fade and no visible scrollbar.
+- Sidebar hierarchy has shallow guide lines, readable disclosure hover and recursive descendant counts after complete metadata loads.
+- Shared overflow surfaces use transcript-style overlay thumbs; fitting content, composers and tab bars have no visible scrollbar.
+- Appearance density choices include shared preview cards; buttons do not shift vertically when pressed.
+- Search control and popup center on the whole application, independently of adjacent actions.
+
+Acceptance and evidence: "'`tests/browser_ui/chat/test_workspace_cycle.py`, `test_workspace_iteration.py` and `test_workspace_selection_design.py` in the same folder.
+Use desktop/mobile and both color modes; verify drafts, original file bytes and per-chat arrangements survive reload.
+'"
