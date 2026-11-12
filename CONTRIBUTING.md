@@ -122,12 +122,12 @@ Install local prerequisites first:
 - A Rust toolchain for the recommended `omnidev` local development supervisor.
 
 ```bash
-git clone https://github.com/omnigent-ai/omnigent.git
+git clone --branch custom https://github.com/MrStrenggeheim/omnigent.git
 cd omnigent
 
 uv python install
 uv venv --python "$(cat .python-version)"
-uv sync --extra all --group dev
+uv sync --locked --group dev
 source .venv/bin/activate    # or prefix commands with `uv run`
 ```
 
@@ -213,7 +213,7 @@ test. A fresh worktree needs its own Python environment first:
 
 ```bash
 cd /path/to/omnigent-worktree
-uv sync --extra all --group dev
+uv sync --locked --group dev
 omnidev
 ```
 

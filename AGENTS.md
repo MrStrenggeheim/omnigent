@@ -3,17 +3,18 @@
 Guidance for AI agents (Claude Code, Copilot, Cursor, etc.) working in this
 repository. See `CONTRIBUTING.md` for the full contributor workflow.
 
-## Personal instructions
+## Project instructions
 
-The user-wide agreement is `/home/agent/.agents/AGENTS.md`.
-Codex and Claude user instruction files link to that canonical source.
+These instructions and the linked repository documents are self-contained.
+Follow any personal instructions supplied by the operator; a private knowledge
+base or a particular home directory is not required to work on this fork.
 
 ## Local customizations
 
-This checkout maintains local changes on top of official release tags. Read
-`/home/agent/knowledge/infrastructure/omnigent/custom-builds.md` for the current
-base release, change register, and build/deployment commands. Update that central
-page whenever a customization is added, changed, or supplied by upstream.
+This checkout maintains changes on top of official release tags. Read
+[the fork guide](docs/custom-fork.md) for startup commands, the upstream base
+and the map of custom features. Keep that guide and the relevant feature map
+current when changing a customization.
 Keep each customization in a focused commit. Never edit installed package files.
 
 ## Reuse and design
@@ -125,7 +126,8 @@ files as a workaround.
 
 ## Request backlog
 
-Use `/home/agent/knowledge/infrastructure/omnigent/development-tasks.md` as the active request checklist.
+Use the task checklist supplied by the operator or the fork's GitHub issues.
+Private deployment notes are optional context, not project prerequisites.
 Record new requests received during work immediately, including deferred discussions.
 Before completing a turn, reconcile every unchecked request with implementation and verification; report outstanding items explicitly.
 

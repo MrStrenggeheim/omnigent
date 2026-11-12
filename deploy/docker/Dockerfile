@@ -143,11 +143,11 @@ RUN python -m venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}"
 
-# Install omnigent. Editable install (-e) is required because
-# pyproject.toml declares the sibling SDKs as editable path deps via
-# [tool.uv.sources]. The runtime stages preserve /build/ so the venv's
-# .pth references stay valid.
-RUN uv pip install --no-cache-dir --index-url ${PYPI_INDEX_URL} -e .
+# Install all three packages from this checkout. uv pip does not resolve the
+# project's tool.uv.sources, so the SDK paths must be explicit here.
+# Runtime stages preserve /build/ for these editable installs.
+RUN uv pip install --no-cache-dir --index-url ${PYPI_INDEX_URL} \
+    -e ./sdks/python-client -e ./sdks/ui -e .
 
 # ── Server builder ──────────────────────────────────────
 # Server-only additions on top of the shared builder: the SPA bundle

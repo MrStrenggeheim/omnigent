@@ -4,7 +4,7 @@
 #
 #   cd deploy/docker
 #   cp .env.example .env       # edit POSTGRES_PASSWORD at minimum
-#   docker compose up -d
+#   docker compose up --build -d
 #   open http://localhost:8000  # web UI; start a local runner per the prompt
 #
 # Auth modes (OMNIGENT_AUTH_PROVIDER):
@@ -39,14 +39,9 @@ services:
       retries: 5
 
   omnigent:
-    # Pre-built image published to GHCR on every main-branch merge.
-    # `docker compose pull` fetches the latest; pin OMNIGENT_IMAGE_TAG
-    # to a sha-<short> or vX.Y.Z tag for reproducible deploys.
-    image: ${OMNIGENT_IMAGE:-ghcr.io/omnigent-ai/omnigent-server}:${OMNIGENT_IMAGE_TAG:-latest}
-    # Local-build fallback for forks / offline / dev iterations. Used
-    # only when the image isn't already pulled AND you run
-    # `docker compose up --build` explicitly. The published image in
-    # CI is built from this same Dockerfile.
+    # Build this fork by default. Published images are an explicit override;
+    # the local tag must not silently select the official upstream release.
+    image: ${OMNIGENT_IMAGE:-omnigent-custom-server}:${OMNIGENT_IMAGE_TAG:-local}
     build:
       # Repo root, reached from deploy/docker/ → ../..
       context: ../..

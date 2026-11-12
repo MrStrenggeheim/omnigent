@@ -14,7 +14,7 @@ _check-uv:
     uv run --no-sync pre-commit --version
 
 _ensure-uv:
-    uv sync --extra all --group dev
+    uv sync --locked --group dev
 
 # Installs the pre-commit and pre-push git hooks (see default_install_hook_types
 # in .pre-commit-config.yaml). Worktrees share the main checkout's .git, so one
@@ -44,10 +44,10 @@ _ensure-omnidev:
 # --- Aggregate setup checks / installs ---
 
 [group('setup')]
-check: _check-uv _check-ios _check-omnidev
+check: _check-uv _check-omnidev
 
 [group('setup')]
-ensure: _ensure-uv _ensure-hooks _ensure-ios _ensure-omnidev
+ensure: _ensure-uv _ensure-hooks _ensure-omnidev
 
 # --- Local dev ---
 
@@ -286,7 +286,7 @@ normalize-locks: _ensure-uv
 # Resolve the declared dependencies through a package mirror without writing
 # uv.lock; fails when a floor needs a release the mirror does not serve yet.
 # Dependency groups resolve too, so a dev-only gap can fail it as well.
-# No `_ensure-uv`: its `uv sync` would re-resolve and rewrite uv.lock first.
+# No `_ensure-uv`: inspect the committed lock before any environment setup.
 [group('lint')]
 check-internal-mirror index="https://pypi-proxy.cloud.databricks.com/simple":
     uv lock --dry-run --default-index {{ index }}

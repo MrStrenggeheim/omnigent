@@ -1,8 +1,11 @@
-# Omnigent — docker-compose stack
+# Custom Omnigent — docker-compose stack
 
 Run the server as a self-contained Docker stack on any host: your
 laptop, a VPS, an EC2 instance, a home server, anywhere `docker
 compose` runs.
+
+The default application image is the local `omnigent-custom-server:local` build.
+Use `--build` after updating the checkout; published images require an explicit `OMNIGENT_IMAGE`/`OMNIGENT_IMAGE_TAG` override.
 
 The stack:
 - `postgres` — persistent DB on a Docker volume
@@ -17,7 +20,7 @@ below). There is no separate auth-proxy container.
 ```bash
 cd deploy/docker
 ./bootstrap.sh                          # mints POSTGRES_PASSWORD + cookie secret into .env
-docker compose up -d
+docker compose up --build -d           # builds this fork from the checkout
 docker compose logs -f omnigent       # ctrl-c when boot is clean
 ```
 

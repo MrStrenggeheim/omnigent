@@ -7,7 +7,7 @@
 # Usage:
 #   cd deploy/docker
 #   ./bootstrap.sh
-#   docker compose up -d
+#   docker compose up --build -d
 #
 # Idempotency:
 #   - If .env doesn't exist, copies .env.example → .env first.
@@ -92,7 +92,7 @@ fi
 
 echo
 echo "✓ deploy/docker/.env is ready. Next:"
-echo "    docker compose up -d && docker compose logs omnigent"
+echo "    docker compose up --build -d && docker compose logs omnigent"
 echo
 echo "  Accounts mode is the default — no credentials are auto-generated."
 echo "  First boot prints a 'No admin yet' line; open that URL and create"

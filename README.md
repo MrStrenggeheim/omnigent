@@ -60,208 +60,66 @@ Omnigent lets you:
 
 ---
 
+> **Custom fork:** this is [MrStrenggeheim/omnigent](https://github.com/MrStrenggeheim/omnigent), maintained on `custom` and based on upstream `v0.20.0`.
+> Use the source or Docker instructions below to get our workspace changes; upstream installers and downloads install the official distribution.
+> [Fork guide and custom features](docs/custom-fork.md) · [Contributor setup](CONTRIBUTING.md#development-setup)
+
 ## Quick start
 
-### 1. Install
+### 1. Run this fork locally
 
-One command installs Omnigent and everything it needs:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/omnigent-ai/omnigent/main/scripts/install_oss.sh | sh
-```
-
-The installer includes Databricks support and installs the Databricks CLI
-alongside Omnigent, or reuses an existing CLI that supports workspace login.
-Pass `--no-databricks` to omit them.
-
-<details>
-<summary>Optional integrations and extras</summary>
-
-Need an optional integration? Pass one or more extras to the installer:
+Use Linux, macOS or WSL2 (clone into the Linux filesystem).
+Install Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), Node.js **22.13+** and **pnpm 11.15.1** first.
+For native agent terminals, also install `tmux` and, on Linux, `bubblewrap`.
+Install and sign in to whichever agent harness you want to use; these credentials are your own.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/omnigent-ai/omnigent/main/scripts/install_oss.sh | sh -s -- --extra modal,e2b
+git clone --branch custom https://github.com/MrStrenggeheim/omnigent.git
+cd omnigent
+OMNIGENT_SKIP_WEB_UI=true uv sync --locked --no-dev
+pnpm install --frozen-lockfile --filter web
+pnpm --dir web run build
+source .venv/bin/activate
+omnigent start --server "" --no-open
 ```
 
-The Antigravity SDK extra conflicts with Databricks dependencies. Install it
-with `--no-databricks --extra antigravity`.
+Open the local URL printed by the command and create a chat.
+The empty `--server` explicitly selects a local instance, even if you previously configured a remote server.
+The backend and both SDKs come from this checkout; the frontend is built from this branch.
+The basic recipe needs neither Rust nor Ruby/iOS tools.
 
-Available user-facing extras include:
+From the activated environment, use `omnigent server status` to check the server or `omnigent stop` to stop it after running work finishes.
+In another terminal, activate `.venv` again or prefix commands with `uv run --no-sync` from the checkout.
+User data stays in `~/.omnigent`, outside Git.
 
-- **Model providers:** `databricks` (included by default), `bedrock`, `vertex`
-- **Sandbox providers:** `modal`, `daytona`, `blaxel`, `boxlite`, `microsandbox`,
-  `cwsandbox`, `e2b`, `openshell`, `kubernetes`
-- **SDK harnesses:** `antigravity`, `copilot`, `cursor`, `agents-sdk`
-- **Storage and memory:** `s3`, `hindsight`
+#### Run the server with Docker
 
-</details>
-
-<details>
-<summary>Prefer to install manually?</summary>
-
-Omnigent needs **Python 3.12+**. Install the `omnigent` package:
+From the same clone, with Docker Compose installed:
 
 ```bash
-uv tool install omnigent        # or: pip install "omnigent"
+cd deploy/docker
+./bootstrap.sh
+docker compose up --build -d
+docker compose logs -f omnigent
 ```
 
-Manual installs use the same extras syntax, for example:
+Open `http://localhost:8000` and create the initial admin account.
+This builds our fork from the checkout instead of pulling upstream's `latest` image.
+Data is kept in named Docker volumes.
+For a remote server, set its public URL and HTTPS using the [existing deployment guide](deploy/docker/README.md).
+
+On each computer whose files and agents you want to use, complete the local dependency/build steps above, activate `.venv`, then connect it to your server:
 
 ```bash
-uv tool install "omnigent[databricks,modal]"
+omnigent host --server https://your-server.example
 ```
 
-Or with [Homebrew](https://github.com/omnigent-ai/homebrew-tap):
+Follow the sign-in instructions printed by the command.
+The server holds conversations; the connected host supplies that computer's files and agent execution.
+Stop the Docker server with `docker compose down`; add no volume-removal flag when keeping your data.
 
-```bash
-brew install omnigent-ai/tap/omnigent
-```
-
-For source builds on networks that require package mirrors, replace these example
-URLs with your mirrors:
-
-```bash
-HOMEBREW_PIP_INDEX_URL='https://pypi.example.com/simple' \
-HOMEBREW_CARGO_INDEX_URL='https://cargo.example.com/index/' \
-  brew install --build-from-source omnigent-ai/tap/omnigent
-```
-
-The PyPI setting also routes pip's isolated build dependencies through the mirror.
-The Cargo setting takes a sparse registry index URL ending in `/`, without the
-`sparse+` prefix. Both overrides are optional and do not affect prebuilt-bottle
-installs.
-
-Or install straight from the repo:
-
-```bash
-uv tool install -q --python 3.12 git+https://github.com/omnigent-ai/omnigent.git
-```
-
-</details>
-
-<details>
-<summary>Toolchain and prerequisites (if the installer reports a missing tool)</summary>
-
-- **`uv`** (required). https://docs.astral.sh/uv/getting-started/installation/
-  The installer offers to set this up for you.
-- **`git`** (required).
-- **Node.js 22 LTS or newer** with **`npm`** (for the coding-harness CLIs
-  installed by `omnigent run`) and **`pnpm`** (for the web UI). You can get
-  both from a single Node install; pnpm is available via
-  `corepack enable` or `npm install -g pnpm`.
-- **Devin CLI** (optional), for `omnigent devin`: install with
-  `curl -fsSL https://cli.devin.ai/install.sh | bash`, then sign in with
-  `devin auth login`. Devin tool approvals appear as Chat approval cards
-  (its `PermissionRequest` hook is mirrored to the web UI) and stay
-  answerable in the embedded Terminal. See `docs/devin-native.md`.
-- **Kiro CLI** (optional), for `omnigent kiro`: install with
-  `curl -fsSL https://cli.kiro.dev/install | bash`, then sign in with Kiro.
-  Kiro tool approvals stay answerable in the embedded Terminal; supported
-  one-time approvals also appear as Chat cards. See
-  `docs/kiro-native-elicitation.md`.
-- **`tmux`**, required by the native `omnigent <harness>` terminal wrappers
-  (`claude`, `codex`, `cursor`, `devin`, `hermes`, `kiro`, `pi`)
-  (`brew install tmux` / `apt install tmux`; the installer offers
-  to install it for you).
-- **`bubblewrap`** (`bwrap`), **Linux only**. The native `omnigent <harness>`
-  terminal wrappers and the `pi` harness wrap each agent
-  terminal in a `bwrap` OS-sandbox; on Linux that isolation is mandatory, so a
-  missing `bwrap` binary makes those terminals fail to start
-  (`apt install bubblewrap`; the installer offers to install it for you). macOS
-  uses the built-in `seatbelt` sandbox and needs nothing extra.
-- **Databricks.** The bootstrap installer includes the `databricks` extra
-  and the Databricks CLI. If installing with uv directly, use
-  `uv tool install "omnigent[databricks]"` and install the
-  [Databricks CLI](https://docs.databricks.com/aws/en/dev-tools/cli/install)
-  separately. Sign in to a workspace-hosted server with
-  `omnigent login <workspace-url>/omnigent`.
-
-</details>
-
-<details>
-<summary>Windows (native)</summary>
-
-Omnigent runs natively on Windows in a degraded mode. The `install_oss.sh`
-bootstrap is POSIX-only, so install with `uv` directly:
-
-```powershell
-uv tool install --python 3.12 omnigent
-# or from the repo:
-uv tool install --python 3.12 git+https://github.com/omnigent-ai/omnigent.git
-```
-
-What works on Windows: `omnigent server`, the web UI, and the SDK-based
-harnesses (`omnigent run <agent.yaml>` with the claude-sdk / cursor / codex
-harnesses). Agents run under a Windows **Job Object** for process-tree
-containment.
-
-What is **not** available on Windows (use Linux/macOS, or WSL, for these):
-
-- the native `omnigent claude` / `omnigent codex` / `omnigent cursor`
-  tmux/PTY terminal wrappers (run an SDK harness or the web UI instead);
-- `bwrap`/`seatbelt` filesystem & network sandboxing and the L7 egress proxy
-  — the Job Object backend contains the process tree and enforces resource
-  limits but does **not** isolate the filesystem or network.
-
-</details>
-
-<details>
-<summary>Updating to a new release</summary>
-
-When a newer release is on PyPI, Omnigent shows a one-line notice (once per
-release) pointing here. To update:
-
-```bash
-omni upgrade            # detects how you installed, drains & stops the local
-                        # server, then runs the matching upgrade command
-omni upgrade --check    # just report whether a newer release is available
-```
-
-`omni upgrade` waits for in-flight agent sessions to finish before stopping the
-local server (pass `--force` to stop them immediately); the next `omni` command
-brings the server back up on the new version. Source checkouts update with
-`git pull` instead. Silence the notice with `OMNIGENT_NO_UPDATE_CHECK=1`.
-
-The check queries your configured package index — honoring `UV_INDEX_URL` /
-`PIP_INDEX_URL` and your `uv.toml` / `pip.conf` (default PyPI), so private
-mirrors work out of the box; override with `OMNIGENT_INDEX_URL` if needed.
-
-</details>
-
-<details>
-<summary>Uninstalling Omnigent</summary>
-
-Preview the CLI/profile cleanup that would run by default:
-
-```bash
-omnigent uninstall
-```
-
-Remove the CLI and installer-managed PATH entries while keeping your local
-history, credentials, and projects:
-
-```bash
-omnigent uninstall --yes
-```
-
-To also remove Omnigent state under `~/.omnigent`, pass `--purge`; Omnigent
-backs it up outside the target before deletion. Your `~/omnigent` workspace is
-kept unless you explicitly add `--purge-workspace`.
-
-```bash
-omnigent uninstall --purge --yes
-```
-
-If the installed wheel is broken or `omnigent` is not on `PATH`, run the
-standalone script instead:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/omnigent-ai/omnigent/main/scripts/uninstall_oss.sh | sh
-```
-
-Add `--yes` to the standalone script to perform the previewed CLI cleanup.
-
-</details>
+For updates, see the [fork guide](docs/custom-fork.md#configuration-and-updates).
+Optional provider integrations remain available through the existing Python extras; install only the ones you need.
 
 ### 2. Start your first agent
 
